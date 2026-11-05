@@ -1,8 +1,6 @@
 /* Hirari DAW Ultimate - (c) 2026 Hirari DAW Project */
 #include "hirari_unified_engine.hpp"
 #include "hirari-core-bridge/src/lib.rs.h"
-#include "engine/bus_track.hpp"
-#include "engine/track.hpp"
 #include "concurrency/audio_task_manager.hpp"
 
 #include <thread>

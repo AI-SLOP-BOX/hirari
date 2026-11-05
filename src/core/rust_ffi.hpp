@@ -70,34 +70,22 @@ extern "C" bool hirari_engine_event_ring_pop(const void* rings, uint64_t* timest
 
 // Engine track table (engine_track_table.rs): the live document graph, its
 // deferred-destruction list and the double-buffered snapshot the realtime
-// callback traverses. Tracks stay C++ objects; the table moves their handles
-// and reads the few scalars a control walk needs through these ops.
-struct HirariEngineTrackOps {
-    uint32_t (*id)(void*);
-    void* (*clone_owner)(void*);
-    void (*destroy_owner)(void*);
-    uint32_t (*trackType)(void*);
-    uint32_t (*busId)(void*);      // UINT32_MAX for a track that is not a bus
-    uint32_t (*latency)(void*);
-    void (*setPdcOffset)(void*, uint32_t);
-};
-static_assert(sizeof(HirariEngineTrackOps) == 7 * sizeof(void*));
-// The published graph. The buffers belong to the table, so the pointers stay
-// valid for its lifetime and only their contents change, under a publication.
+// callback traverses. The tracks themselves are Rust objects; the table owns
+// their Arcs and publishes their object pointers.
+// The published graph.
 struct HirariTrackSnapshot {
     void* const* active_tracks;
     void* const* track_map;
     uint32_t track_count;
     uint64_t audio_config_generation;
 };
-extern "C" void* hirari_engine_track_table_create(const HirariEngineTrackOps* ops);
+extern "C" void* hirari_engine_track_table_create();
 extern "C" void hirari_engine_track_table_destroy(void* table);
 extern "C" size_t hirari_engine_track_count(void* table);
 extern "C" void* const* hirari_engine_track_ptrs(void* table);
 extern "C" void* hirari_engine_track_find(void* table, uint32_t track_id);
 extern "C" void* hirari_engine_track_retain(void* table, uint32_t track_id);
-extern "C" bool hirari_engine_track_insert(void* table, size_t index, void* owner,
-                                          void* track);
+extern "C" bool hirari_engine_track_insert(void* table, size_t index, void* owner);
 extern "C" void hirari_engine_track_defer_all(void* table);
 extern "C" void hirari_engine_track_publish(void* table, uint64_t generation, bool stamp);
 extern "C" void hirari_engine_track_snapshot(void* table, HirariTrackSnapshot* out);
@@ -479,6 +467,13 @@ struct HirariRegionGroupMember {
 // interprets the mutation.
 using HirariRegionNoteMutateFn = bool (*)(void* context, HirariRegionVariAudioStore* store);
 
+// The lifetime handle of an imported Rust audio buffer is Rust's own
+// (storage_handle.rs): the region store views its planes and releases the
+// handle through these entry points.
+extern "C" uint32_t hirari_storage_handle_view(void* audio, const float** out,
+                                               size_t capacity, uint64_t* samples);
+extern "C" void hirari_storage_handle_release(void* audio);
+
 struct HirariRegionHostOps {
     bool (*findRegion)(void* host, uint32_t trackId, uint32_t regionId,
                        HirariRegionState* out) = nullptr;
@@ -644,75 +639,11 @@ struct HirariAudioNoteSegmentRange {
     double endSeconds = 0.0;
     double detectedPitchCents = 0.0;
 };
-struct HirariTrackRegionRenderInput {
-    const float* sourceLeft = nullptr;
-    const float* sourceRight = nullptr;
-    float* destinationLeft = nullptr;
-    float* destinationRight = nullptr;
-    const HirariRegionCompRange* compRanges = nullptr;
-    size_t compRangeCount = 0;
-    const HirariRegionRangeEdit* rangeEdits = nullptr;
-    size_t rangeEditCount = 0;
-    const HirariAudioNoteSegmentRange* noteRanges = nullptr;
-    size_t noteRangeCount = 0;
-    const HirariAudioNoteCurveView* noteCurves = nullptr;
-    size_t noteCurveCount = 0;
-    const HirariWarpMarker* warpMarkers = nullptr;
-    size_t warpMarkerCount = 0;
-    const float* resampleKernel = nullptr;
-    const float* wsolaWindow = nullptr;
-    void* stretchHandle = nullptr;
-    uintptr_t cacheOwner = 0;
-    uintptr_t cacheSnapshot = 0;
-    uintptr_t cacheNoteSegments = 0;
-    uint64_t playhead = 0;
-    uint64_t regionStart = 0;
-    uint64_t regionLength = 0;
-    uint64_t loopCount = 0;
-    uint64_t sourceSamples = 0;
-    uint64_t sourceOffset = 0;
-    uint64_t sourceLength = 0;
-    uint64_t fadeIn = 0;
-    uint64_t fadeOut = 0;
-    uint64_t crossfadeIn = 0;
-    uint64_t crossfadeOut = 0;
-    double warpRatio = 1.0;
-    double sourceSampleRate = 0.0;
-    double timelineSampleRate = 0.0;
-    double sampleRate = 44100.0;
-    float clipGain = 1.0f;
-    float pitchSemitones = 0.0f;
-    uint32_t frameCount = 0;
-    uint32_t regionId = 0;
-    uint32_t syncGroup = 0;
-    uint8_t muted = 0;
-    uint8_t compManaged = 0;
-    uint8_t reverse = 0;
-    uint8_t pitchPreserveWarp = 0;
-    uint8_t needsSpectralStretch = 0;
-};
-// The region table itself is Rust-owned (region_store.rs). A track installs its
-// identity here and receives back only the immutable render-input array the
-// audio callback reads; the decoded buffer stays a C++ handle the store retains
-// and releases through the callbacks below.
-struct HirariRegionStorageHostOps {
-    uint32_t (*audioView)(void* handle, const float** out, size_t capacity,
-                          uint64_t* samples) = nullptr;
-    void* (*retainHandle)(void* handle) = nullptr;
-    void (*releaseHandle)(void* handle) = nullptr;
-    void (*installRegions)(void* track, const HirariTrackRegionRenderInput* inputs,
-                           size_t length, uint8_t published) = nullptr;
-    void (*invalidateFrozen)(void* track) = nullptr;
-    void (*markLayout)(void* track) = nullptr;
-    bool (*pitchRunning)(void* track) = nullptr;
-};
-extern "C" void hirari_region_storage_host_install(const HirariRegionStorageHostOps* ops);
-// The region table is keyed by the live Track, not by the track id: ids are
-// allocated per engine, so two engines can own the same id at the same time.
-// Entry points that only have an engine and an id resolve the track through
-// the host's `trackIdentity` callback before reaching the store.
-extern "C" void hirari_region_store_install(void* track, uint32_t trackId);
-extern "C" void hirari_region_store_forget(void* track);
+// The region table and the host callbacks it reads are Rust-owned
+// (region_store.rs, engine_track.rs). The track installs them itself; this must
+// run before the region edit host installs, because the edit host only routes
+// its region-data callbacks once the storage host already answers.
+extern "C" void hirari_track_region_host_install();
 extern "C" void hirari_region_store_trim_retired(void* track);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
                                                    uint32_t* out, size_t capacity);
@@ -882,17 +813,18 @@ extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* o
 
 // Track lifecycle edit policy (create, duplicate, remove and their undo). The
 // graph walk, the captures and the replay are Rust's (track_edit_host.rs): it
-// takes the tracks lock, moves the Rust track table, publishes the audio
-// snapshot and restores the sidechain links, routes and routing connections.
-// C++ contributes only what a C++ object makes impossible from Rust — building
-// a Track, whose constructor binds the layout revision and registers a bus slot
-// — and the handles of the stores the walk visits.
+// takes the tracks lock, builds the Rust track, moves the Rust track table,
+// publishes the audio snapshot and restores the sidechain links, routes and
+// routing connections. C++ contributes only the handles of the stores the walk
+// visits.
 enum HirariTrackEditStore : uint32_t {
     kHirariTrackEditStoreTrackTable = 0,
     kHirariTrackEditStoreEngineBlock = 1,
     kHirariTrackEditStoreSidechain = 2,
     kHirariTrackEditStoreSidechainRoutes = 3,
     kHirariTrackEditStoreRouting = 4,
+    kHirariTrackEditStoreLayoutRevision = 5,
+    kHirariTrackEditStoreBusSystem = 6,
 };
 
 struct HirariTrackEditHostOps {
@@ -900,10 +832,6 @@ struct HirariTrackEditHostOps {
     // allocator reads the project through these before it hands out an id.
     size_t (*listTracks)(void*, uint32_t*, size_t) = nullptr;
     size_t (*listRegions)(void*, uint32_t, uint32_t*, size_t) = nullptr;
-    // Builds one track of the given kind and id, named by the caller, and
-    // prepares it for the engine's current device format. Writes its address and
-    // returns the owning handle the caller inserts into the graph.
-    void* (*createTrack)(void*, uint32_t, uint32_t, const uint8_t*, size_t, void**) = nullptr;
     void* (*store)(void*, uint32_t) = nullptr;
     using ReplayFn = void (*)(void*);
     void (*recordReplay)(void*, const uint8_t*, size_t, void*, ReplayFn, ReplayFn,
@@ -949,21 +877,13 @@ extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t t
                                            uint64_t expectedProjectGeneration,
                                            uint64_t expectedAudioGeneration);
 
-// Track control policy (spatial validation, HRTF admission, auto-mix curve).
-struct HirariTrackControlHostOps {
-    // Pins a track; the handle must be released.
-    void* (*acquire)(void*, uint32_t) = nullptr;
-    void (*release)(void*) = nullptr;
-    void (*setSpatial)(void*, float, float, float) = nullptr;
-    bool (*setHrtf)(void*, const float*, const float*, uint32_t) = nullptr;
-    void (*clearHrtf)(void*) = nullptr;
-};
-extern "C" void hirari_track_control_host_install(const HirariTrackControlHostOps* ops);
+// Track control policy (spatial validation, HRTF admission, auto-mix curve)
+// is Rust's; it pins a track through the track session host below.
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 
-// Status pointers refer to Track::SandboxStatus, mirrored field for field in
-// plugin_sandbox_maintenance.rs.
+// Status pointers refer to the Rust sandbox status that engine_track.rs fills
+// and plugin_sandbox_maintenance.rs reads; C++ only forwards the visitor.
 using HirariPluginSandboxVisitorFn = bool (*)(void* context, uint32_t trackId, const void* status);
 struct HirariPluginSandboxHostOps {
     // Reports every track's statuses in engine order.
@@ -982,6 +902,98 @@ extern "C" void hirari_plugin_sandbox_maintenance_forget(void* host);
 // (sandbox_recovery_runtime.rs); the engine only lends its host pointer.
 extern "C" void hirari_sandbox_recovery_start(void* host, void* journal);
 extern "C" void hirari_sandbox_recovery_stop();
+
+// The Track object is Rust's (engine_track.rs): one Arc<Track> owning the
+// channel strip, effect chain, automation, runtime, panner and region table.
+// C++ holds two opaque pointers — the object pointer, which addresses the
+// behavior entry points below and keys the region store, and the owning handle,
+// which is the lifetime currency the track table and the host callbacks pass.
+enum HirariTrackKind : uint32_t {
+    kHirariTrackKindAudio = 0,
+    kHirariTrackKindMidi = 1,
+    kHirariTrackKindInstrument = 2,
+    kHirariTrackKindBus = 3,
+    kHirariTrackKindVocal = 4,
+};
+// The Rust sub-stores reachable through hirari_track_storage.
+enum HirariTrackStore : uint32_t {
+    kHirariTrackStoreStrip = 0,
+    kHirariTrackStoreChain = 1,
+    kHirariTrackStoreAutomation = 2,
+    kHirariTrackStoreFrozen = 3,
+    kHirariTrackStoreRuntime = 4,
+    kHirariTrackStoreArticulation = 5,
+    kHirariTrackStoreName = 6,
+    kHirariTrackStoreWorkBuffer = 7,
+    kHirariTrackStorePluginMidi = 8,
+    kHirariTrackStoreBusState = 9,
+    kHirariTrackStoreSendPre = 10,
+    kHirariTrackStoreSendPost = 11,
+};
+// Bumping this revision is the only signal the layout gather observes.
+extern "C" void* hirari_layout_revision_create();
+extern "C" void hirari_layout_revision_release(void* state);
+extern "C" void hirari_layout_revision_mark(void* state);
+extern "C" uint64_t hirari_layout_revision_current(void* state);
+// Builds one track and returns its owning handle; `out_track` receives the
+// object pointer. The caller gives the handle to the track table.
+extern "C" void* hirari_track_new(uint32_t id, const uint8_t* name, size_t name_len,
+                                  uint32_t kind, void* revision, void** out_track);
+extern "C" void* hirari_track_owner_retain(void* owner);
+extern "C" void hirari_track_owner_release(void* owner);
+extern "C" void* hirari_track_owner_object(void* owner);
+extern "C" uint32_t hirari_track_id(void* track);
+extern "C" uint32_t hirari_track_type(void* track);
+extern "C" uint8_t hirari_track_type_byte(void* track);
+extern "C" uint32_t hirari_track_bus_id(void* track);
+extern "C" void hirari_track_resolve_bus(void* track, void* bus_state, bool is_bus);
+extern "C" void* hirari_track_storage(void* track, uint32_t store);
+extern "C" void hirari_track_mark_layout(void* track);
+extern "C" void hirari_track_begin_edit(void* track);
+extern "C" void hirari_track_end_edit(void* track);
+extern "C" uint8_t hirari_track_prepare(void* track, double sample_rate,
+                                        uint32_t block_frames);
+extern "C" bool hirari_track_can_process(void* track, uint32_t frames);
+extern "C" void hirari_track_reset_for_offline_render(void* track);
+extern "C" uint32_t hirari_track_latency_samples(void* track);
+extern "C" uint32_t hirari_track_pdc_requested(void* track);
+extern "C" uint32_t hirari_track_delay_samples(void* track);
+extern "C" void hirari_track_set_delay_samples(void* track, uint32_t samples);
+extern "C" void hirari_track_set_pdc_offset(void* track, uint32_t samples);
+extern "C" float hirari_track_get_volume(void* track);
+extern "C" float hirari_track_get_pan(void* track);
+extern "C" void hirari_track_set_volume(void* track, float value);
+extern "C" void hirari_track_set_pan(void* track, float value);
+extern "C" void hirari_track_set_solo(void* track, bool solo);
+extern "C" bool hirari_track_is_solo(void* track);
+extern "C" void hirari_track_set_muted(void* track, bool muted);
+extern "C" bool hirari_track_is_muted(void* track);
+extern "C" void hirari_track_set_phase_inverted(void* track, bool inverted);
+extern "C" bool hirari_track_is_phase_inverted(void* track);
+extern "C" bool hirari_track_set_record_armed(void* track, bool armed);
+extern "C" bool hirari_track_is_record_armed(void* track);
+extern "C" void hirari_track_set_spatial(void* track, float x, float y, float z);
+extern "C" bool hirari_track_set_hrtf_kernel(void* track, const float* left,
+                                             const float* right, uint32_t taps);
+extern "C" void hirari_track_clear_hrtf_kernel(void* track);
+extern "C" void hirari_track_record_state(void* track, uint64_t playhead);
+extern "C" uint32_t hirari_track_flush_recorded_automation(void* track);
+extern "C" bool hirari_track_pitch_begin(void* track);
+extern "C" void hirari_track_pitch_finish(void* track);
+extern "C" bool hirari_track_pitch_running(void* track);
+extern "C" bool hirari_track_expression_map_set(void* track, uint8_t kind,
+                                                const uint8_t* data, size_t length);
+extern "C" void hirari_track_reclaim_chain(void* track);
+extern "C" bool hirari_track_remove_plugin(void* track, uint32_t index, uint32_t* token,
+                                           uint32_t* kind, bool* bypassed, bool* parallel);
+extern "C" bool hirari_track_restore_plugin(void* track, uint32_t index, uint32_t token,
+                                            bool bypassed, bool parallel);
+extern "C" size_t hirari_track_sandbox_slot_count(void* track);
+extern "C" bool hirari_track_visit_sandbox_statuses(void* track, void* context,
+                                                    HirariPluginSandboxVisitorFn visit);
+extern "C" uint32_t hirari_track_maintain_sandboxes(void* track, bool autoRestart,
+                                                    void* context,
+                                                    HirariPluginSandboxVisitorFn visit);
 
 extern "C" void* hirari_native_pdc_create();
 extern "C" void hirari_native_pdc_destroy(void* state);
@@ -1118,21 +1130,6 @@ extern "C" uint8_t hirari_track_runtime_prepare(void* state, void* region_key,
 /// Rust owns the engine's whole block (engine_block_host.rs): the admission
 /// head, the graph walk and the post-graph tail. The engine binds its handles
 /// once, then calls begin, route and finish around the device buffer.
-/// The track storages the engine block reaches by kind (engine_block_host.rs).
-enum HirariEngineTrackStorageKind {
-    kHirariTrackStorageRuntime = 0,
-    kHirariTrackStorageStrip = 1,
-    kHirariTrackStorageArticulation = 2,
-    kHirariTrackStoragePluginMidi = 3,
-    kHirariTrackStorageBusState = 4,
-};
-struct HirariEngineBlockOps {
-    void* (*storage)(void* track, uint32_t kind);
-    uint8_t (*type)(void* track);
-    void (*begin_edit)(void* track);
-    void (*end_edit)(void* track);
-    void (*record)(void* track, uint64_t playhead);
-};
 /// Every handle the block borrows; the engine owns each for the state's lifetime.
 struct HirariEngineBlockHandles {
     void* routing;
@@ -1155,8 +1152,7 @@ struct HirariEngineBlockHandles {
     void* mpe;
     void* macro_control;
 };
-extern "C" void* hirari_engine_block_create(
-    HirariEngineBlockHandles handles, const HirariEngineBlockOps* ops);
+extern "C" void* hirari_engine_block_create(HirariEngineBlockHandles handles);
 extern "C" void hirari_engine_block_destroy(void* state);
 /// Zero when the head already silenced the window. `frames_out` receives the
 /// block length the rest of the callback must use.

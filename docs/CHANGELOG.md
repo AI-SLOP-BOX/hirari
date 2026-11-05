@@ -146,6 +146,29 @@ production support.
   `hirari_engine_block_range_overflowed`) lost their last C++ consumer, and a new
   `engine_config` test drives a detached engine through one rejected and one
   accepted transition. C++ 4588 -> 4485 (-103).
+- The Track object is now a Rust object. `engine_track.rs` owns what
+  `src/core/engine/track.hpp` and its six `.inc` parts used to build: the
+  storages a track creates and destroys in order, the strip, chain, runtime,
+  freeze, automation, name, panner, PDC, work, pre-fader, pre-insert and both
+  Send taps every entry point reads by kind, the block preparation with its
+  four allocation statuses, `canProcess`, latency and PDC requests, the HRTF
+  kernel gate, the record-state dirty bit and the sandbox maintenance walk.
+  Engine call sites ask for a storage by kind and pass the object pointer
+  through the `hirari_track_*` externs; the owner handle is a boxed `Arc`
+  clone, so `takeTrackOwner` and `hirari_track_owner_release` replaced the
+  copies the topology lock used to hand out. Three C++ hook layers went with
+  the class — the track control host ops, the engine track ops table and the
+  C++ region storage host table — and `hirari_track_region_host_install` now
+  installs those region callbacks from Rust before the region edit host is
+  allowed to route them, which is the one install-order invariant the previous
+  static initializer owned. The engine's duplicate `hirari_audio_import_*`
+  shims, the header entries behind them and `build.rs`'s watch on the deleted
+  header are gone. The block contracts now drive real tracks, which proved
+  three things the opaque fixtures could not express: the Send taps and the
+  one-block feedback edge are what a walked block publishes rather than state
+  a test may author, a track's own preparation marks the layout once, and a
+  kernel the panner rejects still retires the frozen render.
+  C++ 4485 -> 3673 (-812).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

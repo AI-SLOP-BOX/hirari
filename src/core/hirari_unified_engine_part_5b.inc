@@ -41,20 +41,14 @@ void HirariUnifiedEngine::installExpressionMapEditHost() {
     const HirariExpressionMapEditHostOps ops{
         [](void* host, uint32_t trackId) -> void* {
             if (!host) return nullptr;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            Track* track = engine->findPublishedTrack(trackId);
-            return track ? track->articulationStateHandle() : nullptr;
+            void* track = static_cast<HirariUnifiedEngine*>(host)->findPublishedTrack(trackId);
+            return track ? hirari_track_storage(track, kHirariTrackStoreArticulation) : nullptr;
         },
         [](void* host, uint32_t trackId, uint8_t kind, const uint8_t* data,
            size_t length) -> bool {
             if (!host || (length != 0 && !data)) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            Track* track = engine->findPublishedTrack(trackId);
-            if (!track) return false;
-            std::string json(reinterpret_cast<const char*>(data), length);
-            if (kind == 0) track->setExpressionMapJson(std::move(json));
-            else track->setExpressionMapProJson(std::move(json));
-            return true;
+            void* track = static_cast<HirariUnifiedEngine*>(host)->findPublishedTrack(trackId);
+            return hirari_track_expression_map_set(track, kind, data, length);
         },
     };
     hirari_expression_map_edit_host_install(&ops);

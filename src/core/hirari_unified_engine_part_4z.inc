@@ -15,9 +15,9 @@ size_t HirariUnifiedEngine::regionHostListTracks(void* host, uint32_t* out,
     auto* engine = static_cast<HirariUnifiedEngine*>(host);
     std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
     size_t count = 0;
-    for (Track* track : engine->lockedTracks()) {
+    for (void* track : engine->lockedTracks()) {
         if (!track) continue;
-        if (out && count < capacity) out[count] = track->getId();
+        if (out && count < capacity) out[count] = hirari_track_id(track);
         ++count;
     }
     return count;
@@ -39,35 +39,27 @@ double HirariUnifiedEngine::regionHostSampleRate(void* host) {
 
 size_t HirariUnifiedEngine::regionHostTrackIdentity(void* host, uint32_t trackId) {
     return withHostTrack(host, trackId, size_t{0},
-                         [](Track& track) { return reinterpret_cast<size_t>(&track); });
+                         [](void* track) { return reinterpret_cast<size_t>(track); });
 }
 
 void* HirariUnifiedEngine::regionHostRetainTrack(void* host, uint32_t trackId) {
-    if (!host) return nullptr;
-    auto track = static_cast<HirariUnifiedEngine*>(host)->takeTrackHandle(trackId);
-    return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
+    return host ? static_cast<HirariUnifiedEngine*>(host)->takeTrackOwner(trackId) : nullptr;
 }
 
 void HirariUnifiedEngine::regionHostReleaseTrack(void* handle) {
-    delete static_cast<std::shared_ptr<Track>*>(handle);
+    hirari_track_owner_release(handle);
 }
 
-bool HirariUnifiedEngine::regionHostPitchBegin(void* trackHandle) {
-    if (!trackHandle) return false;
-    const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
-    return track && track->beginAudioPitchAnalysis();
+bool HirariUnifiedEngine::regionHostPitchBegin(void* trackOwner) {
+    return hirari_track_pitch_begin(hirari_track_owner_object(trackOwner));
 }
 
-void HirariUnifiedEngine::regionHostPitchFinish(void* trackHandle) {
-    if (!trackHandle) return;
-    const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
-    if (track) track->finishAudioPitchAnalysis();
+void HirariUnifiedEngine::regionHostPitchFinish(void* trackOwner) {
+    hirari_track_pitch_finish(hirari_track_owner_object(trackOwner));
 }
 
-void* HirariUnifiedEngine::regionHostNoteSnapshot(void* trackHandle, uint32_t regionId) {
-    if (!trackHandle) return nullptr;
-    const auto track = *static_cast<const std::shared_ptr<Track>*>(trackHandle);
-    return track ? hirari_region_store_note_snapshot(track.get(), regionId) : nullptr;
+void* HirariUnifiedEngine::regionHostNoteSnapshot(void* trackOwner, uint32_t regionId) {
+    return hirari_region_store_note_snapshot(hirari_track_owner_object(trackOwner), regionId);
 }
 
 namespace {
@@ -75,8 +67,8 @@ namespace {
 const HirariRegionHostOps kRegionEditHostOps = {
     nullptr,  // The Rust region store answers the region-data callbacks.
     nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-    &Hirari::Core::Engine::Track::regionHostAudioView,
-    &Hirari::Core::Engine::Track::regionHostReleaseHandle,
+    &hirari_storage_handle_view,
+    &hirari_storage_handle_release,
     nullptr,
     &HirariUnifiedEngine::regionHostListTracks,
     nullptr,

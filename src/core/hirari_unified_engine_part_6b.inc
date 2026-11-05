@@ -32,27 +32,6 @@ const HirariAutomationHostOps kAutomationEditHostOps = {
 };
 
 }  // namespace
-void HirariUnifiedEngine::installTrackControlHost() {
-    static const HirariTrackControlHostOps ops = {
-        [](void* host, uint32_t tid) -> void* {
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            if (!engine) return nullptr;
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            return newTrackHandle(engine->findTrackSharedLocked(tid));
-        },
-        [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
-        [](void* handle, float x, float y, float z) {
-            (*static_cast<std::shared_ptr<Track>*>(handle))->setSpatialPosition(x, y, z);
-        },
-        [](void* handle, const float* left, const float* right, uint32_t taps) -> bool {
-            return (*static_cast<std::shared_ptr<Track>*>(handle))->setHrtfKernel(left, right, taps);
-        },
-        [](void* handle) {
-            (*static_cast<std::shared_ptr<Track>*>(handle))->clearHrtfKernel();
-        },
-    };
-    hirari_track_control_host_install(&ops);
-}
 
 bool HirariUnifiedEngine::execute_auto_arrangement() {
     // Project extent, section boundaries and marker lengths are Rust-owned.
@@ -88,8 +67,10 @@ namespace {
     HirariUnifiedEngine::installExpressionMapEditHost();
     HirariUnifiedEngine::installTrackFreezeHost();
     HirariUnifiedEngine::installCommandHost();
-    HirariUnifiedEngine::installTrackControlHost();
-    hirari_region_storage_host_install(&Hirari::Core::Engine::Track::kRegionStorageHost);
+    // The tracks and their storages are Rust objects, so the spatial-edit host
+    // needs no native table. The region storage host must install before the
+    // region edit host, which routes its data callbacks only once it answers.
+    hirari_track_region_host_install();
     hirari_region_host_install(&kRegionEditHostOps);
     hirari_automation_host_install(&kAutomationEditHostOps);
     return true;

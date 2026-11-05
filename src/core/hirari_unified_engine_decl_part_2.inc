@@ -43,8 +43,8 @@
     bool bus_track_exists(uint32_t busTrackId) const {
         if (busTrackId == 0) return false;
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        Track* track = findTrackLocked(busTrackId);
-        return track && dynamic_cast<BusTrack*>(track) != nullptr;
+        void* track = findTrackLocked(busTrackId);
+        return track && hirari_track_type(track) == kHirariTrackKindBus;
     }
     float get_master_gain() const noexcept;
     uint32_t get_track_delay_samples(uint32_t tid) const;

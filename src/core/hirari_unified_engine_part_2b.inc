@@ -66,33 +66,6 @@ bool HirariUnifiedEngine::add_region(uint32_t tid, std::string_view path, double
     return result == 0;
 }
 
-// The Rust table owns the graph, so it only needs these reads from C++: the id
-// behind a Track*, the copy/free of the heap shared_ptr it stores, and the four
-// scalars its structural walk solves over.
-const HirariEngineTrackOps* HirariUnifiedEngine::trackOps() noexcept {
-    static const HirariEngineTrackOps ops = {
-        [](void* track) -> uint32_t { return static_cast<const Track*>(track)->getId(); },
-        [](void* owner) -> void* {
-            return new std::shared_ptr<Track>(
-                *static_cast<std::shared_ptr<Track>*>(owner));
-        },
-        [](void* owner) { delete static_cast<std::shared_ptr<Track>*>(owner); },
-        [](void* track) -> uint32_t {
-            return static_cast<uint32_t>(static_cast<const Track*>(track)->getType());
-        },
-        [](void* track) -> uint32_t {
-            const auto* bus = dynamic_cast<const BusTrack*>(static_cast<const Track*>(track));
-            return bus ? bus->busId() : UINT32_MAX;
-        },
-        [](void* track) -> uint32_t {
-            return static_cast<const Track*>(track)->getTotalLatencySamples();
-        },
-        [](void* track, uint32_t samples) {
-            static_cast<Track*>(track)->setPdcCompensationSamples(samples);
-        },
-    };
-    return &ops;
-}
 
 void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) {
     // Rust fills the buffer the callback is not reading, then flips the index.
@@ -101,40 +74,19 @@ void HirariUnifiedEngine::publishTrackSnapshotLocked(bool stampAudioGeneration) 
         stampAudioGeneration);
 }
 
-std::shared_ptr<Track> HirariUnifiedEngine::makeTrack(uint32_t id, const std::string& name,
-                                                     Track::Type type) {
-    if (type != Track::Type::Bus)
-        return std::make_shared<Track>(id, name, type, m_projectLayoutRevision);
-    auto bus = std::make_shared<BusTrack>(id, name, id, m_projectLayoutRevision);
-    bus->resolveBus(hirari_bus_system_register(m_busSystem, id)
-        ? hirari_bus_system_bus(m_busSystem, id) : nullptr);
-    return bus;
-}
-
 void HirariUnifiedEngine::syncNative(void* host) {
     if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
 
 // The lifecycle walk itself is Rust's (track_edit_host.rs): it holds the tracks
-// lock, moves the Rust track table, publishes the audio snapshot and replays the
-// sidechain, route and routing captures through the shared track session. Only
-// building the C++ Track and naming the stores it walks stay here.
+// lock, builds each track through the Rust track object, moves the Rust track
+// table, publishes the audio snapshot and replays the sidechain, route and
+// routing captures through the shared track session. The engine contributes the
+// stores it walks and the undo history it records into.
 void HirariUnifiedEngine::installTrackEditHost() {
     static const HirariTrackEditHostOps ops = {
         &HirariUnifiedEngine::regionHostListTracks,
         &hirari_region_store_list_regions,
-        [](void* host, uint32_t type, uint32_t id, const uint8_t* name, size_t nameLength,
-           void** outTrack) -> void* {
-            if (!host || !name || !outTrack) return nullptr;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            auto created = engine->makeTrack(
-                id, std::string(reinterpret_cast<const char*>(name), nameLength),
-                static_cast<Track::Type>(type));
-            created->prepareToPlay(engine->m_sampleRate.load(std::memory_order_relaxed),
-                                   engine->m_blockSize.load(std::memory_order_relaxed));
-            *outTrack = created.get();
-            return newTrackHandle(std::move(created));
-        },
         [](void* host, uint32_t kind) -> void* {
             if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
@@ -143,6 +95,8 @@ void HirariUnifiedEngine::installTrackEditHost() {
                 case kHirariTrackEditStoreEngineBlock: return engine->m_engineBlock;
                 case kHirariTrackEditStoreSidechain: return engine->m_sidechainEngine;
                 case kHirariTrackEditStoreSidechainRoutes: return engine->m_sidechainRoutes;
+                case kHirariTrackEditStoreLayoutRevision: return engine->m_layoutRevision;
+                case kHirariTrackEditStoreBusSystem: return engine->m_busSystem;
                 default: return engine->m_routingEngine;
             }
         },

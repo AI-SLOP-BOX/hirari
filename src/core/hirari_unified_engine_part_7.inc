@@ -8,9 +8,9 @@ bool HirariUnifiedEngine::set_automation_record_mode(uint32_t mode) {
 }
 
 bool HirariUnifiedEngine::execute_vocal_remover(uint32_t tid) {
-    Track* track = findPublishedTrack(tid);
+    void* track = findPublishedTrack(tid);
     if (!track) return false;
-    void* buffer = track->workBufferStorage();
+    void* buffer = hirari_track_storage(track, kHirariTrackStoreWorkBuffer);
     if (hirari_audio_buffer_storage_channels(buffer) < 2) return false;
     return hirari_vocal_remove_stereo(
         hirari_audio_buffer_storage_write_pointer(buffer, 0),
@@ -19,9 +19,9 @@ bool HirariUnifiedEngine::execute_vocal_remover(uint32_t tid) {
 }
 
 float HirariUnifiedEngine::get_track_correlation(uint32_t tid) const {
-    Track* track = findPublishedTrack(tid);
+    void* track = findPublishedTrack(tid);
     if (!track) return 1.0f;
-    void* buffer = track->workBufferStorage();
+    void* buffer = hirari_track_storage(track, kHirariTrackStoreWorkBuffer);
     if (hirari_audio_buffer_storage_channels(buffer) < 2) return 1.0f;
     return hirari_stereo_correlation(
         hirari_audio_buffer_storage_read_pointer(buffer, 0, 0),

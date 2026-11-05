@@ -3,8 +3,8 @@
 //! The tail is the last part of a device callback: it feeds the routing
 //! feedback edges, publishes per-track metering, injects the metronome, scales
 //! and limits the master, measures it, mixes the Control Room cue and advances
-//! the playhead it holds. Tracks stay opaque, so the test drives the published
-//! operations tables instead of a C++ `Track`.
+//! the playhead it holds. Tracks are the Rust objects of `engine_track.rs`, so
+//! the test builds real ones and reads back what the tail wrote into them.
 
 use hirari_core_bridge::audio_buffer_ops::{
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_create,
@@ -23,14 +23,19 @@ use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_playhead, hirari_engine_block_range_overflowed,
     hirari_engine_block_set_playhead, hirari_engine_block_set_playing,
     hirari_engine_telemetry_active_index, hirari_engine_telemetry_snapshot,
-    HirariEngineBlockHandles, HirariEngineBlockOps, HirariEngineTelemetry, TRACK_RUNTIME,
+    HirariEngineBlockHandles, HirariEngineTelemetry,
 };
 use hirari_core_bridge::engine_input_block::{
     hirari_input_blocks_create, hirari_input_blocks_destroy,
 };
+use hirari_core_bridge::engine_track::{
+    hirari_layout_revision_create, hirari_layout_revision_release,
+    hirari_track_flush_recorded_automation, hirari_track_new, hirari_track_prepare,
+    hirari_track_set_record_armed, hirari_track_storage, STORAGE_WORK_BUFFER, TRACK_TYPE_AUDIO,
+};
 use hirari_core_bridge::engine_track_table::{
     hirari_engine_track_insert, hirari_engine_track_publish, hirari_engine_track_table_create,
-    hirari_engine_track_table_destroy, HirariEngineTrackOps,
+    hirari_engine_track_table_destroy,
 };
 use hirari_core_bridge::master_limiter::{
     hirari_master_limiter_create, hirari_master_limiter_destroy,
@@ -47,75 +52,13 @@ use hirari_core_bridge::sidechain_manager::{
     hirari_sidechain_engine_create, hirari_sidechain_engine_destroy,
 };
 use hirari_core_bridge::tempo::{hirari_tempo_map_create, hirari_tempo_map_destroy};
-use hirari_core_bridge::track_runtime::{
-    hirari_track_runtime_create, hirari_track_runtime_destroy,
-};
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FRAMES: u32 = 4;
-
-/// Stand-in for a C++ `Track`: the block reaches it only for its own storages.
-struct FakeTrack {
-    id: u32,
-    runtime: *mut c_void,
-    records: AtomicUsize,
-}
-
-unsafe extern "C" fn storage_of(track: *mut c_void, kind: u32) -> *mut c_void {
-    match kind {
-        TRACK_RUNTIME => unsafe { &*track.cast::<FakeTrack>() }.runtime,
-        _ => std::ptr::null_mut(),
-    }
-}
-
-unsafe extern "C" fn block_type_of(_track: *mut c_void) -> u8 {
-    0
-}
-
-unsafe extern "C" fn edit_of(_track: *mut c_void) {}
-
-unsafe extern "C" fn record_of(track: *mut c_void, _playhead: u64) {
-    unsafe { &*track.cast::<FakeTrack>() }
-        .records
-        .fetch_add(1, Ordering::Relaxed);
-}
-
-unsafe extern "C" fn track_id_of(track: *mut c_void) -> u32 {
-    unsafe { &*track.cast::<FakeTrack>() }.id
-}
-
-/// The table owns one handle per track; here it is the `FakeTrack` itself, so a
-/// clone is the same pointer and a release frees nothing.
-unsafe extern "C" fn owner_clone(owner: *mut c_void) -> *mut c_void {
-    owner
-}
-
-unsafe extern "C" fn owner_release(_owner: *mut c_void) {}
-
-unsafe extern "C" fn track_type_of(_track: *mut c_void) -> u32 {
-    0
-}
-
-unsafe extern "C" fn bus_id_of(_track: *mut c_void) -> u32 {
-    u32::MAX
-}
-
-unsafe extern "C" fn latency_of(_track: *mut c_void) -> u32 {
-    0
-}
-
-unsafe extern "C" fn apply_pdc(_track: *mut c_void, _samples: u32) {}
-
-static TABLE_OPS: HirariEngineTrackOps = HirariEngineTrackOps {
-    id: Some(track_id_of),
-    clone_owner: Some(owner_clone),
-    destroy_owner: Some(owner_release),
-    track_type: Some(track_type_of),
-    bus_id: Some(bus_id_of),
-    latency: Some(latency_of),
-    set_pdc_offset: Some(apply_pdc),
-};
+const RATE: f64 = 44_100.0;
+/// The block length every track is prepared with, so a track that cannot hold
+/// the walked block still has room for the samples the test writes.
+const CAPACITY: u32 = 8;
 
 fn storage(channels: u32, frames: u32) -> *mut c_void {
     unsafe {
@@ -147,11 +90,10 @@ struct Engine {
     state: *mut c_void,
     output: *mut c_void,
     tracks: Vec<*mut c_void>,
-    work: Vec<*mut c_void>,
-    runtime: Vec<*mut c_void>,
     /// `[routing, bounce, input blocks, control room, mixer telemetry,
     /// metronome, limiter, meter, tempo, bus system, sidechain engine]`.
     borrowed: [*mut c_void; 11],
+    revision: *mut c_void,
     /// The published graph the tail traverses, as in the engine.
     table: *mut c_void,
 }
@@ -162,21 +104,14 @@ impl Engine {
             state: std::ptr::null_mut(),
             output: storage(2, 8192),
             tracks: Vec::new(),
-            work: Vec::new(),
-            runtime: Vec::new(),
             borrowed: [std::ptr::null_mut(); 11],
+            revision: std::ptr::null_mut(),
             table: std::ptr::null_mut(),
         }
     }
 
     fn bind(&mut self) -> &mut Self {
-        let ops = HirariEngineBlockOps {
-            storage: Some(storage_of),
-            track_type: Some(block_type_of),
-            begin_edit: Some(edit_of),
-            end_edit: Some(edit_of),
-            record: Some(record_of),
-        };
+        self.revision = hirari_layout_revision_create();
         self.borrowed = unsafe {
             [
                 hirari_routing_engine_create(),
@@ -184,16 +119,16 @@ impl Engine {
                 hirari_input_blocks_create(8192),
                 hirari_control_room_state_create(),
                 hirari_mixer_telemetry_create(),
-                hirari_metronome_create(44_100.0),
-                hirari_master_limiter_create(44_100.0),
-                hirari_master_meter_create(44_100.0),
+                hirari_metronome_create(RATE),
+                hirari_master_limiter_create(RATE),
+                hirari_master_meter_create(RATE),
                 hirari_tempo_map_create(),
                 hirari_bus_system_create(),
                 hirari_sidechain_engine_create(),
             ]
         };
         let borrowed = self.borrowed;
-        self.table = unsafe { hirari_engine_track_table_create(&TABLE_OPS) };
+        self.table = unsafe { hirari_engine_track_table_create() };
         let handles = HirariEngineBlockHandles {
             routing: borrowed[0],
             track_table: self.table,
@@ -209,47 +144,63 @@ impl Engine {
             sidechain: borrowed[10],
             ..HirariEngineBlockHandles::default()
         };
-        self.state = unsafe { hirari_engine_block_create(handles, &ops) };
+        self.state = unsafe { hirari_engine_block_create(handles) };
         assert!(!self.state.is_null());
         self
     }
 
-    /// Adds a track whose work buffer holds `frames` samples, returning its
-    /// published slot index.
+    /// Adds an audio track whose work block holds `frames` samples, returning
+    /// its published slot index.
     fn track(&mut self, id: u32, frames: u32) -> usize {
-        let work = storage(2, frames);
-        let runtime = unsafe {
-            let null = std::ptr::null_mut::<c_void>();
-            hirari_track_runtime_create(
-                id, 0, null, null, null, null, null, null, work, null, null, null, null, null,
-                null, null,
+        let name = b"test track";
+        let mut track = std::ptr::null_mut();
+        let owner = unsafe {
+            hirari_track_new(
+                id,
+                name.as_ptr(),
+                name.len(),
+                TRACK_TYPE_AUDIO,
+                self.revision,
+                &mut track,
             )
         };
-        let track = Box::into_raw(Box::new(FakeTrack {
-            id,
-            runtime,
-            records: AtomicUsize::new(0),
-        }));
-        self.work.push(work);
-        self.runtime.push(runtime);
-        self.tracks.push(track.cast());
+        assert!(!track.is_null());
+        assert_eq!(
+            unsafe { hirari_track_prepare(track, RATE, CAPACITY) },
+            0,
+            "the test track must prepare for the walked block"
+        );
+        // The length under test is the work buffer's own.
+        assert!(unsafe {
+            hirari_audio_buffer_storage_resize(
+                hirari_track_storage(track, STORAGE_WORK_BUFFER),
+                2,
+                frames,
+            )
+        });
+        self.tracks.push(track);
         let slot = self.tracks.len() - 1;
+        // The table owns the handle from here, so destroying it releases the
+        // track and every storage it owns.
         unsafe {
-            assert!(hirari_engine_track_insert(
-                self.table,
-                usize::MAX,
-                track.cast(),
-                track.cast()
-            ));
+            assert!(hirari_engine_track_insert(self.table, usize::MAX, owner));
             hirari_engine_track_publish(self.table, 1, true);
         }
         slot
     }
 
-    fn records(&self, slot: usize) -> usize {
-        unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
-            .records
-            .load(Ordering::Relaxed)
+    fn work(&self, slot: usize) -> *mut c_void {
+        unsafe { hirari_track_storage(self.tracks[slot], STORAGE_WORK_BUFFER) }
+    }
+
+    /// Arms one track's recorder, exactly as the control side does.
+    fn arm(&self, slot: usize) {
+        assert!(unsafe { hirari_track_set_record_armed(self.tracks[slot], true) });
+    }
+
+    /// The automation points the tail captured for this track.
+    fn records(&self, slot: usize) -> u32 {
+        unsafe { hirari_track_flush_recorded_automation(self.tracks[slot]) }
     }
 
     /// Runs one tail and reports the playhead step and the sticky overflow the
@@ -263,7 +214,7 @@ impl Engine {
                 self.output,
                 0,
                 FRAMES,
-                44_100.0,
+                RATE,
                 1.0,
                 u8::from(auto_record),
             );
@@ -293,31 +244,20 @@ impl Drop for Engine {
             // The tail borrows every other handle, so it is retired first.
             hirari_engine_block_destroy(self.state);
             hirari_engine_track_table_destroy(self.table);
-            for handle in self.runtime.drain(..) {
-                hirari_track_runtime_destroy(handle);
-            }
-            for handle in self.work.drain(..) {
-                hirari_audio_buffer_storage_destroy(handle);
-            }
-            for handle in self.tracks.drain(..) {
-                drop(Box::from_raw(handle.cast::<FakeTrack>()));
-            }
-            // The block state borrowed all of these, so it is already retired.
-            if !self.state.is_null() {
-                let [routing, bounce, input, control_room, mixer, metronome, limiter, meter, tempo, bus_system, sidechain] =
-                    self.borrowed;
-                hirari_routing_engine_destroy(routing);
-                hirari_bounce_session_destroy(bounce);
-                hirari_input_blocks_destroy(input);
-                hirari_control_room_state_destroy(control_room);
-                hirari_mixer_telemetry_destroy(mixer);
-                hirari_metronome_destroy(metronome);
-                hirari_master_limiter_destroy(limiter);
-                hirari_master_meter_destroy(meter);
-                hirari_tempo_map_destroy(tempo);
-                hirari_bus_system_destroy(bus_system);
-                hirari_sidechain_engine_destroy(sidechain);
-            }
+            let [routing, bounce, input, control_room, mixer, metronome, limiter, meter, tempo, bus_system, sidechain] =
+                self.borrowed;
+            hirari_routing_engine_destroy(routing);
+            hirari_bounce_session_destroy(bounce);
+            hirari_input_blocks_destroy(input);
+            hirari_control_room_state_destroy(control_room);
+            hirari_mixer_telemetry_destroy(mixer);
+            hirari_metronome_destroy(metronome);
+            hirari_master_limiter_destroy(limiter);
+            hirari_master_meter_destroy(meter);
+            hirari_tempo_map_destroy(tempo);
+            hirari_bus_system_destroy(bus_system);
+            hirari_sidechain_engine_destroy(sidechain);
+            hirari_layout_revision_release(self.revision);
             hirari_audio_buffer_storage_destroy(self.output);
         }
     }
@@ -328,8 +268,9 @@ fn a_playing_block_publishes_metering_records_and_advances_the_playhead() {
     let mut engine = Engine::new();
     engine.bind();
     let slot = engine.track(3, FRAMES);
+    engine.arm(slot);
     fill(
-        engine.work[slot],
+        engine.work(slot),
         &[[0.5, -0.25, 0.75, -1.0], [0.125, 0.25, -0.5, 0.25]],
     );
 
@@ -353,7 +294,7 @@ fn metering_stays_aligned_with_the_graph_when_a_track_cannot_hold_the_block() {
     engine.bind();
     let loud = engine.track(5, FRAMES);
     let small = engine.track(6, 1);
-    fill(engine.work[loud], &[[0.25; 4], [0.25; 4]]);
+    fill(engine.work(loud), &[[0.25; 4], [0.25; 4]]);
 
     engine.finish(0, true, false);
 
@@ -383,6 +324,7 @@ fn a_stopped_engine_reports_no_step_and_captures_no_automation() {
     let mut engine = Engine::new();
     engine.bind();
     let slot = engine.track(2, FRAMES);
+    engine.arm(slot);
 
     assert_eq!(engine.finish(0, false, true), (0, 0));
     assert_eq!(engine.records(slot), 0);
@@ -395,7 +337,7 @@ fn a_block_larger_than_the_engine_cap_writes_nothing() {
     engine.track(4, FRAMES);
     unsafe {
         hirari_engine_block_set_playing(engine.state, 1);
-        hirari_engine_block_finish(engine.state, engine.output, 0, 16_385, 44_100.0, 1.0, 0);
+        hirari_engine_block_finish(engine.state, engine.output, 0, 16_385, RATE, 1.0, 0);
     };
     assert_eq!(
         unsafe { hirari_engine_block_playhead(engine.state) },

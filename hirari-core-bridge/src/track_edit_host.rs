@@ -8,19 +8,23 @@
 //! the table, publishes the audio-thread snapshot, captures and replays the links,
 //! routes and connections, and hands one entry to the history.
 //!
-//! C++ keeps only what a C++ object makes impossible here: building a `Track`,
-//! whose constructor binds the project layout revision and registers a bus slot.
-//!
 //! Every entry point runs on the control thread.
 
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use crate::engine_block_host::hirari_engine_block_generation;
+use crate::bus_audio::{hirari_bus_system_bus, hirari_bus_system_register};
+use crate::engine_block_host::{
+    hirari_engine_block_device_block_frames, hirari_engine_block_device_sample_rate,
+    hirari_engine_block_generation,
+};
+use crate::engine_track::{
+    hirari_track_new, hirari_track_owner_object, hirari_track_owner_release,
+    hirari_track_owner_retain, hirari_track_prepare, hirari_track_resolve_bus, TRACK_TYPE_BUS,
+};
 use crate::engine_track_table::{
     hirari_engine_track_count, hirari_engine_track_detach, hirari_engine_track_find,
-    hirari_engine_track_index_of, hirari_engine_track_insert, hirari_engine_track_owner_deleter,
-    hirari_engine_track_owner_retain, hirari_engine_track_publish,
+    hirari_engine_track_index_of, hirari_engine_track_insert, hirari_engine_track_publish,
 };
 use crate::plugin_edit_host::{commit_closures, UndoStateFn};
 use crate::region_edit_host::{HirariRegionListRegionsFn, HirariRegionListTracksFn};
@@ -49,26 +53,17 @@ use crate::track_session::{
     STORAGE_RUNTIME, STORAGE_STRIP,
 };
 
-/// `Track::Type::Bus`, mirrored from `track_part_1a.inc`.
-pub const TRACK_TYPE_BUS: u32 = 3;
-
 /// The engine stores a lifecycle walk visits, as `store` numbers them.
 pub const STORE_TRACK_TABLE: u32 = 0;
 pub const STORE_ENGINE_BLOCK: u32 = 1;
 pub const STORE_SIDECHAIN: u32 = 2;
 pub const STORE_SIDECHAIN_ROUTES: u32 = 3;
 pub const STORE_ROUTING: u32 = 4;
+pub const STORE_LAYOUT_REVISION: u32 = 5;
+pub const STORE_BUS_SYSTEM: u32 = 6;
 
-/// Builds a track of the given kind and id, named by the caller and prepared for
-/// the engine's current device format. Writes its address and returns the owning
-/// handle this module inserts into the graph.
-pub type CreateTrackFn =
-    unsafe extern "C" fn(*mut c_void, u32, u32, *const u8, usize, *mut *mut c_void) -> *mut c_void;
 /// One of the engine's Rust-owned stores, by `STORE_*` kind.
 pub type StoreFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
-/// Releases one owning track handle. A capture keeps this instead of the table
-/// it came from, because the undo history can outlive the engine.
-pub type OwnerDeleter = unsafe extern "C" fn(*mut c_void);
 pub type ReplayTrackEditFn = unsafe extern "C" fn(*mut c_void);
 /// Records an applied action; the host invokes `undo`/`redo` with `edit` and
 /// releases it once the history drops the entry.
@@ -91,7 +86,6 @@ pub struct HirariTrackEditHostOps {
     /// allocator in `id_host` reads the project through these.
     pub list_tracks: Option<HirariRegionListTracksFn>,
     pub list_regions: Option<HirariRegionListRegionsFn>,
-    pub create_track: Option<CreateTrackFn>,
     pub store: Option<StoreFn>,
     pub record_replay: Option<RecordTrackReplayFn>,
     pub sync_structural_changes: Option<SyncStructuralChangesFn>,
@@ -141,7 +135,8 @@ struct Stores {
     host: *mut c_void,
     block: *mut c_void,
     table: *mut c_void,
-    destroy: OwnerDeleter,
+    revision: *mut c_void,
+    bus_system: *mut c_void,
     sidechain: *mut c_void,
     routes: *mut c_void,
     routing: *mut c_void,
@@ -151,14 +146,13 @@ impl Stores {
     fn new(ops: &HirariTrackEditHostOps, host: *mut c_void) -> Option<Self> {
         let session = track_session::engine_ops()?;
         let store = ops.store?;
-        let table = unsafe { store(host, STORE_TRACK_TABLE) };
-        let destroy = unsafe { hirari_engine_track_owner_deleter(table) }?;
         Some(Self {
             session,
             host,
             block: unsafe { store(host, STORE_ENGINE_BLOCK) },
-            table,
-            destroy,
+            table: unsafe { store(host, STORE_TRACK_TABLE) },
+            revision: unsafe { store(host, STORE_LAYOUT_REVISION) },
+            bus_system: unsafe { store(host, STORE_BUS_SYSTEM) },
             sidechain: unsafe { store(host, STORE_SIDECHAIN) },
             routes: unsafe { store(host, STORE_SIDECHAIN_ROUTES) },
             routing: unsafe { store(host, STORE_ROUTING) },
@@ -180,7 +174,7 @@ impl Stores {
     /// Releases one owning handle this walk no longer needs.
     fn release(&self, owner: *mut c_void) {
         if !owner.is_null() {
-            unsafe { (self.destroy)(owner) };
+            unsafe { hirari_track_owner_release(owner) };
         }
     }
 
@@ -194,12 +188,51 @@ impl Stores {
         };
     }
 
-    /// Appends a freshly built track and returns the index it landed at.
-    fn append(&self, owner: *mut c_void, track: *mut c_void) -> usize {
+    /// Builds a track of this kind and id, names it, and brings it up at the
+    /// device format the graph is prepared for. A bus takes its slot from the
+    /// engine's bus system first: the structural walk can only route to a slot
+    /// the system actually hands out, so an unresolvable bus stays slotless.
+    fn build(&self, kind: u32, id: u32, name: &str) -> (*mut c_void, *mut c_void) {
+        let mut track = std::ptr::null_mut();
+        let owner = unsafe {
+            hirari_track_new(
+                id,
+                name.as_ptr(),
+                name.len(),
+                kind,
+                self.revision,
+                &mut track,
+            )
+        };
+        if kind == TRACK_TYPE_BUS {
+            let state = unsafe {
+                hirari_bus_system_register(self.bus_system, id)
+                    .then(|| hirari_bus_system_bus(self.bus_system, id))
+            };
+            unsafe {
+                hirari_track_resolve_bus(track, state.unwrap_or(std::ptr::null_mut()), true)
+            };
+        }
+        unsafe {
+            hirari_track_prepare(
+                track,
+                hirari_engine_block_device_sample_rate(self.block),
+                hirari_engine_block_device_block_frames(self.block),
+            )
+        };
+        (owner, track)
+    }
+
+    /// Appends a track the walk built and returns the index it landed at. The
+    /// caller keeps its own handle: the undo capture outlives the graph, and the
+    /// table holds a reference of its own.
+    fn append(&self, owner: *mut c_void) -> usize {
         let index = unsafe { hirari_engine_track_count(self.table) };
-        let owned = unsafe { hirari_engine_track_owner_retain(self.table, owner) };
-        unsafe { hirari_engine_track_insert(self.table, index, owned, track) };
-        self.session.mark_layout(track);
+        let track = unsafe { hirari_track_owner_object(owner) };
+        let owned = unsafe { hirari_track_owner_retain(owner) };
+        if unsafe { hirari_engine_track_insert(self.table, index, owned) } {
+            self.session.mark_layout(track);
+        }
         index
     }
 
@@ -231,18 +264,17 @@ impl Stores {
         if !self.find(captured.id).is_null() {
             return;
         }
-        let owner = unsafe { hirari_engine_track_owner_retain(self.table, captured.owner) };
-        if unsafe { hirari_engine_track_insert(self.table, captured.index, owner, captured.track) } {
+        let owner = unsafe { hirari_track_owner_retain(captured.owner) };
+        if unsafe { hirari_engine_track_insert(self.table, captured.index, owner) } {
             self.session.mark_layout(captured.track);
             self.publish(stamp);
         }
     }
 }
 
-/// An owning handle the factory handed out, released when the edit it was built
-/// for does not complete.
+/// An owning handle this walk built, released when the edit it was built for
+/// does not complete.
 struct TrackOwner {
-    destroy: OwnerDeleter,
     owner: *mut c_void,
 }
 
@@ -250,14 +282,14 @@ impl TrackOwner {
     /// Hands the handle to a capture that takes over the release.
     fn into_captured(self, track: *mut c_void, index: usize, id: u32) -> CapturedTrack {
         let kept = std::mem::ManuallyDrop::new(self);
-        CapturedTrack::created(kept.destroy, kept.owner, track, index, id)
+        CapturedTrack::created(kept.owner, track, index, id)
     }
 }
 
 impl Drop for TrackOwner {
     fn drop(&mut self) {
         if !self.owner.is_null() {
-            unsafe { (self.destroy)(self.owner) };
+            unsafe { hirari_track_owner_release(self.owner) };
         }
     }
 }
@@ -304,7 +336,6 @@ fn discard_routing(stores: &Stores, track_id: u32) {
 /// its owning handle and address, the graph index it came from, and the captures
 /// of the sidechain links, routes and routing connections taken with it.
 pub struct CapturedTrack {
-    destroy: OwnerDeleter,
     owner: *mut c_void,
     track: *mut c_void,
     index: usize,
@@ -318,9 +349,8 @@ pub struct CapturedTrack {
 impl CapturedTrack {
     /// A track the edit just built: nothing was taken out of the graph with it,
     /// so undo only has to remove it again.
-    fn created(destroy: OwnerDeleter, owner: *mut c_void, track: *mut c_void, index: usize, id: u32) -> Self {
+    fn created(owner: *mut c_void, track: *mut c_void, index: usize, id: u32) -> Self {
         Self {
-            destroy,
             owner,
             track,
             index,
@@ -340,7 +370,7 @@ impl Drop for CapturedTrack {
             hirari_sidechain_routes_release(self.sidechain_routes);
         }
         if !self.owner.is_null() {
-            unsafe { (self.destroy)(self.owner) };
+            unsafe { hirari_track_owner_release(self.owner) };
         }
     }
 }
@@ -560,9 +590,6 @@ fn add_track_impl(
     host: *mut c_void,
     track_type: u32,
 ) -> u32 {
-    let Some(create) = ops.create_track else {
-        return 0;
-    };
     let Some(stores) = Stores::new(ops, host) else {
         return 0;
     };
@@ -575,19 +602,13 @@ fn add_track_impl(
     } else {
         format!("Track {}", id.wrapping_add(1))
     };
-    let mut track = std::ptr::null_mut();
     let captured = {
         // Building the track and appending it stay inside one lock hold, which
         // is where the engine's own create path had both.
         let _guard = stores.lock();
-        let owner = TrackOwner {
-            destroy: stores.destroy,
-            owner: unsafe { create(host, track_type, id, name.as_ptr(), name.len(), &mut track) },
-        };
-        if owner.owner.is_null() || track.is_null() {
-            return 0;
-        }
-        let index = stores.append(owner.owner, track);
+        let (owner, track) = stores.build(track_type, id, &name);
+        let owner = TrackOwner { owner };
+        let index = stores.append(owner.owner);
         stores.publish(true);
         owner.into_captured(track, index, id)
     };
@@ -616,9 +637,6 @@ fn duplicate_track_impl(
     host: *mut c_void,
     track_id: u32,
 ) -> u32 {
-    let Some(create) = ops.create_track else {
-        return 0;
-    };
     let Some(stores) = Stores::new(ops, host) else {
         return 0;
     };
@@ -634,31 +652,15 @@ fn duplicate_track_impl(
     if region_ids.len() != region_count {
         return 0;
     }
-    let mut copy = std::ptr::null_mut();
     let captured = {
         let _guard = stores.lock();
         let source = stores.find(track_id);
         if source.is_null() || hirari_region_store_count(source) != region_ids.len() {
             return 0;
         }
-        // The copy is named by the clone step, so the factory starts it nameless.
-        let empty = [0u8; 1];
-        let owner = TrackOwner {
-            destroy: stores.destroy,
-            owner: unsafe {
-                create(
-                    host,
-                    stores.session.track_type(source),
-                    new_id,
-                    empty.as_ptr(),
-                    0,
-                    &mut copy,
-                )
-            },
-        };
-        if owner.owner.is_null() || copy.is_null() {
-            return 0;
-        }
+        // The copy is named by the clone step, so it starts nameless.
+        let (owner, copy) = stores.build(stores.session.track_type(source), new_id, "");
+        let owner = TrackOwner { owner };
         // The copy's own storages are the destination, name included: the reads
         // and writes go store to store, so the copy suffix is Rust's rule.
         let cloned = unsafe {
@@ -681,7 +683,7 @@ fn duplicate_track_impl(
         if !cloned || !regions {
             return 0;
         }
-        let index = stores.append(owner.owner, copy);
+        let index = stores.append(owner.owner);
         stores.publish(false);
         owner.into_captured(copy, index, new_id)
     };
@@ -727,7 +729,6 @@ fn remove_track_impl(ops: &HirariTrackEditHostOps, host: *mut c_void, track_id: 
         let track = stores.find(track_id);
         let owner = stores.detach(track_id);
         let captured = CapturedTrack {
-            destroy: stores.destroy,
             owner,
             track,
             index,

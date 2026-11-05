@@ -1,37 +1,5 @@
 using ScopedDenormalGuard = ::Hirari::Core::Concurrency::ScopedDenormalGuard;
 
-namespace {
-// The track reads the Rust engine block cannot make through a handle
-// (engine_block_host.rs). Kind selects the track's own storage, and a bus stage
-// only exists on a bus track, so the downcast is the one thing kept here.
-void* engineTrackStorage(void* track, uint32_t kind) {
-    auto* target = static_cast<Track*>(track);
-    switch (kind) {
-        case kHirariTrackStorageRuntime: return target->realtimeRuntime();
-        case kHirariTrackStorageStrip: return target->channelStripHandle();
-        case kHirariTrackStorageArticulation: return target->articulationStateHandle();
-        case kHirariTrackStoragePluginMidi: return target->pluginMidiHandle();
-        case kHirariTrackStorageBusState:
-            return target->getType() == Track::Bus
-                ? static_cast<BusTrack*>(target)->busStateHandle() : nullptr;
-    }
-    return nullptr;
-}
-uint8_t engineTrackType(void* track) {
-    return static_cast<uint8_t>(static_cast<Track*>(track)->getType());
-}
-void engineTrackRecord(void* track, uint64_t playhead) {
-    auto* target = static_cast<Track*>(track);
-    if (target->isRecordArmed()) target->recordCurrentState(playhead);
-}
-// The control protocol a drained command keeps on the track: the frozen render
-// is dropped before the store write and the layout revision bumped after it.
-void engineTrackBeginEdit(void* track) {
-    static_cast<Track*>(track)->invalidateFrozenForEdit();
-}
-void engineTrackEndEdit(void* track) { static_cast<Track*>(track)->markProjectLayoutChanged(); }
-}  // namespace
-
 HirariUnifiedEngine::~HirariUnifiedEngine() {
     // Async region jobs hold the engine host pointer; join them before any
     // member (decoder, tracks) is destroyed.
@@ -107,18 +75,13 @@ HirariUnifiedEngine::HirariUnifiedEngine() {
     // configuration mutex through a mutator.
     (void)hirari_native_pdc_bind_control_thread(m_pdcState);
     m_masterLimiter = hirari_master_limiter_create(44'100.0);
-    static const HirariEngineBlockOps blockOps{&engineTrackStorage,
-                                               &engineTrackType,
-                                               &engineTrackBeginEdit,
-                                               &engineTrackEndEdit,
-                                               &engineTrackRecord};
     const HirariEngineBlockHandles blockHandles{
         m_routingEngine, m_trackTable, m_bounceSession, m_inputBlocks,
         m_controlRoomState, m_mixerTelemetry, m_metronome, m_masterLimiter,
         m_meterCore, m_tempoState, m_busSystem, m_sidechainEngine,
         m_engineRings, m_midiPlaybackClock, m_midiSnapshotStore,
         m_previewSynthState, m_previewSampler, m_mpeState, m_macroControl};
-    m_engineBlock = hirari_engine_block_create(blockHandles, &blockOps);
+    m_engineBlock = hirari_engine_block_create(blockHandles);
     hirari_sandbox_recovery_start(this, m_forensicJournal);
 }
 

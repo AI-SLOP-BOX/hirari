@@ -1,32 +1,28 @@
 
 
-// The maintenance pass itself lives in Rust; these handlers only report the
-// per-track sandbox statuses, run one restart and post the resulting event with
-// the engine's playhead. The slot queries and isolated block processing read the
-// effect chain through the Rust layout gather.
-static_assert(sizeof(Track::SandboxStatus) == 24,
-              "plugin_sandbox_maintenance.rs mirrors this layout");
+// The maintenance pass itself lives in Rust; these handlers only walk the graph
+// and hand each track to the Rust sandbox queries, then post the resulting event
+// with the engine's playhead. The status layout is plugin_sandbox_maintenance.rs.
 void HirariUnifiedEngine::installSandboxMaintenanceHost() {
     static const HirariPluginSandboxHostOps ops = {
         [](void* host, void* context, HirariPluginSandboxVisitorFn visit) -> bool {
             if (!host) return false;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             const std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (Track* track : engine->lockedTracks())
-                for (const auto& status : track->getSandboxStatuses())
-                    if (!visit(context, track->getId(), &status)) return true;
+            for (void* track : engine->lockedTracks())
+                hirari_track_visit_sandbox_statuses(track, context, visit);
             return true;
         },
         [](void* host, uint32_t trackId, bool autoRestart, void* context,
            HirariPluginSandboxVisitorFn visit) -> uint32_t {
             if (!host) return 0;
-            // The restart can block on a worker process, so the Track is held
-            // by handle and the topology lock is already released around it.
-            const auto track = static_cast<HirariUnifiedEngine*>(host)->takeTrackHandle(trackId);
-            if (!track) return 0;
-            const uint32_t recovered = track->maintainSandboxedPlugins(autoRestart);
-            for (const auto& status : track->getSandboxStatuses())
-                if (!visit(context, trackId, &status)) break;
+            // The restart can block on a worker process, so the track is held by
+            // handle and the topology lock is already released around it.
+            void* owner = static_cast<HirariUnifiedEngine*>(host)->takeTrackOwner(trackId);
+            if (!owner) return 0;
+            const uint32_t recovered = hirari_track_maintain_sandboxes(
+                hirari_track_owner_object(owner), autoRestart, context, visit);
+            hirari_track_owner_release(owner);
             return recovered;
         },
         [](void* host, uint32_t type, uint32_t trackId, float value,

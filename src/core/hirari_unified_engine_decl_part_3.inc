@@ -28,9 +28,7 @@
     static void installTrackEditHost();
     static void installTrackFreezeHost();
     static void installCommandHost();
-    static void installTrackControlHost();
     static void syncNative(void* host);
-    std::shared_ptr<Track> makeTrack(uint32_t id, const std::string& name, Track::Type type);
     void publishTrackSnapshotLocked(bool stampAudioGeneration);
     // Installs the sandbox maintenance callbacks Rust drives; see part_3a.
     static void installSandboxMaintenanceHost();

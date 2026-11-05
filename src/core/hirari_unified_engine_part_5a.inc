@@ -36,8 +36,8 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (engine->m_masterLimiter) hirari_master_limiter_reset(engine->m_masterLimiter);
             std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            for (Track* track : engine->lockedTracks()) {
-                if (track) track->resetForOfflineRender();
+            for (void* track : engine->lockedTracks()) {
+                if (track) hirari_track_reset_for_offline_render(track);
             }
         },
         // The plan walk is Rust's (bounce_driver.rs): it pins the tracks, reads

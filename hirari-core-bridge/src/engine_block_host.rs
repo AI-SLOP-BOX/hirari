@@ -14,14 +14,13 @@
 //! [`hirari_engine_block_begin`], [`hirari_engine_block_route`] and
 //! [`hirari_engine_block_finish`] around the device buffer it is rendering.
 //!
-//! Tracks stay C++ objects, but every read and write the block makes on one is
-//! now a Rust call on a storage handle it asks for by kind -- the runtime, the
-//! channel strip, the articulation state, the MIDI input buffer and a bus's
-//! stage. What stays in the published operations table is the handle selection,
-//! the track's role, the armed recorder and the control-edit protocol (the
-//! frozen-render drop and the layout-revision bump) that a drained command keeps
-//! around its store write. Every tap buffer the walk reads is already bound in
-//! the track's [`TrackRuntime`].
+//! Tracks are Rust objects ([`crate::engine_track`]), and every read and write
+//! the block makes on one is a direct call on the storage handle it asks for by
+//! kind -- the runtime, the channel strip, the articulation state, the MIDI input
+//! buffer and a bus's stage. The only protocol still around a store write is the
+//! control-edit pair: drop the frozen render before it, bump the layout revision
+//! after it. Every tap buffer the walk reads is already bound in the track's
+//! [`TrackRuntime`].
 
 use crate::audio_buffer_ops::{
     hirari_audio_add_sanitized_stereo, hirari_audio_buffer_storage_channels,
@@ -54,6 +53,11 @@ use crate::control_room_runtime::{
 use crate::engine_input_block::{hirari_input_blocks_take_monitor, hirari_input_blocks_take_talkback};
 use crate::engine_rings::{hirari_engine_command_ring_pop, CommandRecord, EngineRings};
 use crate::engine_clock::{hirari_engine_chunk_plan, CHUNK_RESTART_PLAYHEAD};
+use crate::engine_track::{
+    hirari_track_begin_edit, hirari_track_end_edit, hirari_track_record_state,
+    hirari_track_storage, hirari_track_type_byte, STORAGE_ARTICULATION, STORAGE_BUS_STATE,
+    STORAGE_PLUGIN_MIDI, STORAGE_RUNTIME, STORAGE_STRIP,
+};
 use crate::engine_track_table::{
     hirari_engine_track_count, hirari_engine_track_ptrs, hirari_engine_track_snapshot,
     HirariTrackSnapshot,
@@ -161,39 +165,10 @@ impl Default for HirariEngineTelemetry {
     }
 }
 
-/// The track storages [`HirariEngineBlockOps::storage`] reaches, mirroring
-/// `HirariEngineTrackStorageKind`.
-pub const TRACK_RUNTIME: u32 = 0;
-pub const TRACK_STRIP: u32 = 1;
-pub const TRACK_ARTICULATION: u32 = 2;
-pub const TRACK_PLUGIN_MIDI: u32 = 3;
-pub const TRACK_BUS_STATE: u32 = 4;
-
-/// `Track::Type`, so the block decides a track's role from the same byte the
-/// C++ model stores.
+/// The track's role, as the byte [`crate::engine_track`] reports it.
 const TRACK_TYPE_MIDI: u8 = 1;
 const TRACK_TYPE_INSTRUMENT: u8 = 2;
 const TRACK_TYPE_BUS: u8 = 3;
-
-/// The per-track operations the engine block needs from C++. Every read the
-/// block makes on a track is now a Rust call on a handle it supplies, so what
-/// stays here is the handle selection, the track's role and the control-side
-/// edit protocol.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariEngineBlockOps {
-    /// The track's own storage selected by one of the `TRACK_*` kinds, or null
-    /// when the track has none of that kind.
-    pub storage: Option<unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void>,
-    /// The track's `Type` as a byte.
-    pub track_type: Option<unsafe extern "C" fn(*mut c_void) -> u8>,
-    /// Drops the frozen render before a store write, as a control edit does.
-    pub begin_edit: Option<unsafe extern "C" fn(*mut c_void)>,
-    /// Bumps the layout revision after a store write.
-    pub end_edit: Option<unsafe extern "C" fn(*mut c_void)>,
-    /// Captures the fader and pan of one armed recorder.
-    pub record: Option<unsafe extern "C" fn(*mut c_void, u64)>,
-}
 
 /// Every handle the block borrows from the engine, bound once at creation. The
 /// engine owns each of them for at least as long as the returned state.
@@ -282,7 +257,6 @@ impl View {
 }
 
 pub struct EngineBlockState {
-    ops: HirariEngineBlockOps,
     routing: *mut c_void,
     track_table: *mut c_void,
     bounce: *mut c_void,
@@ -350,38 +324,30 @@ fn block(state: *const c_void) -> Option<&'static EngineBlockState> {
 
 impl EngineBlockState {
     fn storage(&self, track: *mut c_void, kind: u32) -> *mut c_void {
-        let Some(op) = self.ops.storage else {
-            return ptr::null_mut();
-        };
-        unsafe { op(track, kind) }
+        unsafe { hirari_track_storage(track, kind) }
     }
 
     fn track_type(&self, track: *mut c_void) -> u8 {
-        let Some(op) = self.ops.track_type else {
-            return 0;
-        };
-        unsafe { op(track) }
+        unsafe { hirari_track_type_byte(track) }
     }
 
     fn runtime(&self, track: *mut c_void) -> Option<&'static TrackRuntime> {
-        track_runtime::runtime(self.storage(track, TRACK_RUNTIME))
+        track_runtime::runtime(self.storage(track, STORAGE_RUNTIME))
     }
 
     fn bus_state(&self, track: *mut c_void) -> *mut c_void {
         if self.track_type(track) != TRACK_TYPE_BUS {
             return ptr::null_mut();
         }
-        self.storage(track, TRACK_BUS_STATE)
+        self.storage(track, STORAGE_BUS_STATE)
     }
 
     fn solo(&self, track: *mut c_void) -> bool {
-        unsafe { hirari_channel_strip_is_solo(self.storage(track, TRACK_STRIP)) }
+        unsafe { hirari_channel_strip_is_solo(self.storage(track, STORAGE_STRIP)) }
     }
 
     fn record(&self, track: *mut c_void, playhead: u64) {
-        if let Some(op) = self.ops.record {
-            unsafe { op(track, playhead) };
-        }
+        unsafe { hirari_track_record_state(track, playhead) };
     }
 
     fn click(&self, side: usize) -> *mut f32 {
@@ -449,11 +415,11 @@ impl EngineBlockState {
     }
 
     fn articulation(&self, track: *mut c_void) -> *mut c_void {
-        self.storage(track, TRACK_ARTICULATION)
+        self.storage(track, STORAGE_ARTICULATION)
     }
 
     fn plugin_midi(&self, track: *mut c_void) -> *mut c_void {
-        self.storage(track, TRACK_PLUGIN_MIDI)
+        self.storage(track, STORAGE_PLUGIN_MIDI)
     }
 
     /// One slot of the held preview-voice table, or null when the pair is out of
@@ -659,28 +625,23 @@ impl EngineBlockState {
     }
 
     /// Writes one drained command to the track's own storage under the control
-    /// edit protocol the C++ setter applied around it: the fader, pan and solo
-    /// live on the channel strip, mute on the runtime.
+    /// edit protocol the track keeps: the fader, pan and solo live on the
+    /// channel strip, mute on the runtime.
     fn apply_scalar(&self, track: *mut c_void, command: u32, value: f32) {
-        let Some(op) = self.ops.begin_edit else {
-            return;
-        };
-        unsafe { op(track) };
-        let strip = self.storage(track, TRACK_STRIP);
+        unsafe { hirari_track_begin_edit(track) };
+        let strip = self.storage(track, STORAGE_STRIP);
         match command {
             AUDIO_COMMAND_VOLUME => unsafe { hirari_channel_strip_set_gain(strip, value) },
             AUDIO_COMMAND_PAN => unsafe { hirari_channel_strip_set_pan(strip, value) },
             AUDIO_COMMAND_MUTE => unsafe {
                 hirari_track_runtime_set_muted(
-                    self.storage(track, TRACK_RUNTIME),
+                    self.storage(track, STORAGE_RUNTIME),
                     u8::from(value >= 0.5),
                 )
             },
             _ => unsafe { hirari_channel_strip_set_solo(strip, value >= 0.5) },
         }
-        if let Some(op) = self.ops.end_edit {
-            unsafe { op(track) };
-        }
+        unsafe { hirari_track_end_edit(track) };
     }
 
     /// Hands the timeline's scheduled notes to the graph: a note addressed to a
@@ -1843,9 +1804,7 @@ pub unsafe extern "C" fn hirari_engine_block_prepare_tracks(
             continue;
         };
         if runtime.invalidate_stale_freeze(rate) {
-            if let Some(op) = state.ops.end_edit {
-                unsafe { op(track) };
-            }
+            unsafe { hirari_track_end_edit(track) };
         }
         let status = runtime.prepare(track, sample_rate, block_frames);
         if status != 0 {
@@ -1929,11 +1888,10 @@ pub unsafe extern "C" fn hirari_engine_block_clear_midi_events(state: *mut c_voi
 /// Binds an engine's block. Every handle must outlive the returned state.
 ///
 /// # Safety
-/// `ops` and `handles` are read once; the handles belong to this one engine.
+/// `handles` are read once; they belong to this one engine.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_create(
     handles: HirariEngineBlockHandles,
-    ops: *const HirariEngineBlockOps,
 ) -> *mut c_void {
     // The walk writes these from the audio callback only, so they are bound once
     // here instead of rebuilt for every block.
@@ -1977,11 +1935,6 @@ pub unsafe extern "C" fn hirari_engine_block_create(
     std::mem::forget(graph_ids);
     std::mem::forget(process_order);
     Box::into_raw(Box::new(EngineBlockState {
-        ops: if ops.is_null() {
-            HirariEngineBlockOps::default()
-        } else {
-            unsafe { *ops }
-        },
         routing: handles.routing,
         track_table: handles.track_table,
         bounce: handles.bounce,

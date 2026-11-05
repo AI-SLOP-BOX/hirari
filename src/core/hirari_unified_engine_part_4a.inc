@@ -10,11 +10,11 @@
 bool HirariUnifiedEngine::append_region_processing(uint32_t tid, uint32_t rid, uint32_t stepId, std::string_view operation, float parameter, bool enabled) {
     const HirariEventStep step{stepId, reinterpret_cast<const uint8_t*>(operation.data()),
                                operation.size(), parameter, enabled};
-    Track* track = findPublishedTrack(tid);
+    void* track = findPublishedTrack(tid);
     return track != nullptr && hirari_region_store_append_processing(track, rid, step);
 }
 bool HirariUnifiedEngine::clear_region_processing(uint32_t tid, uint32_t rid) {
-    Track* track = findPublishedTrack(tid);
+    void* track = findPublishedTrack(tid);
     return track != nullptr && hirari_region_store_clear_processing(track, rid);
 }
 
@@ -50,7 +50,27 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
         // sidechain, plugin index, missing allocation, or unsupported audio
         // state; none of those failures may erase the user's open project.
         std::unique_lock<std::mutex> lock(m_tracksMutex);
-        std::vector<std::shared_ptr<Track>> loadedTracks;
+        // A provisional track is a Rust object plus the owning handle that keeps
+        // it alive until the graph takes the handle over at the commit point. If
+        // hydration fails, releasing the handle tears the track down again.
+        struct Provisional {
+            void* owner = nullptr;
+            void* track = nullptr;
+            Provisional(void* ownerHandle, void* object) : owner(ownerHandle), track(object) {}
+            Provisional(Provisional&& other) noexcept
+                : owner(other.owner), track(other.track) { other.owner = nullptr; }
+            Provisional(const Provisional&) = delete;
+            ~Provisional() {
+                if (owner) hirari_track_owner_release(owner);
+            }
+            // Gives the graph the handle and stops this entry from releasing it.
+            void* commit() {
+                void* taken = owner;
+                owner = nullptr;
+                return taken;
+            }
+        };
+        std::vector<Provisional> loadedTracks;
         loadedTracks.reserve(state.tracks.size());
         // The plugin chain and curves are rebuilt by Rust once every provisional
         // track exists, so the loader hands it each track's own store handles.
@@ -58,32 +78,30 @@ bool HirariUnifiedEngine::loadProject(std::string_view path) {
         pluginTargets.reserve(state.tracks.size());
         // 1. Hydrate Tracks
         for (const auto& ts : state.tracks) {
-            const auto trackType = static_cast<Track::Type>(ts.trackType);
             const std::string trackName = std::string(ts.pluginName);
-            std::shared_ptr<Track> t;
-            if (trackType == Track::Type::Bus) {
-                auto busTrack = std::make_shared<BusTrack>(
-                    ts.id, trackName.empty() ? "Bus" : trackName, ts.id,
-                    m_projectLayoutRevision);
-                // Do not mutate the process/session bus summing system while the
-                // replacement document is still provisional. If hydration
-                // later fails, the old project must remain the only visible
-                // routing state. Resolve the bus after the commit point.
-                t = std::move(busTrack);
-            } else {
-                t = std::make_shared<Track>(ts.id,
-                    trackName.empty() ? "Track" : trackName, trackType,
-                    m_projectLayoutRevision);
-            }
-            t->setVolume(ts.volume);
-            t->setPan(ts.pan);
-            t->setMuted(ts.muted);
-            t->setSolo(ts.solo);
-            t->setPhaseInverted(ts.phaseInvert);
-            t->setRecordArmed(ts.recordArmed);
-            t->setTrackDelaySamples(ts.trackDelaySamples);
-            t->setSpatialPosition(ts.pan3d_x, ts.pan3d_y, ts.pan3d_z);
+            const std::string named = trackName.empty()
+                ? (ts.trackType == kHirariTrackKindBus ? "Bus" : "Track")
+                : trackName;
+            void* track = nullptr;
+            void* owner = hirari_track_new(
+                ts.id, reinterpret_cast<const uint8_t*>(named.data()), named.size(),
+                ts.trackType, m_layoutRevision, &track);
+            if (!owner) return false;
+            // A bus keeps its slot only once the bus system resolves it after the
+            // commit point; while provisional it must not touch the summing system.
+            loadedTracks.emplace_back(owner, track);
+            hirari_track_set_volume(track, ts.volume);
+            hirari_track_set_pan(track, ts.pan);
+            hirari_track_set_muted(track, ts.muted);
+            hirari_track_set_solo(track, ts.solo);
+            hirari_track_set_phase_inverted(track, ts.phaseInvert);
+            (void)hirari_track_set_record_armed(track, ts.recordArmed);
+            hirari_track_set_delay_samples(track, ts.trackDelaySamples);
+            hirari_track_set_spatial(track, ts.pan3d_x, ts.pan3d_y, ts.pan3d_z);
             pluginTargets.push_back(::Hirari::Core::Bridge::NativeTrackStorages{
                 ts.id, ts.trackType,
-                reinterpret_cast<size_t>(t->effectChainHandle()),
-                reinterpret_cast<size_t>(t->automationStoreHandle())});
+                reinterpret_cast<size_t>(
+                    hirari_track_storage(track, kHirariTrackStoreChain)),
+                reinterpret_cast<size_t>(
+                    hirari_track_storage(track, kHirariTrackStoreAutomation))});
+        }

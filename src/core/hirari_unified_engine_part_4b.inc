@@ -1,6 +1,3 @@
-            loadedTracks.push_back(t);
-        }
-
         // Rust rebuilds each chain and curve set from the decoded document now
         // that every provisional track has its stores. An insert the engine
         // cannot create fails hydration, leaving the previous project published.
@@ -16,10 +13,10 @@
         // only names the provisional tracks the regions install into.
         rust::Vec<::Hirari::Core::Bridge::NativeTrackHandle> regionTracks;
         regionTracks.reserve(loadedTracks.size());
-        for (const auto& track : loadedTracks) {
+        for (const auto& entry : loadedTracks) {
             regionTracks.push_back(
-                ::Hirari::Core::Bridge::NativeTrackHandle{track->getId(),
-                    reinterpret_cast<size_t>(track.get())});
+                ::Hirari::Core::Bridge::NativeTrackHandle{hirari_track_id(entry.track),
+                    reinterpret_cast<size_t>(entry.track)});
         }
         if (!::Hirari::Core::Bridge::native_project_hydrate_regions(
                 state, regionTracks, projectSampleRate)) {
@@ -30,10 +27,10 @@
         // This catches invalid plugin/buffer state while the old project is
         // still published; a later prepare failure must not leave the engine
         // with an empty or half-hydrated graph.
-        for (const auto& track : loadedTracks) {
-            if (!track) return false;
-            track->prepareToPlay(projectSampleRate, currentBlockSize);
-            if (!track->canProcess(currentBlockSize)) return false;
+        for (const auto& entry : loadedTracks) {
+            if (!entry.track) return false;
+            (void)hirari_track_prepare(entry.track, projectSampleRate, currentBlockSize);
+            if (!hirari_track_can_process(entry.track, currentBlockSize)) return false;
         }
         
         // Commit point: all validation and hydration above completed while
@@ -43,10 +40,9 @@
         hirari_engine_reset_project(m_trackTable, m_engineRings, m_pdcState,
                                     m_sidechainEngine, m_routingEngine, m_busSystem,
                                     m_controlRoomState, m_sidechainRoutes);
-        for (auto& track : loadedTracks) {
-            Track* raw = track.get();
+        for (auto& entry : loadedTracks) {
             (void)hirari_engine_track_insert(m_trackTable, std::numeric_limits<size_t>::max(),
-                                   newTrackHandle(std::move(track)), raw);
+                                             entry.commit());
         }
         loadedTracks.clear();
         mark_project_layout_changed();
@@ -55,12 +51,11 @@
                 m_routingEngine, route.sourceId, route.destinationId, route.gain,
                 route.send, route.preFader);
         }
-        for (Track* track : lockedTracks()) {
-            if (auto* busTrack = dynamic_cast<BusTrack*>(track)) {
-                const uint32_t busId = busTrack->busId();
-                busTrack->resolveBus(hirari_bus_system_register(m_busSystem, busId)
-                    ? hirari_bus_system_bus(m_busSystem, busId) : nullptr);
-            }
+        for (void* track : lockedTracks()) {
+            if (hirari_track_type(track) != kHirariTrackKindBus) continue;
+            const uint32_t busId = hirari_track_id(track);
+            hirari_track_resolve_bus(track, hirari_bus_system_register(m_busSystem, busId)
+                ? hirari_bus_system_bus(m_busSystem, busId) : nullptr, true);
         }
         lock.unlock();
         hirari_ids_seed_from_project(this);

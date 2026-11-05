@@ -1,10 +1,11 @@
 //! Engine track table: the live document graph.
 //!
 //! The engine used to keep `std::vector<std::shared_ptr<Track>>`, a deferred
-//! destruction list and a double-buffered audio-thread snapshot in C++. Order,
-//! identity resolution, retirement and lock-free publication now live here. The
-//! `Track` objects themselves stay C++ because their processing is virtual, and
-//! this module only ever moves the opaque handles around.
+//! destruction list and a double-buffered audio-thread snapshot in C++. The
+//! tracks themselves are Rust now ([`crate::engine_track`]), so this module
+//! holds their arcs outright: order, identity resolution, retirement and
+//! lock-free publication all read a track's id, role, bus slot and latency
+//! without calling back into native code.
 //!
 //! Lock discipline: every mutator and every control-thread reader runs while
 //! the engine's tracks lock is held, exactly as the C++ container did. The
@@ -12,27 +13,11 @@
 //! publication fills the buffer the callback is not reading and only then flips
 //! the index.
 
+use crate::bus_audio::MAX_BUSES;
+use crate::engine_track::{Track, NO_BUS_ID, TRACK_TYPE_BUS};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicUsize, Ordering};
-
-/// Mirrors `HirariEngineTrackOps` in `src/core/rust_ffi.hpp`.
-#[repr(C)]
-pub struct HirariEngineTrackOps {
-    pub id: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    pub clone_owner: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
-    pub destroy_owner: Option<unsafe extern "C" fn(*mut c_void)>,
-    /// `Track::Type` as its numeric value; 3 is a bus.
-    pub track_type: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    /// The bus slot a bus track occupies, or [`NO_BUS_ID`] for every other kind.
-    pub bus_id: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    /// The track's own reported latency, the input to the PDC solve.
-    pub latency: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
-    /// Applies a solved PDC offset to one track.
-    pub set_pdc_offset: Option<unsafe extern "C" fn(*mut c_void, u32)>,
-}
-
-/// A track that is not a bus has no bus slot.
-pub const NO_BUS_ID: u32 = u32::MAX;
+use std::sync::Arc;
 
 /// Matches `HirariUnifiedEngine::kMaxTracks`.
 const MAX_ACTIVE_TRACKS: usize = 256;
@@ -61,55 +46,29 @@ impl Snapshot {
 }
 
 pub struct EngineTrackTable {
-    ops: *const HirariEngineTrackOps,
-    /// `std::shared_ptr<Track>*` handles owned by this table, in graph order.
-    owners: Vec<*mut c_void>,
-    /// The `Track*` behind each handle, kept parallel to `owners` so a
-    /// control-thread walk needs no per-entry call into C++.
+    /// The graph, in order. Holding the arc is what runs the track's drop order
+    /// once its last reference goes.
+    owners: Vec<Arc<Track>>,
+    /// The object pointer behind each arc, kept parallel to `owners` so a
+    /// control-thread walk and the published snapshot need no dereference.
     raws: Vec<*mut c_void>,
     /// Retired tracks. A device callback may still hold their pointers, so the
-    /// engine destroys them at shutdown instead of at detach time.
-    deferred: Vec<*mut c_void>,
+    /// engine releases them at shutdown instead of at detach time.
+    deferred: Vec<Arc<Track>>,
     snapshots: [Snapshot; 2],
     active_index: AtomicUsize,
 }
 
 impl EngineTrackTable {
-    fn id(&self, track: *mut c_void) -> u32 {
-        let op = unsafe { (*self.ops).id }.expect("track id op");
-        unsafe { op(track) }
-    }
-
-    fn clone_owner(&self, owner: *mut c_void) -> *mut c_void {
-        let op = unsafe { (*self.ops).clone_owner }.expect("track clone op");
-        unsafe { op(owner) }
-    }
-
-    /// The release op read out of the table so a drain loop can destroy handles
-    /// while it still holds the owning vector.
-    fn destroy_op(&self) -> unsafe extern "C" fn(*mut c_void) {
-        unsafe { (*self.ops).destroy_owner }.expect("track destroy op")
-    }
-
     fn index_of(&self, track_id: u32) -> Option<usize> {
-        self.raws
-            .iter()
-            .position(|&track| !track.is_null() && self.id(track) == track_id)
+        self.owners.iter().position(|track| track.id() == track_id)
     }
 
-    fn destroy_owners(&mut self) {
-        let destroy = self.destroy_op();
-        for owner in self.owners.drain(..) {
-            unsafe { destroy(owner) };
-        }
-        self.raws.clear();
-    }
-
-    fn destroy_deferred(&mut self) {
-        let destroy = self.destroy_op();
-        for owner in self.deferred.drain(..) {
-            unsafe { destroy(owner) };
-        }
+    fn insert_owner(&mut self, index: usize, track: Arc<Track>) {
+        let at = index.min(self.owners.len());
+        let object = Arc::as_ptr(&track).cast_mut().cast();
+        self.owners.insert(at, track);
+        self.raws.insert(at, object);
     }
 
     /// Publishes the active list and the id map. `stamp` decides whether the
@@ -124,23 +83,17 @@ impl EngineTrackTable {
         } else {
             self.snapshots[current].generation
         };
-        let id = unsafe { (*self.ops).id }.expect("track id op");
-        let raws = &self.raws;
         let buffer = &mut self.snapshots[next];
         buffer.active.fill(std::ptr::null_mut());
         buffer.track_map.fill(std::ptr::null_mut());
         buffer.count = 0;
         buffer.generation = generation;
-        for &track in raws
-            .iter()
-            .filter(|track| !track.is_null())
-            .take(MAX_ACTIVE_TRACKS)
-        {
+        for (&track, owner) in self.raws.iter().zip(&self.owners).take(MAX_ACTIVE_TRACKS) {
             buffer.active[buffer.count as usize] = track;
             buffer.count += 1;
-            let id = unsafe { id(track) };
-            if (id as usize) < TRACK_MAP_LEN {
-                buffer.track_map[id as usize] = track;
+            let id = owner.id() as usize;
+            if id < TRACK_MAP_LEN {
+                buffer.track_map[id] = track;
             }
         }
         self.active_index.store(next, Ordering::Release);
@@ -158,35 +111,14 @@ impl EngineTrackTable {
         pdc: *mut c_void,
         generation: u64,
     ) {
-        let (id, track_type, bus_id, latency, set_offset) = unsafe {
-            (
-                (*self.ops).id,
-                (*self.ops).track_type,
-                (*self.ops).bus_id,
-                (*self.ops).latency,
-                (*self.ops).set_pdc_offset,
-            )
-        };
-        let (id, track_type, bus_id, latency, set_offset) = (
-            id.expect("track id op"),
-            track_type.expect("track type op"),
-            bus_id.expect("track bus id op"),
-            latency.expect("track latency op"),
-            set_offset.expect("track pdc offset op"),
-        );
-        let live: Vec<*mut c_void> = self
-            .raws
-            .iter()
-            .copied()
-            .filter(|track| !track.is_null())
-            .collect();
+        let live = self.owners.clone();
 
-        let mut active_buses = vec![false; crate::bus_audio::MAX_BUSES];
-        for &track in &live {
-            if unsafe { track_type(track) } != crate::track_edit_host::TRACK_TYPE_BUS {
+        let mut active_buses = vec![false; MAX_BUSES];
+        for track in &live {
+            if track.kind() != TRACK_TYPE_BUS {
                 continue;
             }
-            let slot = unsafe { bus_id(track) };
+            let slot = track.bus_slot();
             if slot != NO_BUS_ID && (slot as usize) < active_buses.len() {
                 active_buses[slot as usize] = true;
             }
@@ -203,14 +135,14 @@ impl EngineTrackTable {
 
         let mut configs = Vec::with_capacity(live.len());
         let mut compensated = Vec::with_capacity(live.len());
-        for &track in &live {
-            let track_id = unsafe { id(track) };
-            if track_id as usize >= crate::native_pdc::MAX_TRACKS {
+        for track in &live {
+            let id = track.id();
+            if id as usize >= crate::native_pdc::MAX_TRACKS {
                 continue;
             }
             configs.push(crate::native_pdc::PdcTrackConfig {
-                id: track_id,
-                latency_samples: unsafe { latency(track) },
+                id,
+                latency_samples: track.latency_samples(),
             });
             compensated.push(track);
         }
@@ -218,13 +150,13 @@ impl EngineTrackTable {
         let solved =
             crate::native_pdc::sync_graph(pdc, routing, &configs, offsets.as_mut_slice());
         for (&track, offset) in compensated.iter().zip(offsets).take(solved) {
-            unsafe { set_offset(track, offset) };
+            track.apply_pdc_offset(offset);
         }
     }
 
     /// The project-load commit point, in the order the audio path needs: the
     /// outgoing graph loses its sidechain entries by id, every project-scoped
-    /// manager is reset, then the old tracks are destroyed because the
+    /// manager is reset, then the old tracks are released because the
     /// replacement graph is already validated. The caller inserts the new tracks
     /// after this returns.
     fn reset_project(
@@ -237,12 +169,7 @@ impl EngineTrackTable {
         control_room: *mut c_void,
         sidechain_routes: *mut c_void,
     ) {
-        let ids: Vec<u32> = self
-            .raws
-            .iter()
-            .filter(|track| !track.is_null())
-            .map(|&track| self.id(track))
-            .collect();
+        let ids: Vec<u32> = self.owners.iter().map(|track| track.id()).collect();
         for track in ids {
             unsafe {
                 crate::sidechain_manager::hirari_sidechain_engine_remove_track(sidechain, track)
@@ -257,28 +184,30 @@ impl EngineTrackTable {
             crate::control_room_runtime::hirari_control_room_reset(control_room);
             crate::sidechain_route_store::hirari_sidechain_routes_clear(sidechain_routes.cast());
         }
-        self.destroy_owners();
+        self.owners.clear();
+        self.raws.clear();
     }
 }
 
 impl Drop for EngineTrackTable {
     fn drop(&mut self) {
-        self.destroy_owners();
-        self.destroy_deferred();
+        self.owners.clear();
+        self.raws.clear();
+        self.deferred.clear();
     }
 }
 
+/// An owning handle for one track, released by [`hirari_track_owner_release`].
+fn owner_handle(track: Arc<Track>) -> *mut c_void {
+    Box::into_raw(Box::new(track)).cast()
+}
+
 /// # Safety
-/// `ops` must point at a table that outlives the returned engine track table.
+/// The returned handle must be passed to the other `hirari_engine_track_*`
+/// entry points, or be null.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_engine_track_table_create(
-    ops: *const HirariEngineTrackOps,
-) -> *mut c_void {
-    if ops.is_null() {
-        return std::ptr::null_mut();
-    }
+pub extern "C" fn hirari_engine_track_table_create() -> *mut c_void {
     let table = EngineTrackTable {
-        ops,
         owners: Vec::new(),
         raws: Vec::new(),
         deferred: Vec::new(),
@@ -291,7 +220,7 @@ pub unsafe extern "C" fn hirari_engine_track_table_create(
 /// # Safety
 /// `table` must be null or a pointer from [`hirari_engine_track_table_create`],
 /// and no track pointer handed to the realtime callback may still be in use.
-/// Dropping the table destroys every handle it owns.
+/// Dropping the table releases every track it owns.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_track_table_destroy(table: *mut c_void) {
     if !table.is_null() {
@@ -313,12 +242,12 @@ fn as_table_mut<'a>(handle: *mut c_void) -> Option<&'a mut EngineTrackTable> {
 /// `table` must be null or a pointer from [`hirari_engine_track_table_create`].
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_track_count(table: *const c_void) -> usize {
-    as_table(table).map_or(0, |table| table.raws.len())
+    as_table(table).map_or(0, |table| table.owners.len())
 }
 
-/// The live `Track*` list in graph order. The pointer is the vector's buffer,
-/// so it stays valid only while the engine tracks lock is held and no mutator
-/// runs.
+/// The live track object list in graph order. The pointer is the vector's
+/// buffer, so it stays valid only while the engine tracks lock is held and no
+/// mutator runs.
 ///
 /// # Safety
 /// `table` must be null or a pointer from [`hirari_engine_track_table_create`].
@@ -327,7 +256,8 @@ pub unsafe extern "C" fn hirari_engine_track_ptrs(table: *const c_void) -> *cons
     as_table(table).map_or_else(std::ptr::null, |table| table.raws.as_ptr())
 }
 
-/// Resolves a track id to its `Track*`, or null when the id is not in the graph.
+/// Resolves a track id to its object pointer, or null when the id is not in the
+/// graph.
 ///
 /// # Safety
 /// `table` must be null or a pointer from [`hirari_engine_track_table_create`].
@@ -359,12 +289,11 @@ pub unsafe extern "C" fn hirari_engine_track_index_of(
     table.index_of(track_id).unwrap_or(usize::MAX)
 }
 
-/// Clones the owning handle of one track, or returns null when the id is gone.
+/// A fresh owning handle for the track with this id, or null. The caller
+/// releases it with [`hirari_track_owner_release`].
 ///
 /// # Safety
 /// `table` must be null or a pointer from [`hirari_engine_track_table_create`].
-/// The caller owns the returned handle and releases it by deleting the C++
-/// `std::shared_ptr<Track>` it points at.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_track_retain(
     table: *const c_void,
@@ -376,65 +305,33 @@ pub unsafe extern "C" fn hirari_engine_track_retain(
     table
         .index_of(track_id)
         .map_or(std::ptr::null_mut(), |index| {
-            table.clone_owner(table.owners[index])
+            owner_handle(table.owners[index].clone())
         })
 }
 
-/// Takes over `owner` at `index`, clamped to the end of the graph, so an
-/// appending caller passes `usize::MAX`. `track` must be the object `owner`
-/// points at; a null owner is rejected so a failed construction cannot leave a
-/// hole.
+/// Takes over `owner`, the owning handle [`hirari_track_new`] returned, at
+/// `index`, clamped to the end of the graph, so an appending caller passes
+/// `usize::MAX`. A null owner is rejected so a failed construction cannot leave
+/// a hole.
 ///
 /// # Safety
-/// `table` must come from [`hirari_engine_track_table_create`], `owner` must be
-/// a heap handle nobody else frees, and `track` must be the object inside it.
+/// `table` must come from [`hirari_engine_track_table_create`] and `owner` must
+/// be an owning handle nobody else frees.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_track_insert(
     table: *mut c_void,
     index: usize,
     owner: *mut c_void,
-    track: *mut c_void,
 ) -> bool {
     if owner.is_null() {
         return false;
     }
-    as_table_mut(table).is_some_and(|table| {
-        let at = index.min(table.owners.len());
-        table.owners.insert(at, owner);
-        table.raws.insert(at, track);
-        true
-    })
-}
-
-/// Clones one owning handle, so a track can sit in the graph and be held by an
-/// edit at the same time. Null when `owner` is null.
-///
-/// # Safety
-/// `table` must come from [`hirari_engine_track_table_create`] and `owner` must
-/// be a handle that table or one of its callers owns.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_engine_track_owner_retain(
-    table: *const c_void,
-    owner: *mut c_void,
-) -> *mut c_void {
-    if owner.is_null() {
-        return std::ptr::null_mut();
-    }
-    as_table(table).map_or(std::ptr::null_mut(), |table| table.clone_owner(owner))
-}
-
-/// The deleter this table releases owning handles with. An undo capture can
-/// outlive the engine that built the track, so it keeps this pointer — the ops
-/// table it is read from has static storage — instead of the table itself. Null
-/// when `table` is not a live table or has no deleter.
-///
-/// # Safety
-/// `table` must come from [`hirari_engine_track_table_create`].
-#[no_mangle]
-pub unsafe extern "C" fn hirari_engine_track_owner_deleter(
-    table: *const c_void,
-) -> Option<unsafe extern "C" fn(*mut c_void)> {
-    as_table(table).and_then(|table| unsafe { (*table.ops).destroy_owner })
+    let Some(table) = as_table_mut(table) else {
+        return false;
+    };
+    let track = unsafe { *Box::from_raw(owner.cast::<Arc<Track>>()) };
+    table.insert_owner(index, track);
+    true
 }
 
 /// Removes the track from the graph and keeps it alive in the deferred list.
@@ -443,8 +340,8 @@ pub unsafe extern "C" fn hirari_engine_track_owner_deleter(
 ///
 /// # Safety
 /// `table` must come from [`hirari_engine_track_table_create`] and the engine
-/// tracks lock must be held. The caller releases the returned handle by
-/// deleting the C++ `std::shared_ptr<Track>` it points at.
+/// tracks lock must be held. The caller releases the returned handle with
+/// [`hirari_track_owner_release`].
 #[no_mangle]
 pub unsafe extern "C" fn hirari_engine_track_detach(
     table: *mut c_void,
@@ -456,10 +353,11 @@ pub unsafe extern "C" fn hirari_engine_track_detach(
     let Some(index) = table.index_of(track_id) else {
         return std::ptr::null_mut();
     };
-    let owner = table.owners.remove(index);
+    let track = table.owners.remove(index);
     table.raws.remove(index);
-    table.deferred.push(owner);
-    table.clone_owner(owner)
+    let caller = owner_handle(track.clone());
+    table.deferred.push(track);
+    caller
 }
 
 /// Moves the whole live graph into the deferred list, which is what starting a
@@ -530,7 +428,15 @@ pub unsafe extern "C" fn hirari_engine_reset_project(
     sidechain_routes: *mut c_void,
 ) {
     if let Some(table) = as_table_mut(table) {
-        table.reset_project(rings, pdc, sidechain, routing, bus_system, control_room, sidechain_routes);
+        table.reset_project(
+            rings,
+            pdc,
+            sidechain,
+            routing,
+            bus_system,
+            control_room,
+            sidechain_routes,
+        );
     }
 }
 
@@ -573,180 +479,76 @@ pub unsafe extern "C" fn hirari_engine_track_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, MutexGuard};
-
-    /// Stand-in for the `Track`: destroyed when its last handle is released.
-    struct Shared {
-        id: u32,
-        refs: usize,
-    }
-
-    /// Stand-in for the heap `std::shared_ptr<Track>` the table owns.
-    struct Owner {
-        shared: *mut Shared,
-    }
-
-    static HANDLES: AtomicUsize = AtomicUsize::new(0);
-    static DESTROYED: Mutex<Vec<u32>> = Mutex::new(Vec::new());
-    /// The `(Track*, type, bus slot, latency)` the structural ops read for a
-    /// stand-in pointer, and the offsets `set_pdc_offset` was handed.
-    static FACTS: Mutex<Vec<(usize, u32, u32, u32)>> = Mutex::new(Vec::new());
-    static PDC_OFFSETS: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
-    /// The two counters are process-global, so the tests take this lock instead
-    /// of running concurrently and interleaving their accounting.
-    static SERIALIZED: Mutex<()> = Mutex::new(());
-
-    /// Takes the lock and clears the logs, so a test only ever sees the tracks
-    /// it created itself.
-    fn serialize() -> MutexGuard<'static, ()> {
-        let guard = SERIALIZED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        DESTROYED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
-        FACTS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
-        PDC_OFFSETS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clear();
-        guard
-    }
-
-    unsafe extern "C" fn raw_id(raw: *mut c_void) -> u32 {
-        raw as usize as u32
-    }
-
-    unsafe extern "C" fn clone_owner(owner: *mut c_void) -> *mut c_void {
-        let owner = unsafe { &*owner.cast::<Owner>() };
-        unsafe { (*owner.shared).refs += 1 };
-        HANDLES.fetch_add(1, Ordering::Relaxed);
-        Box::into_raw(Box::new(Owner {
-            shared: owner.shared,
-        }))
-        .cast()
-    }
-
-    unsafe extern "C" fn destroy_owner(owner: *mut c_void) {
-        let owner = unsafe { Box::from_raw(owner.cast::<Owner>()) };
-        HANDLES.fetch_sub(1, Ordering::Relaxed);
-        let shared = unsafe { &mut *owner.shared };
-        shared.refs -= 1;
-        if shared.refs == 0 {
-            DESTROYED
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .push(shared.id);
-            drop(unsafe { Box::from_raw(owner.shared) });
-        }
-    }
-
-    /// Reads one structural fact for a stand-in pointer; an unregistered track
-    /// answers as an audio track with no latency.
-    fn fact(raw: *mut c_void, select: impl Fn(&(usize, u32, u32, u32)) -> u32) -> u32 {
-        let facts = FACTS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        facts
-            .iter()
-            .find(|(track, ..)| *track == raw as usize)
-            .map_or(0, select)
-    }
-
-    fn set_facts(id: u32, track_type: u32, bus_id: u32, latency: u32) {
-        FACTS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push((raw(id) as usize, track_type, bus_id, latency));
-    }
-
-    fn pdc_offsets() -> Vec<(u32, u32)> {
-        let mut offsets = PDC_OFFSETS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut offsets)
-    }
-
-    unsafe extern "C" fn track_type(raw: *mut c_void) -> u32 {
-        fact(raw, |&(_, track_type, _, _)| track_type)
-    }
-
-    unsafe extern "C" fn bus_id(raw: *mut c_void) -> u32 {
-        fact(raw, |&(_, _, slot, _)| slot)
-    }
-
-    unsafe extern "C" fn latency(raw: *mut c_void) -> u32 {
-        fact(raw, |&(_, _, _, latency)| latency)
-    }
-
-    unsafe extern "C" fn set_pdc_offset(raw: *mut c_void, samples: u32) {
-        PDC_OFFSETS
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .push((unsafe { raw_id(raw) }, samples));
-    }
-
-    static OPS: HirariEngineTrackOps = HirariEngineTrackOps {
-        id: Some(raw_id),
-        clone_owner: Some(clone_owner),
-        destroy_owner: Some(destroy_owner),
-        track_type: Some(track_type),
-        bus_id: Some(bus_id),
-        latency: Some(latency),
-        set_pdc_offset: Some(set_pdc_offset),
+    use crate::engine_track::{
+        hirari_track_delay_samples, hirari_track_id, hirari_track_new, hirari_track_owner_object,
+        hirari_track_owner_release, hirari_track_pdc_requested, hirari_track_resolve_bus,
+        hirari_track_set_delay_samples, TRACK_TYPE_AUDIO,
     };
+    use std::sync::Weak;
 
-    /// The raw `Track*` the table publishes is this id, so a walk needs no
-    /// allocation and a test can read identity straight back out of a pointer.
-    fn raw(id: u32) -> *mut c_void {
-        id as usize as *mut c_void
+    /// Builds a track and hands the reference it owns to the graph, together
+    /// with the object pointer every entry point addresses it by and a
+    /// non-owning witness for the track's lifetime.
+    struct Made {
+        owner: *mut c_void,
+        object: *mut c_void,
+        witness: Weak<Track>,
     }
 
-    fn new_handle(id: u32) -> *mut c_void {
-        let shared = Box::into_raw(Box::new(Shared { id, refs: 1 }));
-        HANDLES.fetch_add(1, Ordering::Relaxed);
-        Box::into_raw(Box::new(Owner { shared })).cast()
-    }
-
-    fn owner_id(owner: *mut c_void) -> u32 {
-        unsafe { (*(*owner.cast::<Owner>()).shared).id }
-    }
-
-    fn release_handle(owner: *mut c_void) {
-        unsafe { destroy_owner(owner) };
-    }
-
-    fn live_handles() -> usize {
-        HANDLES.load(Ordering::Relaxed)
-    }
-
-    fn destroyed_tracks() -> Vec<u32> {
-        let mut log = DESTROYED
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        std::mem::take(&mut log)
+    fn build(id: u32, kind: u32) -> Made {
+        let name = b"t";
+        let mut object = std::ptr::null_mut();
+        let owner = unsafe {
+            hirari_track_new(
+                id,
+                name.as_ptr(),
+                name.len(),
+                kind,
+                std::ptr::null_mut(),
+                &mut object,
+            )
+        };
+        Made {
+            witness: unsafe { Arc::downgrade(&*owner.cast::<Arc<Track>>()) },
+            owner,
+            object,
+        }
     }
 
     struct Table(*mut c_void);
 
     impl Table {
         fn new() -> Self {
-            Table(unsafe { hirari_engine_track_table_create(&OPS) })
+            Table(unsafe { hirari_engine_track_table_create() })
         }
         fn get(&self) -> *mut c_void {
             self.0
         }
-        fn push(&self, id: u32) {
-            assert!(unsafe {
-                hirari_engine_track_insert(self.get(), usize::MAX, new_handle(id), raw(id))
-            });
+        /// Appends one track and returns it, so a test keeps only the pointers
+        /// that stay valid while the graph holds the reference.
+        fn add(&self, id: u32, kind: u32) -> (*mut c_void, Weak<Track>) {
+            let made = self.commit(id, kind);
+            (made.object, made.witness)
+        }
+        fn commit(&self, id: u32, kind: u32) -> Made {
+            let made = build(id, kind);
+            assert!(unsafe { hirari_engine_track_insert(self.get(), usize::MAX, made.owner) });
+            made
+        }
+        /// A bus track claims the slot its own id names, which is how the
+        /// engine resolves one once the graph is committed.
+        fn add_bus(&self, id: u32) -> (*mut c_void, Weak<Track>) {
+            let (object, witness) = self.add(id, TRACK_TYPE_BUS);
+            unsafe { hirari_track_resolve_bus(object, std::ptr::null_mut(), true) };
+            (object, witness)
         }
         fn publish(&self, generation: u64, stamp: bool) {
             unsafe { hirari_engine_track_publish(self.get(), generation, stamp) };
+        }
+        fn locked(&self) -> Vec<*mut c_void> {
+            let count = unsafe { hirari_engine_track_count(self.get()) };
+            unsafe { std::slice::from_raw_parts(hirari_engine_track_ptrs(self.get()), count) }
+                .to_vec()
         }
         fn snapshot(&self) -> HirariTrackSnapshot {
             let mut out = HirariTrackSnapshot::default();
@@ -762,29 +564,35 @@ mod tests {
         }
     }
 
-    fn published_ids(snapshot: &HirariTrackSnapshot) -> Vec<u32> {
-        (0..snapshot.track_count as usize)
-            .map(|index| unsafe { *snapshot.active_tracks.add(index) as usize as u32 })
+    fn ids(tracks: &[*mut c_void]) -> Vec<u32> {
+        tracks
+            .iter()
+            .map(|&track| unsafe { hirari_track_id(track) })
             .collect()
+    }
+
+    fn published_ids(snapshot: &HirariTrackSnapshot) -> Vec<u32> {
+        ids(&unsafe {
+            std::slice::from_raw_parts(snapshot.active_tracks, snapshot.track_count as usize)
+        })
     }
 
     fn mapped(snapshot: &HirariTrackSnapshot, id: u32) -> bool {
         !unsafe { *snapshot.track_map.add(id as usize) }.is_null()
     }
 
+    fn retained(witness: &Weak<Track>) -> bool {
+        witness.upgrade().is_some()
+    }
+
     #[test]
     fn graph_keeps_push_order_and_resolves_ids() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(7);
-        table.push(3);
+        let (first, _) = table.add(7, TRACK_TYPE_AUDIO);
+        let (second, _) = table.add(3, TRACK_TYPE_AUDIO);
         assert_eq!(unsafe { hirari_engine_track_count(table.get()) }, 2);
-        assert_eq!(
-            unsafe { std::slice::from_raw_parts(hirari_engine_track_ptrs(table.get()), 2) }
-                .to_vec(),
-            vec![raw(7), raw(3)]
-        );
-        assert_eq!(unsafe { hirari_engine_track_find(table.get(), 3) }, raw(3));
+        assert_eq!(table.locked(), vec![first, second]);
+        assert_eq!(unsafe { hirari_engine_track_find(table.get(), 3) }, second);
         assert_eq!(unsafe { hirari_engine_track_index_of(table.get(), 3) }, 1);
         assert!(unsafe { hirari_engine_track_find(table.get(), 9) }.is_null());
         assert_eq!(
@@ -795,59 +603,50 @@ mod tests {
 
     #[test]
     fn insert_clamps_the_index_and_rejects_a_null_owner() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(1);
-        table.push(2);
+        table.add(1, TRACK_TYPE_AUDIO);
+        table.add(2, TRACK_TYPE_AUDIO);
         assert!(!unsafe {
-            hirari_engine_track_insert(table.get(), usize::MAX, std::ptr::null_mut(), raw(3))
+            hirari_engine_track_insert(table.get(), usize::MAX, std::ptr::null_mut())
         });
-        assert!(unsafe { hirari_engine_track_insert(table.get(), 99, new_handle(3), raw(3)) });
-        assert!(unsafe { hirari_engine_track_insert(table.get(), 0, new_handle(4), raw(4)) });
-        assert_eq!(
-            unsafe { std::slice::from_raw_parts(hirari_engine_track_ptrs(table.get()), 4) }
-                .to_vec(),
-            vec![raw(4), raw(1), raw(2), raw(3)]
-        );
+        let tail = build(3, TRACK_TYPE_AUDIO);
+        assert!(unsafe { hirari_engine_track_insert(table.get(), 99, tail.owner) });
+        let head = build(4, TRACK_TYPE_AUDIO);
+        assert!(unsafe { hirari_engine_track_insert(table.get(), 0, head.owner) });
+        assert_eq!(ids(&table.locked()), vec![4, 1, 2, 3]);
         assert_eq!(unsafe { hirari_engine_track_index_of(table.get(), 3) }, 3);
     }
 
     #[test]
     fn detach_returns_a_second_reference_and_defers_the_track() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(11);
-        table.push(12);
-        let before = live_handles();
+        table.add(11, TRACK_TYPE_AUDIO);
+        let kept = table.commit(12, TRACK_TYPE_AUDIO);
         let detached = unsafe { hirari_engine_track_detach(table.get(), 11) };
         assert!(!detached.is_null());
-        assert_eq!(owner_id(detached), 11);
+        assert_eq!(unsafe { hirari_track_id(hirari_track_owner_object(detached)) }, 11);
         assert_eq!(unsafe { hirari_engine_track_count(table.get()) }, 1);
-        assert_eq!(live_handles(), before + 1);
-        release_handle(detached);
         // The caller's reference is gone but the deferred list still holds the
         // track, so no audio-thread pointer can dangle.
-        assert_eq!(live_handles(), before);
-        assert!(destroyed_tracks().is_empty());
+        unsafe { hirari_track_owner_release(detached) };
         assert!(unsafe { hirari_engine_track_detach(table.get(), 99) }.is_null());
-        // Dropping the table releases the live handles first, then the deferred
-        // ones, so every track the callback may have seen is destroyed.
+        // Dropping the table releases every track the callback may have seen.
+        assert!(retained(&kept.witness));
         drop(table);
-        assert_eq!(destroyed_tracks(), vec![12, 11]);
+        assert!(!retained(&kept.witness));
     }
 
     #[test]
     fn publish_stamps_the_generation_and_detach_clears_the_id_map() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(21);
-        table.push(22);
+        table.add(21, TRACK_TYPE_AUDIO);
+        table.add(22, TRACK_TYPE_AUDIO);
         table.publish(7, true);
         let snapshot = table.snapshot();
         assert_eq!(published_ids(&snapshot), vec![21, 22]);
         assert_eq!(snapshot.audio_config_generation, 7);
         assert!(mapped(&snapshot, 21) && mapped(&snapshot, 22));
-        release_handle(unsafe { hirari_engine_track_detach(table.get(), 21) });
+        unsafe { hirari_track_owner_release(hirari_engine_track_detach(table.get(), 21)) };
         table.publish(0, false);
         let snapshot = table.snapshot();
         assert_eq!(published_ids(&snapshot), vec![22]);
@@ -857,12 +656,11 @@ mod tests {
 
     #[test]
     fn publish_without_a_stamp_keeps_the_previous_generation() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(1);
+        table.add(1, TRACK_TYPE_AUDIO);
         table.publish(3, true);
         assert_eq!(table.snapshot().audio_config_generation, 3);
-        table.push(2);
+        table.add(2, TRACK_TYPE_AUDIO);
         table.publish(99, false);
         assert_eq!(table.snapshot().audio_config_generation, 3);
         assert_eq!(table.snapshot().track_count, 2);
@@ -872,15 +670,16 @@ mod tests {
 
     #[test]
     fn publication_writes_the_buffer_the_callback_is_not_reading() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(31);
-        table.push(32);
+        table.add(31, TRACK_TYPE_AUDIO);
+        table.add(32, TRACK_TYPE_AUDIO);
         table.publish(1, true);
         let held = table.snapshot();
         assert_eq!(published_ids(&held), vec![31, 32]);
-        release_handle(unsafe { hirari_engine_track_detach(table.get(), 31) });
-        release_handle(unsafe { hirari_engine_track_detach(table.get(), 32) });
+        unsafe {
+            hirari_track_owner_release(hirari_engine_track_detach(table.get(), 31));
+            hirari_track_owner_release(hirari_engine_track_detach(table.get(), 32));
+        }
         table.publish(2, true);
         assert_eq!(published_ids(&table.snapshot()), Vec::<u32>::new());
         // The realtime callback may still be traversing the buffer it read.
@@ -889,10 +688,9 @@ mod tests {
 
     #[test]
     fn publication_clamps_to_the_realtime_capacity() {
-        let _guard = serialize();
         let table = Table::new();
         for id in 1..=(MAX_ACTIVE_TRACKS as u32 + 2) {
-            table.push(id);
+            table.add(id, TRACK_TYPE_AUDIO);
         }
         table.publish(1, true);
         let snapshot = table.snapshot();
@@ -905,11 +703,10 @@ mod tests {
 
     #[test]
     fn ids_beyond_the_map_capacity_are_published_but_not_mapped() {
-        let _guard = serialize();
         let table = Table::new();
         let id = TRACK_MAP_LEN as u32 + 5;
-        table.push(id);
-        table.push(9);
+        table.add(id, TRACK_TYPE_AUDIO);
+        table.add(9, TRACK_TYPE_AUDIO);
         table.publish(1, true);
         let snapshot = table.snapshot();
         assert_eq!(published_ids(&snapshot), vec![id, 9]);
@@ -918,63 +715,57 @@ mod tests {
 
     #[test]
     fn retain_answers_a_second_reference_for_the_graph() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(41);
-        table.push(42);
-        let before = live_handles();
+        table.add(41, TRACK_TYPE_AUDIO);
+        let kept = table.commit(42, TRACK_TYPE_AUDIO);
         let one = unsafe { hirari_engine_track_retain(table.get(), 42) };
-        assert_eq!(owner_id(one), 42);
-        assert_eq!(live_handles(), before + 1);
-        release_handle(one);
+        assert_eq!(unsafe { hirari_track_owner_object(one) }, kept.object);
+        unsafe { hirari_track_owner_release(one) };
         assert!(unsafe { hirari_engine_track_retain(table.get(), 99) }.is_null());
-        assert_eq!(live_handles(), before);
+        assert!(retained(&kept.witness));
     }
 
     #[test]
     fn defer_all_holds_the_graph_until_the_table_dies() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(51);
-        table.push(52);
+        let first = table.commit(51, TRACK_TYPE_AUDIO);
+        let second = table.commit(52, TRACK_TYPE_AUDIO);
         unsafe { hirari_engine_track_defer_all(table.get()) };
         assert_eq!(unsafe { hirari_engine_track_count(table.get()) }, 0);
-        assert!(destroyed_tracks().is_empty());
-        assert_eq!(live_handles(), 2);
+        assert!(table.locked().is_empty());
+        assert!(retained(&first.witness) && retained(&second.witness));
         drop(table);
-        assert_eq!(destroyed_tracks(), vec![51, 52]);
-        assert_eq!(live_handles(), 0);
+        assert!(!retained(&first.witness) && !retained(&second.witness));
     }
 
     #[test]
-    fn reset_project_destroys_the_graph_and_resets_the_managers() {
-        let _guard = serialize();
+    fn reset_project_releases_the_graph_and_resets_the_managers() {
         let table = Table::new();
-        set_facts(2, crate::track_edit_host::TRACK_TYPE_BUS, 5, 0);
-        table.push(2);
+        let bus = table.commit(2, TRACK_TYPE_BUS);
+        unsafe { hirari_track_resolve_bus(bus.object, std::ptr::null_mut(), true) };
         let buses = crate::bus_audio::hirari_bus_system_create();
         let null = std::ptr::null_mut();
         unsafe { hirari_engine_sync_structure(table.get(), buses, null, null, 1) };
-        assert!(unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 5) });
+        assert!(unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 2) });
         unsafe {
             hirari_engine_reset_project(table.get(), null, null, null, null, buses, null, null)
         };
-        // The outgoing graph is destroyed here rather than deferred to shutdown.
+        // The outgoing graph is released here rather than deferred to shutdown.
         assert_eq!(unsafe { hirari_engine_track_count(table.get()) }, 0);
-        assert_eq!(destroyed_tracks(), vec![2]);
-        assert_eq!(live_handles(), 0);
-        assert!(!unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 5) });
+        assert!(!retained(&bus.witness));
+        assert!(!unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 2) });
         unsafe { crate::bus_audio::hirari_bus_system_destroy(buses) };
     }
 
     #[test]
     fn structural_sync_reconciles_buses_publishes_then_compensates() {
-        let _guard = serialize();
         let table = Table::new();
-        set_facts(1, 0, NO_BUS_ID, 0);
-        set_facts(2, crate::track_edit_host::TRACK_TYPE_BUS, 5, 256);
-        table.push(1);
-        table.push(2);
+        let audio = table.commit(1, TRACK_TYPE_AUDIO);
+        let bus = table.commit(5, TRACK_TYPE_BUS);
+        unsafe { hirari_track_resolve_bus(bus.object, std::ptr::null_mut(), true) };
+        // The user delay is the part of the delay line a graph rebuild must
+        // never erase, so seed it before the solve runs.
+        unsafe { hirari_track_set_delay_samples(audio.object, 64) };
         let buses = crate::bus_audio::hirari_bus_system_create();
         let pdc = crate::native_pdc::hirari_native_pdc_create();
         assert!(unsafe { crate::native_pdc::hirari_native_pdc_bind_control_thread(pdc) });
@@ -983,19 +774,20 @@ mod tests {
         assert_eq!(table.snapshot().audio_config_generation, 9);
         // Only the bus actually in the graph is presented to the audio path.
         assert!(unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 5) });
-        assert!(!unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 0) });
-        // The bus carries the latency, so the audio track is the one compensated.
-        assert_eq!(pdc_offsets(), vec![(1, 256), (2, 0)]);
+        assert!(!unsafe { crate::bus_audio::hirari_bus_system_is_present(buses, 1) });
+        // A chain without inserts reports no latency, so the solver owes every
+        // track a zero offset — and the manual delay still reads back.
+        assert_eq!(unsafe { hirari_track_pdc_requested(audio.object) }, 0);
+        assert_eq!(unsafe { hirari_track_pdc_requested(bus.object) }, 0);
+        assert_eq!(unsafe { hirari_track_delay_samples(audio.object) }, 64);
         unsafe { crate::native_pdc::hirari_native_pdc_destroy(pdc) };
         unsafe { crate::bus_audio::hirari_bus_system_destroy(buses) };
     }
 
     #[test]
     fn null_handles_answer_defaults() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(1);
-        assert!(unsafe { hirari_engine_track_table_create(std::ptr::null()) }.is_null());
+        table.add(1, TRACK_TYPE_AUDIO);
         assert_eq!(unsafe { hirari_engine_track_count(std::ptr::null()) }, 0);
         assert!(unsafe { hirari_engine_track_ptrs(std::ptr::null()) }.is_null());
         assert!(unsafe { hirari_engine_track_find(std::ptr::null(), 1) }.is_null());
@@ -1004,22 +796,21 @@ mod tests {
             usize::MAX
         );
         assert!(unsafe { hirari_engine_track_retain(std::ptr::null(), 1) }.is_null());
-        let rejected = [new_handle(2), new_handle(3)];
+        let first = build(2, TRACK_TYPE_AUDIO);
+        let second = build(3, TRACK_TYPE_AUDIO);
         assert!(!unsafe {
-            hirari_engine_track_insert(std::ptr::null_mut(), usize::MAX, rejected[0], raw(2))
+            hirari_engine_track_insert(std::ptr::null_mut(), usize::MAX, first.owner)
         });
-        assert!(!unsafe {
-            hirari_engine_track_insert(std::ptr::null_mut(), 0, rejected[1], raw(3))
-        });
-        for owner in rejected {
-            release_handle(owner);
+        assert!(!unsafe { hirari_engine_track_insert(std::ptr::null_mut(), 0, second.owner) });
+        for owner in [first.owner, second.owner] {
+            unsafe { hirari_track_owner_release(owner) };
         }
         assert!(unsafe { hirari_engine_track_detach(std::ptr::null_mut(), 1) }.is_null());
+        unsafe { hirari_engine_track_table_destroy(std::ptr::null_mut()) };
         unsafe {
             hirari_engine_track_defer_all(std::ptr::null_mut());
             hirari_engine_track_publish(std::ptr::null_mut(), 1, true);
             hirari_engine_track_snapshot(std::ptr::null(), std::ptr::null_mut());
-            hirari_engine_track_table_destroy(std::ptr::null_mut());
             hirari_engine_sync_structure(
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
@@ -1038,8 +829,7 @@ mod tests {
                 std::ptr::null_mut(),
             );
         };
-        assert!(pdc_offsets().is_empty());
-        let buffers = [raw(1), raw(2)];
+        let buffers = [table.locked()[0], std::ptr::null_mut()];
         let mut snapshot = HirariTrackSnapshot {
             active_tracks: buffers.as_ptr(),
             track_map: unsafe { buffers.as_ptr().add(1) },
@@ -1054,16 +844,27 @@ mod tests {
 
     #[test]
     fn dropping_the_table_releases_every_handle() {
-        let _guard = serialize();
         let table = Table::new();
-        table.push(71);
-        table.push(72);
+        let first = table.commit(71, TRACK_TYPE_AUDIO);
+        let second = table.commit(72, TRACK_TYPE_AUDIO);
         let detached = unsafe { hirari_engine_track_detach(table.get(), 72) };
-        release_handle(detached);
+        unsafe { hirari_track_owner_release(detached) };
         table.publish(1, true);
-        assert_eq!(live_handles(), 2);
+        assert!(retained(&first.witness) && retained(&second.witness));
         drop(table);
-        assert_eq!(destroyed_tracks(), vec![71, 72]);
-        assert_eq!(live_handles(), 0);
+        assert!(!retained(&first.witness) && !retained(&second.witness));
+    }
+
+    #[test]
+    fn a_retained_handle_keeps_the_object_readable_after_the_graph_goes() {
+        let table = Table::new();
+        table.add(61, TRACK_TYPE_AUDIO);
+        let retained = unsafe { hirari_engine_track_retain(table.get(), 61) };
+        let object = unsafe { hirari_track_owner_object(retained) };
+        drop(table);
+        // A control walk that took the track out of the graph still reads a
+        // consistent identity from it, because its own reference holds.
+        assert_eq!(unsafe { hirari_track_id(object) }, 61);
+        unsafe { hirari_track_owner_release(retained) };
     }
 }

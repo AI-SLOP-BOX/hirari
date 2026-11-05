@@ -52,21 +52,15 @@ const NATIVE_OPS: WeakOps = WeakOps {
 };
 
 fn native_lock(handle: *mut c_void) -> *mut c_void {
-    unsafe { hirari_audio_import_weak_lock(handle) }
+    unsafe { crate::storage_handle::hirari_audio_import_weak_lock(handle) }
 }
 
 fn native_alive(handle: *mut c_void) -> bool {
-    unsafe { hirari_audio_import_weak_alive(handle) }
+    unsafe { crate::storage_handle::hirari_audio_import_weak_alive(handle) }
 }
 
 fn native_release(handle: *mut c_void) {
-    unsafe { hirari_audio_import_weak_release(handle) }
-}
-
-extern "C" {
-    fn hirari_audio_import_weak_lock(handle: *mut c_void) -> *mut c_void;
-    fn hirari_audio_import_weak_alive(handle: *mut c_void) -> bool;
-    fn hirari_audio_import_weak_release(handle: *mut c_void);
+    unsafe { crate::storage_handle::hirari_audio_import_weak_release(handle) }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -251,7 +245,7 @@ pub unsafe extern "C" fn hirari_audio_import_cache_store(
     if weak_audio.is_null() {
         return false;
     }
-    let release = || unsafe { hirari_audio_import_weak_release(weak_audio) };
+    let release = || unsafe { crate::storage_handle::hirari_audio_import_weak_release(weak_audio) };
     let Some(text) = path_text(path, path_size) else {
         release();
         return false;
@@ -302,19 +296,12 @@ pub struct ImportOps {
     pub decode: DecodeFn,
 }
 
-extern "C" {
-    fn hirari_audio_import_buffer_create(out_storage: *mut *mut c_void) -> *mut c_void;
-    fn hirari_audio_import_buffer_storage(audio: *mut c_void) -> *mut c_void;
-    fn hirari_audio_import_buffer_weak(audio: *mut c_void) -> *mut c_void;
-    fn hirari_audio_import_buffer_release(audio: *mut c_void);
-}
-
 fn native_create(out_storage: *mut *mut c_void) -> *mut c_void {
-    unsafe { hirari_audio_import_buffer_create(out_storage) }
+    unsafe { crate::storage_handle::hirari_audio_import_buffer_create(out_storage) }
 }
 
 fn native_storage(audio: *mut c_void) -> *mut c_void {
-    unsafe { hirari_audio_import_buffer_storage(audio) }
+    unsafe { crate::storage_handle::hirari_audio_import_buffer_storage(audio) }
 }
 
 fn native_channels(storage: *mut c_void) -> u32 {
@@ -326,11 +313,11 @@ fn native_frames(storage: *mut c_void) -> u64 {
 }
 
 fn native_weak(audio: *mut c_void) -> *mut c_void {
-    unsafe { hirari_audio_import_buffer_weak(audio) }
+    unsafe { crate::storage_handle::hirari_audio_import_buffer_weak(audio) }
 }
 
 fn native_buffer_release(audio: *mut c_void) {
-    unsafe { hirari_audio_import_buffer_release(audio) }
+    unsafe { crate::storage_handle::hirari_audio_import_buffer_release(audio) }
 }
 
 fn native_decode(path: *const u8, path_size: usize) -> NativeDecodedAudio {

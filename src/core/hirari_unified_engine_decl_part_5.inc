@@ -32,7 +32,7 @@
         m_projectControlRevision.fetch_add(1, std::memory_order_acq_rel);
     }
     void mark_project_layout_changed() const {
-        if (m_projectLayoutRevision) m_projectLayoutRevision->markChanged();
+        hirari_layout_revision_mark(m_layoutRevision);
     }
     bool set_articulation_map(uint32_t trackId, uint32_t mapHash);
     static void installExpressionMapEditHost();

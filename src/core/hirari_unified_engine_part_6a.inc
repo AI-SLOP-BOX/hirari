@@ -5,26 +5,11 @@ extern "C" void hirari_engine_sync_structural_changes(void* host) {
     if (host) static_cast<HirariUnifiedEngine*>(host)->syncStructuralChanges();
 }
 
-void* HirariUnifiedEngine::trackStorageHandle(void* track, uint32_t kind) noexcept {
-    if (!track) return nullptr;
-    auto* typed = static_cast<Track*>(track);
-    switch (kind) {
-        case 0: return typed->channelStripHandle();
-        case 1: return typed->effectChainHandle();
-        case 2: return typed->automationStoreHandle();
-        case 3: return typed->frozenStoreHandle();
-        case 4: return typed->realtimeRuntime();
-        case 6: return typed->nameStoreHandle();
-        case 7: return typed->workBufferStorage();
-        default: return typed->articulationStateHandle();
-    }
-}
-
 // Exposes the live tracks to the Rust layout gather (layout_gather.rs) and the
-// shared track-edit session (track_session.rs). Every per-track field they need
-// — faders, name, automation, plug-ins, freeze, regions — already lives in a
-// Rust storage addressed through this function, so this table only holds the
-// tracks lock and the track's id and type.
+// shared track-edit session (track_session.rs). The track and every storage it
+// owns are Rust objects, so this table only holds the tracks lock, the graph
+// window and the engine's own stores; identity, type, storage and the drained
+// edits are the track's Rust entry points.
 const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
     static const HirariLayoutHostOps ops = {
         // Drain queued write-automation before taking the lock, so UI, CLI
@@ -32,10 +17,10 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         [](void* host) {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             engine->m_tracksMutex.lock();
-            for (Track* track : engine->lockedTracks()) {
+            for (void* track : engine->lockedTracks()) {
                 if (!track) continue;
-                track->flushRecordedAutomation();
-                track->reclaimEffectChainRetiredMemory();
+                hirari_track_flush_recorded_automation(track);
+                hirari_track_reclaim_chain(track);
             }
         },
         [](void* host) {
@@ -47,13 +32,9 @@ const HirariLayoutHostOps* HirariUnifiedEngine::layoutHostOps() const {
         [](void* host, size_t index) -> void* {
             return static_cast<HirariUnifiedEngine*>(host)->lockedTrackAt(index);
         },
-        [](void* track) -> uint32_t {
-            return track ? static_cast<Track*>(track)->getId() : 0u;
-        },
-        [](void* track) -> uint32_t {
-            return track ? static_cast<uint32_t>(static_cast<Track*>(track)->getType()) : 0u;
-        },
-        &HirariUnifiedEngine::trackStorageHandle,
+        &hirari_track_id,
+        &hirari_track_type,
+        &hirari_track_storage,
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_sidechainRoutes; },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_routingEngine; },
         [](void* host) {
@@ -82,7 +63,7 @@ uint64_t HirariUnifiedEngine::get_project_generation() const {
 }
 
 uint64_t HirariUnifiedEngine::get_project_layout_revision() const noexcept {
-    return m_projectLayoutRevision ? m_projectLayoutRevision->current() : 0;
+    return hirari_layout_revision_current(m_layoutRevision);
 }
 
 uint64_t HirariUnifiedEngine::get_project_state_revision() const noexcept {
@@ -115,14 +96,15 @@ void HirariUnifiedEngine::installCommandHost() {
 
 void HirariUnifiedEngine::installTrackFreezeHost() {
     static const HirariTrackFreezeHostOps ops = {
+        // The owner handle is the Rust Arc's boxed clone, so it keeps the track
+        // alive after the topology lock is released.
         [](void* host, uint32_t tid, bool wait) -> void* {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return nullptr;
             if (wait) engine->waitForAudioCallbacks();
-            std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-            return newTrackHandle(engine->findTrackSharedLocked(tid));
+            return engine->takeTrackOwner(tid);
         },
-        [](void* handle) { delete static_cast<std::shared_ptr<Track>*>(handle); },
+        [](void* handle) { hirari_track_owner_release(handle); },
         [](void* host) -> uint32_t {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             return engine ? engine->get_block_size() : 0;

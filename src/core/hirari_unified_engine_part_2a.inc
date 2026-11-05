@@ -20,7 +20,7 @@ void HirariUnifiedEngine::set_playing(bool p) {
         // immutable region generations on the control thread only.
         waitForAudioCallbacks();
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        for (Track* track : lockedTracks()) {
+        for (void* track : lockedTracks()) {
             hirari_region_store_trim_retired(track);
         }
     }
@@ -39,15 +39,15 @@ float HirariUnifiedEngine::get_latency_ms() const noexcept {
 
 float HirariUnifiedEngine::get_track_latency_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
-        return hirari_samples_to_milliseconds(track.getTotalLatencySamples(), sampleRate);
+    return queryLockedTrack(tid, 0.0f, [&](void* track) {
+        return hirari_samples_to_milliseconds(hirari_track_latency_samples(track), sampleRate);
     });
 }
 
 float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noexcept {
     const double sampleRate = m_sampleRate.load(std::memory_order_relaxed);
-    return queryLockedTrack(tid, 0.0f, [&](const Track& track) {
-        return hirari_samples_to_milliseconds(track.getPdcCompensationSamples(), sampleRate);
+    return queryLockedTrack(tid, 0.0f, [&](void* track) {
+        return hirari_samples_to_milliseconds(hirari_track_pdc_requested(track), sampleRate);
     });
 }
 
@@ -91,14 +91,16 @@ void HirariUnifiedEngine::new_project() {
     hirari_ids_reset_project(this);
     // Start with one audio track so a new project is immediately usable for
     // importing or recording, instead of presenting a dead empty canvas.
-    auto bootstrapTrack = std::make_shared<Track>(1, "Audio 1", Track::Audio,
-                                                  m_projectLayoutRevision);
-    bootstrapTrack->prepareToPlay(m_sampleRate.load(std::memory_order_relaxed),
-                                  m_blockSize.load(std::memory_order_relaxed));
-    Track* bootstrap = bootstrapTrack.get();
-    (void)hirari_engine_track_insert(m_trackTable, 0, newTrackHandle(std::move(bootstrapTrack)),
-                                       bootstrap);
-    mark_project_layout_changed();
+    void* bootstrap = nullptr;
+    void* bootstrapOwner = hirari_track_new(
+        1, reinterpret_cast<const uint8_t*>("Audio 1"), 7, kHirariTrackKindAudio,
+        m_layoutRevision, &bootstrap);
+    if (bootstrapOwner) {
+        (void)hirari_track_prepare(bootstrap, m_sampleRate.load(std::memory_order_relaxed),
+                                   m_blockSize.load(std::memory_order_relaxed));
+        (void)hirari_engine_track_insert(m_trackTable, 0, bootstrapOwner);
+        mark_project_layout_changed();
+    }
     publishTrackSnapshotLocked(true);
 }
 

@@ -24,91 +24,70 @@
     // The engine keeps only this handle, which the realtime callback and the
     // control surface both read through narrow FFI entry points.
     void* m_bounceSession = hirari_bounce_session_create();
-    std::shared_ptr<ProjectLayoutRevision> m_projectLayoutRevision =
-        std::make_shared<ProjectLayoutRevision>();
+    // The layout revision is a Rust counter (engine_track.rs); a track marks it
+    // when it changes and the control side polls it.
+    void* m_layoutRevision = hirari_layout_revision_create();
     std::atomic<uint64_t> m_projectControlRevision{0};
     mutable std::mutex m_tracksMutex;
 
-    // The document graph lives in the Rust track table (engine_track_table.rs).
-    // Id resolution and every walk below go through it; callers must already hold
-    // m_tracksMutex, except findPublishedTrack, which reads the lock-free snapshot.
-    Track* findTrackLocked(uint32_t tid) const {
-        return reinterpret_cast<Track*>(hirari_engine_track_find(m_trackTable, tid));
+    // The document graph lives in the Rust track table (engine_track_table.rs)
+    // and its tracks are Rust objects (engine_track.rs). A track pointer is the
+    // Arc's own address: it keys the region store and is what every
+    // hirari_track_* entry point takes. Callers must already hold m_tracksMutex,
+    // except findPublishedTrack, which reads the lock-free snapshot.
+    void* findTrackLocked(uint32_t tid) const {
+        return hirari_engine_track_find(m_trackTable, tid);
     }
-    std::shared_ptr<Track> findTrackSharedLocked(uint32_t tid) const {
-        return adoptTrackHandle(hirari_engine_track_retain(m_trackTable, tid));
-    }
-    Track* findPublishedTrack(uint32_t tid) const {
+    void* findPublishedTrack(uint32_t tid) const {
         const auto published = published_tracks();
         if (published.track_map == nullptr || tid >= kMaxTrackMap) return nullptr;
-        return reinterpret_cast<Track*>(published.track_map[tid]);
+        return published.track_map[tid];
     }
 
     // Borrowed window onto the graph in layout order, valid while the lock is held.
     struct TrackRange {
-        Track* const* items;
+        void* const* items;
         size_t count;
         size_t size() const noexcept { return count; }
-        Track* const* begin() const noexcept { return items; }
-        Track* const* end() const noexcept { return items + count; }
+        void* const* begin() const noexcept { return items; }
+        void* const* end() const noexcept { return items + count; }
     };
     TrackRange lockedTracks() const noexcept {
-        return { reinterpret_cast<Track* const*>(hirari_engine_track_ptrs(m_trackTable)),
+        return { hirari_engine_track_ptrs(m_trackTable),
                  hirari_engine_track_count(m_trackTable) };
     }
-    Track* lockedTrackAt(size_t index) const noexcept {
+    void* lockedTrackAt(size_t index) const noexcept {
         const TrackRange tracks = lockedTracks();
         return index < tracks.count ? tracks.items[index] : nullptr;
     }
 
-    // The table stores heap `std::shared_ptr<Track>` handles as opaque owners, so
-    // adopting one is a cast into a unique_ptr and publishing one is a heap copy.
-    static std::shared_ptr<Track> adoptTrackHandle(void* owner) {
-        if (!owner) return nullptr;
-        auto handle = std::unique_ptr<std::shared_ptr<Track>>(
-            static_cast<std::shared_ptr<Track>*>(owner));
-        return std::move(*handle);
-    }
-    static void* newTrackHandle(std::shared_ptr<Track> track) {
-        return track ? new std::shared_ptr<Track>(std::move(track)) : nullptr;
-    }
-
-    // Applies fn to the locked track and reports whether the id resolved, so a
-    // control mutator is one call plus the Track method it forwards to.
-    template <typename Fn>
-    bool mutateLockedTrack(uint32_t tid, const Fn& fn) {
+    // A copy of the track that outlives the topology lock: an operation that can
+    // block on a worker or vendor UI code holds this and releases it when done.
+    void* takeTrackOwner(uint32_t tid) const {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        Track* track = findTrackLocked(tid);
-        return track != nullptr && fn(*track);
+        return hirari_engine_track_retain(m_trackTable, tid);
     }
 
     // Same resolution for the host callbacks, which only hold the opaque engine
     // pointer; each handler keeps its mutation instead of the lock prologue.
     template <typename Fn>
-    static std::invoke_result_t<Fn, Track&> withHostTrack(
-        void* host, uint32_t tid, std::invoke_result_t<Fn, Track&> missing, const Fn& fn) {
+    static std::invoke_result_t<Fn, void*> withHostTrack(
+        void* host, uint32_t tid, std::invoke_result_t<Fn, void*> missing, const Fn& fn) {
         if (!host) return missing;
         auto* engine = static_cast<HirariUnifiedEngine*>(host);
         std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-        Track* track = engine->findTrackLocked(tid);
-        return track != nullptr ? fn(*track) : missing;
+        void* track = engine->findTrackLocked(tid);
+        return track != nullptr ? fn(track) : missing;
     }
 
-    // Same resolution for the read-only host callbacks, with the fallback the
-    // caller supplies instead of a repeated scan.
+    // Same resolution for the read-only accessors, with the fallback the caller
+    // supplies instead of a repeated scan.
     template <typename Fn>
-    std::invoke_result_t<Fn, const Track&> queryLockedTrack(
-        uint32_t tid, std::invoke_result_t<Fn, const Track&> missing, const Fn& fn) const {
+    std::invoke_result_t<Fn, void*> queryLockedTrack(
+        uint32_t tid, std::invoke_result_t<Fn, void*> missing, const Fn& fn) const {
         std::lock_guard<std::mutex> lock(m_tracksMutex);
-        const Track* track = findTrackLocked(tid);
-        return track != nullptr ? fn(*track) : missing;
-    }
-
-    // Copies the owning handle out from under the lock so a call that can enter
-    // vendor UI code holds the Track without the project topology lock.
-    std::shared_ptr<Track> takeTrackHandle(uint32_t tid) const {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        return findTrackSharedLocked(tid);
+        void* track = findTrackLocked(tid);
+        return track != nullptr ? fn(track) : missing;
     }
 
     // Sidechain route bookkeeping is project state owned by Rust
@@ -118,10 +97,6 @@
     // Rust owns the layout snapshot (layout_gather.rs); this only exposes the
     // live-track accessors it reads through.
     const HirariLayoutHostOps* layoutHostOps() const;
-
-    // One of a track's own storages, by the kind the layout gather and the
-    // shared track-edit session both address it with.
-    static void* trackStorageHandle(void* track, uint32_t kind) noexcept;
 
     void* m_midiSnapshotStore = nullptr;
 

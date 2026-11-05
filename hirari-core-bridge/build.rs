@@ -117,7 +117,6 @@ fn main() {
     // bridge-facing engine path must invalidate the native build as well.
     println!("cargo:rerun-if-changed=../src/core/audio_engine.hpp");
     println!("cargo:rerun-if-changed=../src/core/hirari_unified_engine.hpp");
-    println!("cargo:rerun-if-changed=../src/core/engine/track.hpp");
 
     if target_os == "macos" {
         println!("cargo:rustc-link-lib=framework=Foundation");

@@ -9,7 +9,6 @@
 #include "bridge_types.hpp"
 #include "concurrency/audio_task_manager.hpp"
 #include <optional>
-#include "engine/bus_track.hpp"
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
@@ -31,8 +30,6 @@
 #include <future>
 
 namespace Hirari::Core::Engine {
-
-class Track;
 
 class HirariUnifiedEngine {
 #include "hirari_unified_engine_decl_part_1.inc"

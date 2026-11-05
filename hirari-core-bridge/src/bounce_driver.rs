@@ -988,11 +988,8 @@ mod tests {
     impl FakeEngine {
         fn new() -> Self {
             Self {
-                // SAFETY: the handles are read once and the operations table is
-                // optional.
-                block: unsafe {
-                    hirari_engine_block_create(HirariEngineBlockHandles::default(), std::ptr::null())
-                },
+                // SAFETY: the handles are read once and all null.
+                block: unsafe { hirari_engine_block_create(HirariEngineBlockHandles::default()) },
                 limiter: hirari_master_limiter_create(44_100.0),
             }
         }

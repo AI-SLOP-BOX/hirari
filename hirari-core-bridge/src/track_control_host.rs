@@ -1,110 +1,49 @@
 //! Track control-plane policy: spatial-position validation and HRTF kernel
 //! admission (non-empty, matching stereo taps, bounded length).
 //!
-//! The engine keeps the track vector and the panner. This module decides
-//! which spatial requests are valid and pins the track for the write.
+//! The track is a Rust object and its panner is one of the storages it owns, so
+//! a request needs no native callback: the engine's track session pins the id
+//! under the tracks lock, [`crate::engine_track`] performs the write with the
+//! edit protocol around it, and this module contributes only the two checks that
+//! have to run before a store the realtime thread reads is touched.
 //!
 //! Every entry point runs on the control thread.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
 
-/// Mirrors `HolographicPanner::kMaxHrtfTaps`.
+use crate::engine_track::{
+    hirari_track_clear_hrtf_kernel as write_clear_hrtf,
+    hirari_track_set_hrtf_kernel as write_hrtf_kernel, hirari_track_set_spatial,
+};
+use crate::track_session::TrackSession;
+
+/// Mirrors the panner's kernel cap, so an oversized request is refused before
+/// the track is looked up.
 pub const MAX_HRTF_TAPS: usize = 128;
-/// Pins a live track for one request; null when the id no longer resolves.
-pub type AcquireTrackFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
-pub type ReleaseTrackFn = unsafe extern "C" fn(*mut c_void);
-pub type SetSpatialFn = unsafe extern "C" fn(*mut c_void, f32, f32, f32);
-pub type SetHrtfFn = unsafe extern "C" fn(*mut c_void, *const f32, *const f32, u32) -> bool;
-pub type ClearHrtfFn = unsafe extern "C" fn(*mut c_void);
 
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariTrackControlHostOps {
-    pub acquire: Option<AcquireTrackFn>,
-    pub release: Option<ReleaseTrackFn>,
-    pub set_spatial: Option<SetSpatialFn>,
-    pub set_hrtf: Option<SetHrtfFn>,
-    pub clear_hrtf: Option<ClearHrtfFn>,
-}
-
-// The table only holds function pointers supplied by the native engine.
-unsafe impl Send for HirariTrackControlHostOps {}
-unsafe impl Sync for HirariTrackControlHostOps {}
-
-static HOST_OPS: OnceLock<Mutex<Option<HirariTrackControlHostOps>>> = OnceLock::new();
-
-fn host_ops() -> Option<HirariTrackControlHostOps> {
-    HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
-}
-
-/// Installs the native host callbacks. Passing null clears them.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_control_host_install(
-    ops: *const HirariTrackControlHostOps,
-) {
-    let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
-    let value = if ops.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ptr::read(ops) })
-    };
-    if let Ok(mut guard) = slot.lock() {
-        *guard = value;
-    }
-}
-
-/// Releases the pinned track when the request ends, even on an early return.
-struct TrackPin {
-    raw: *mut c_void,
-    release: ReleaseTrackFn,
-}
-
-impl Drop for TrackPin {
-    fn drop(&mut self) {
-        unsafe { (self.release)(self.raw) };
-    }
-}
-
-fn acquire(
-    ops: &HirariTrackControlHostOps,
-    host: *mut c_void,
-    track_id: u32,
-) -> Option<TrackPin> {
-    let acquire = ops.acquire?;
-    let release = ops.release?;
-    let raw = unsafe { acquire(host, track_id) };
-    if raw.is_null() {
-        return None;
-    }
-    Some(TrackPin { raw, release })
-}
-
-fn set_spatial_impl(
-    ops: &HirariTrackControlHostOps,
+/// A non-finite coordinate would poison the panner's history, so it is rejected
+/// here rather than clamped on the way in.
+pub unsafe extern "C" fn hirari_track_set_spatial_position(
     host: *mut c_void,
     track_id: u32,
     x: f32,
     y: f32,
     z: f32,
 ) -> bool {
-    // A non-finite coordinate would poison the panner's history. Reject it
-    // before the track is even looked up.
     if !x.is_finite() || !y.is_finite() || !z.is_finite() {
         return false;
     }
-    let Some(set_spatial) = ops.set_spatial else {
+    let Some(session) = TrackSession::open(host, track_id) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id) else {
-        return false;
-    };
-    unsafe { set_spatial(pin.raw, x, y, z) };
+    unsafe { hirari_track_set_spatial(session.track(), x, y, z) };
     true
 }
 
-fn set_hrtf_impl(
-    ops: &HirariTrackControlHostOps,
+/// Installs one stereo HRTF kernel. The two taps have to describe the same
+/// length and neither may be missing: a half kernel would steer the panner with
+/// one ear's data.
+pub unsafe extern "C" fn hirari_track_set_hrtf_kernel(
     host: *mut c_void,
     track_id: u32,
     left: *const f32,
@@ -120,207 +59,202 @@ fn set_hrtf_impl(
     {
         return false;
     }
-    let Some(set_hrtf) = ops.set_hrtf else {
+    let Some(session) = TrackSession::open(host, track_id) else {
         return false;
     };
-    let Some(pin) = acquire(ops, host, track_id) else {
-        return false;
-    };
-    let taps = left_len as u32;
-    unsafe { set_hrtf(pin.raw, left, right, taps) }
+    unsafe { write_hrtf_kernel(session.track(), left, right, left_len as u32) }
 }
 
-fn clear_hrtf_impl(
-    ops: &HirariTrackControlHostOps,
-    host: *mut c_void,
-    track_id: u32,
-) -> bool {
-    let Some(clear_hrtf) = ops.clear_hrtf else {
-        return false;
-    };
-    let Some(pin) = acquire(ops, host, track_id) else {
-        return false;
-    };
-    unsafe { clear_hrtf(pin.raw) };
-    true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_set_spatial_position(
-    host: *mut c_void,
-    track_id: u32,
-    x: f32,
-    y: f32,
-    z: f32,
-) -> bool {
-    match host_ops() {
-        Some(ops) => set_spatial_impl(&ops, host, track_id, x, y, z),
-        None => false,
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_set_hrtf_kernel(
-    host: *mut c_void,
-    track_id: u32,
-    left: *const f32,
-    left_len: usize,
-    right: *const f32,
-    right_len: usize,
-) -> bool {
-    match host_ops() {
-        Some(ops) => set_hrtf_impl(&ops, host, track_id, left, left_len, right, right_len),
-        None => false,
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_track_clear_hrtf_kernel(host: *mut c_void, track_id: u32) -> bool {
-    match host_ops() {
-        Some(ops) => clear_hrtf_impl(&ops, host, track_id),
-        None => false,
-    }
+    let Some(session) = TrackSession::open(host, track_id) else {
+        return false;
+    };
+    unsafe { write_clear_hrtf(session.track()) };
+    true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::RefCell;
+    use crate::engine_track::{
+        hirari_layout_revision_create, hirari_layout_revision_current, hirari_layout_revision_release,
+        hirari_track_new, TRACK_TYPE_AUDIO,
+    };
+    use crate::engine_track_table::{
+        hirari_engine_track_find, hirari_engine_track_insert, hirari_engine_track_table_create,
+        hirari_engine_track_table_destroy,
+    };
+    use crate::track_session::{hirari_track_session_install, HirariTrackSessionOps};
 
-    thread_local! {
-        static LOG: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    unsafe extern "C" fn no_lock(_host: *mut c_void) {}
+
+    unsafe extern "C" fn find(host: *mut c_void, track_id: u32) -> *mut c_void {
+        unsafe { hirari_engine_track_find(host, track_id) }
     }
 
-    fn log(entry: impl Into<String>) {
-        LOG.with(|log| log.borrow_mut().push(entry.into()));
-    }
+    /// The session table is process-global and the engine installs its own copy
+    /// at startup, so the pin these tests install is handed back to it after.
+    struct SessionGuard(Option<HirariTrackSessionOps>);
 
-    fn take_log() -> Vec<String> {
-        LOG.with(|log| std::mem::take(&mut *log.borrow_mut()))
-    }
-
-    unsafe extern "C" fn fake_acquire(_host: *mut c_void, track_id: u32) -> *mut c_void {
-        log(format!("acquire {track_id}"));
-        if track_id == 99 {
-            return std::ptr::null_mut();
+    impl SessionGuard {
+        fn install() -> Self {
+            let previous = crate::track_session::engine_ops();
+            let ops = HirariTrackSessionOps {
+                lock: Some(no_lock),
+                unlock: Some(no_lock),
+                track: Some(find),
+                ..HirariTrackSessionOps::default()
+            };
+            unsafe { hirari_track_session_install(&ops) };
+            Self(previous)
         }
-        track_id as usize as *mut c_void
     }
 
-    unsafe extern "C" fn fake_release(handle: *mut c_void) {
-        log(format!("release {}", handle as usize));
+    impl Drop for SessionGuard {
+        fn drop(&mut self) {
+            match self.0 {
+                Some(ops) => unsafe { hirari_track_session_install(&ops) },
+                None => unsafe { hirari_track_session_install(std::ptr::null()) },
+            }
+        }
     }
 
-    unsafe extern "C" fn fake_set_spatial(handle: *mut c_void, x: f32, y: f32, z: f32) {
-        log(format!("spatial {} {x} {y} {z}", handle as usize));
+    /// One real track in the engine's own table, with the layout revision the
+    /// track marks for every edit it applies. The host the session resolves
+    /// through is the table itself.
+    struct Engine {
+        table: *mut c_void,
+        revision: *mut c_void,
+        track: *mut c_void,
     }
 
-    unsafe extern "C" fn fake_set_hrtf(
-        handle: *mut c_void,
-        left: *const f32,
-        right: *const f32,
-        taps: u32,
-    ) -> bool {
-        let left = unsafe { std::slice::from_raw_parts(left, taps as usize) };
-        let right = unsafe { std::slice::from_raw_parts(right, taps as usize) };
-        log(format!("hrtf {} {taps} {left:?} {right:?}", handle as usize));
-        true
+    impl Engine {
+        fn new(id: u32) -> Self {
+            let table = unsafe { hirari_engine_track_table_create() };
+            let revision = unsafe { hirari_layout_revision_create() };
+            let mut track = std::ptr::null_mut();
+            let owner = unsafe {
+                hirari_track_new(
+                    id,
+                    b"Track\0".as_ptr(),
+                    6,
+                    TRACK_TYPE_AUDIO,
+                    revision,
+                    &mut track,
+                )
+            };
+            assert!(unsafe { hirari_engine_track_insert(table, usize::MAX, owner) });
+            Self { table, revision, track }
+        }
+
+        /// How many times the track marked the layout: one edit marks it twice,
+        /// the frozen render dropped before the write and the publication after.
+        fn marks(&self) -> u64 {
+            unsafe { hirari_layout_revision_current(self.revision) }
+        }
     }
 
-    unsafe extern "C" fn fake_clear_hrtf(handle: *mut c_void) {
-        log(format!("clear {}", handle as usize));
-    }
-
-    fn fake_ops() -> HirariTrackControlHostOps {
-        HirariTrackControlHostOps {
-            acquire: Some(fake_acquire),
-            release: Some(fake_release),
-            set_spatial: Some(fake_set_spatial),
-            set_hrtf: Some(fake_set_hrtf),
-            clear_hrtf: Some(fake_clear_hrtf),
+    impl Drop for Engine {
+        fn drop(&mut self) {
+            unsafe {
+                // The table holds the only owning handle, so destroying it runs
+                // the track's own storage teardown.
+                hirari_engine_track_table_destroy(self.table);
+                hirari_layout_revision_release(self.revision);
+            }
         }
     }
 
     #[test]
-    fn spatial_position_rejects_non_finite_coordinates_locally() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
-        assert!(!set_spatial_impl(&ops, host, 5, f32::NAN, 0.0, 0.0));
-        assert!(!set_spatial_impl(&ops, host, 5, 0.0, f32::INFINITY, 0.0));
-        assert!(!set_spatial_impl(&ops, host, 5, 0.0, 0.0, f32::NEG_INFINITY));
-        assert!(take_log().is_empty());
-    }
-
-    #[test]
-    fn spatial_position_pins_forwards_and_releases() {
-        let ops = fake_ops();
-        assert!(set_spatial_impl(&ops, 8_usize as *mut c_void, 5, 1.0, 2.0, 3.0));
-        assert_eq!(
-            take_log(),
-            vec!["acquire 5", "spatial 5 1 2 3", "release 5"]
+    fn an_unresolved_track_is_refused() {
+        let _guard = SessionGuard::install();
+        let engine = Engine::new(5);
+        let before = engine.marks();
+        assert!(
+            !unsafe { hirari_track_set_spatial_position(engine.table, 99, 1.0, 2.0, 3.0) },
+            "a retired id cannot be written"
         );
+        assert!(!unsafe { hirari_track_clear_hrtf_kernel(engine.table, 99) });
+        assert_eq!(engine.marks(), before, "and nothing was marked");
     }
 
     #[test]
-    fn spatial_position_reports_a_missing_track() {
-        let ops = fake_ops();
-        assert!(!set_spatial_impl(&ops, 8_usize as *mut c_void, 99, 1.0, 2.0, 3.0));
-        assert_eq!(take_log(), vec!["acquire 99"]);
+    fn spatial_position_rejects_non_finite_coordinates_before_the_lookup() {
+        let _guard = SessionGuard::install();
+        let engine = Engine::new(5);
+        let before = engine.marks();
+        assert!(!unsafe { hirari_track_set_spatial_position(engine.table, 5, f32::NAN, 0.0, 0.0) });
+        assert!(
+            !unsafe { hirari_track_set_spatial_position(engine.table, 5, 0.0, f32::INFINITY, 0.0) },
+            "an infinite coordinate never reaches the panner"
+        );
+        assert!(!unsafe {
+            hirari_track_set_spatial_position(engine.table, 5, 0.0, 0.0, f32::NEG_INFINITY)
+        });
+        assert_eq!(engine.marks(), before, "a rejected edit marks no layout");
+
+        assert!(unsafe { hirari_track_set_spatial_position(engine.table, 5, 1.0, 2.0, 3.0) });
+        assert_eq!(engine.marks(), before + 2, "and an accepted one is an edit");
     }
 
     #[test]
-    fn hrtf_rejects_incomplete_or_oversized_kernels() {
-        let ops = fake_ops();
-        let host = 8_usize as *mut c_void;
+    fn hrtf_admits_only_a_complete_matching_kernel() {
+        let _guard = SessionGuard::install();
+        let engine = Engine::new(5);
+        let before = engine.marks();
         let taps = vec![0.5f32; MAX_HRTF_TAPS + 1];
-        assert!(!set_hrtf_impl(&ops, host, 5, std::ptr::null(), 0, std::ptr::null(), 0));
-        assert!(!set_hrtf_impl(&ops, host, 5, taps.as_ptr(), 2, taps.as_ptr(), 3));
-        assert!(!set_hrtf_impl(
-            &ops,
-            host,
-            5,
-            taps.as_ptr(),
-            MAX_HRTF_TAPS + 1,
-            taps.as_ptr(),
-            MAX_HRTF_TAPS + 1
-        ));
-        assert!(take_log().is_empty());
-    }
+        assert!(
+            !unsafe {
+                hirari_track_set_hrtf_kernel(engine.table, 5, std::ptr::null(), 0, std::ptr::null(), 0)
+            },
+            "an empty kernel is not a kernel"
+        );
+        assert!(
+            !unsafe { hirari_track_set_hrtf_kernel(engine.table, 5, taps.as_ptr(), 2, taps.as_ptr(), 3) },
+            "the two taps have to describe the same length"
+        );
+        assert!(
+            !unsafe {
+                hirari_track_set_hrtf_kernel(
+                    engine.table,
+                    5,
+                    taps.as_ptr(),
+                    MAX_HRTF_TAPS + 1,
+                    taps.as_ptr(),
+                    MAX_HRTF_TAPS + 1,
+                )
+            },
+            "and neither may exceed the panner cap"
+        );
+        assert_eq!(engine.marks(), before, "none of them reached the track");
 
-    #[test]
-    fn hrtf_pins_forwards_a_matching_kernel_and_releases() {
-        let ops = fake_ops();
         let left = [0.5f32, 0.25];
         let right = [0.75f32, 0.125];
-        assert!(set_hrtf_impl(
-            &ops,
-            8_usize as *mut c_void,
-            5,
-            left.as_ptr(),
-            left.len(),
-            right.as_ptr(),
-            right.len()
-        ));
-        assert_eq!(
-            take_log(),
-            vec!["acquire 5", "hrtf 5 2 [0.5, 0.25] [0.75, 0.125]", "release 5"]
+        assert!(unsafe {
+            hirari_track_set_hrtf_kernel(engine.table, 5, left.as_ptr(), 2, right.as_ptr(), 2)
+        });
+        assert_eq!(engine.marks(), before + 2, "a valid kernel is installed");
+
+        assert!(unsafe { hirari_track_clear_hrtf_kernel(engine.table, 5) });
+        assert_eq!(engine.marks(), before + 4, "and clearing it is an edit too");
+    }
+
+    #[test]
+    fn a_kernel_the_panner_rejects_still_retires_the_frozen_render() {
+        let _guard = SessionGuard::install();
+        let engine = Engine::new(5);
+        let before = engine.marks();
+        let left = [f32::NAN, 0.25];
+        let right = [0.75f32, 0.125];
+        assert!(
+            !unsafe {
+                hirari_track_set_hrtf_kernel(engine.table, 5, left.as_ptr(), 2, right.as_ptr(), 2)
+            },
+            "a non-finite sample is refused by the store"
         );
-    }
-
-    #[test]
-    fn clear_hrtf_pins_forwards_and_releases() {
-        let ops = fake_ops();
-        assert!(clear_hrtf_impl(&ops, 8_usize as *mut c_void, 5));
-        assert_eq!(take_log(), vec!["acquire 5", "clear 5", "release 5"]);
-    }
-
-    #[test]
-    fn missing_ops_fail_closed() {
-        let ops = HirariTrackControlHostOps::default();
-        let host = 8_usize as *mut c_void;
-        assert!(!set_spatial_impl(&ops, host, 5, 0.0, 0.0, 0.0));
-        assert!(!set_hrtf_impl(&ops, host, 5, [0.5f32].as_ptr(), 1, [0.5f32].as_ptr(), 1));
-        assert!(!clear_hrtf_impl(&ops, host, 5));
-        assert!(take_log().is_empty());
+        // The argument gate above refuses before the edit protocol starts; a
+        // kernel that reaches the panner has already retired the frozen render,
+        // which is one mark even when the panner then declines it.
+        assert_eq!(engine.marks(), before + 1);
     }
 }

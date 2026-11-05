@@ -3,16 +3,13 @@
 //! The head is what runs before the graph is touched: the admission gates that
 //! decide whether a block renders at all, the cycle wrap, the device-generation
 //! check, the command drain, each track's MIDI input reset and the timeline
-//! staging. Tracks stay opaque, so the test drives the published operations
-//! table and the handles the head borrows instead of a C++ `Track`.
+//! staging. Tracks are the Rust objects of `engine_track.rs`, so the head writes
+//! through the storages they own and the test reads the same values back.
 
 use hirari_core_bridge::audio_buffer_ops::{
     hirari_audio_buffer_storage_array_write, hirari_audio_buffer_storage_create,
     hirari_audio_buffer_storage_destroy, hirari_audio_buffer_storage_reserve_buffer,
     hirari_audio_buffer_storage_resize,
-};
-use hirari_core_bridge::channel_strip::{
-    hirari_channel_strip_create, hirari_channel_strip_destroy, hirari_channel_strip_gain,
 };
 use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_begin, hirari_engine_block_create, hirari_engine_block_cycle_start,
@@ -20,103 +17,33 @@ use hirari_core_bridge::engine_block_host::{
     hirari_engine_block_range_overflowed, hirari_engine_block_set_config_transition,
     hirari_engine_block_set_cycle, hirari_engine_block_set_loop, hirari_engine_block_set_playhead,
     hirari_engine_block_set_playing, hirari_engine_block_set_test_tone, HirariEngineBlockHandles,
-    HirariEngineBlockOps, TRACK_PLUGIN_MIDI, TRACK_RUNTIME, TRACK_STRIP,
 };
 use hirari_core_bridge::engine_rings::{
     hirari_engine_command_ring_push, hirari_engine_rings_create, hirari_engine_rings_destroy,
     CommandRecord, EngineRings,
 };
+use hirari_core_bridge::engine_track::{
+    hirari_layout_revision_create, hirari_layout_revision_current, hirari_layout_revision_release,
+    hirari_track_get_volume, hirari_track_is_muted, hirari_track_new, hirari_track_prepare,
+    hirari_track_storage, STORAGE_PLUGIN_MIDI, TRACK_TYPE_AUDIO,
+};
 use hirari_core_bridge::engine_track_table::{
     hirari_engine_track_insert, hirari_engine_track_publish, hirari_engine_track_table_create,
-    hirari_engine_track_table_destroy, HirariEngineTrackOps,
+    hirari_engine_track_table_destroy,
 };
 use hirari_core_bridge::midi_buffer_ops::{
-    hirari_midi_buffer_add_note_on, hirari_midi_buffer_create, hirari_midi_buffer_destroy,
-    hirari_midi_buffer_event_count,
-};
-use hirari_core_bridge::track_runtime::{
-    hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_is_muted,
+    hirari_midi_buffer_add_note_on, hirari_midi_buffer_event_count,
 };
 use std::ffi::c_void;
 use std::ptr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 const FRAMES: u32 = 4;
 const SAMPLE_RATE: f64 = 44_100.0;
 /// The device configuration generation every published snapshot in these tests
 /// carries, matching the one `hirari_engine_block_create` starts the transport at.
 const GENERATION: u64 = 1;
-
-/// Stand-in for a C++ `Track`: the block reaches it only for a storage handle,
-/// so the fader, pan and mute the head writes land in the real Rust storages and
-/// the edit counter is the assertion for the control protocol around them.
-struct FakeTrack {
-    id: u32,
-    midi: *mut c_void,
-    strip: *mut c_void,
-    runtime: *mut c_void,
-    edits: AtomicUsize,
-}
-
-unsafe extern "C" fn track_id_of(track: *mut c_void) -> u32 {
-    unsafe { &*track.cast::<FakeTrack>() }.id
-}
-
-/// The table owns one handle per track; here it is the `FakeTrack` itself, so a
-/// clone is the same pointer and a release frees nothing.
-unsafe extern "C" fn owner_clone(owner: *mut c_void) -> *mut c_void {
-    owner
-}
-
-unsafe extern "C" fn owner_release(_owner: *mut c_void) {}
-
-unsafe extern "C" fn track_type_of(_track: *mut c_void) -> u32 {
-    0
-}
-
-unsafe extern "C" fn bus_id_of(_track: *mut c_void) -> u32 {
-    u32::MAX
-}
-
-unsafe extern "C" fn latency_of(_track: *mut c_void) -> u32 {
-    0
-}
-
-unsafe extern "C" fn apply_pdc(_track: *mut c_void, _samples: u32) {}
-
-static TABLE_OPS: HirariEngineTrackOps = HirariEngineTrackOps {
-    id: Some(track_id_of),
-    clone_owner: Some(owner_clone),
-    destroy_owner: Some(owner_release),
-    track_type: Some(track_type_of),
-    bus_id: Some(bus_id_of),
-    latency: Some(latency_of),
-    set_pdc_offset: Some(apply_pdc),
-};
-
-unsafe extern "C" fn storage_of(track: *mut c_void, kind: u32) -> *mut c_void {
-    let track = unsafe { &*track.cast::<FakeTrack>() };
-    match kind {
-        TRACK_RUNTIME => track.runtime,
-        TRACK_STRIP => track.strip,
-        TRACK_PLUGIN_MIDI => track.midi,
-        _ => ptr::null_mut(),
-    }
-}
-
-unsafe extern "C" fn type_of(_track: *mut c_void) -> u8 {
-    0
-}
-
-unsafe extern "C" fn begin_edit_of(track: *mut c_void) {
-    unsafe { &*track.cast::<FakeTrack>() }
-        .edits
-        .fetch_add(1, Ordering::Relaxed);
-}
-
-unsafe extern "C" fn end_edit_of(_track: *mut c_void) {}
-
-unsafe extern "C" fn record_of(_track: *mut c_void, _playhead: u64) {}
+/// A track prepared for more samples than any block these contracts walk.
+const CAPACITY: u32 = 8;
 
 fn storage(channels: u32, frames: u32) -> *mut c_void {
     unsafe {
@@ -158,90 +85,90 @@ struct Engine {
     output: *mut c_void,
     table: *mut c_void,
     rings: *mut c_void,
+    revision: *mut c_void,
     tracks: Vec<*mut c_void>,
+    /// The revision value the engine started at, so the edit count is relative.
+    start: u64,
 }
 
 impl Engine {
     fn new() -> Self {
-        let ops = HirariEngineBlockOps {
-            storage: Some(storage_of),
-            track_type: Some(type_of),
-            begin_edit: Some(begin_edit_of),
-            end_edit: Some(end_edit_of),
-            record: Some(record_of),
-        };
-        let table = unsafe { hirari_engine_track_table_create(&TABLE_OPS) };
+        let revision = hirari_layout_revision_create();
+        let start = unsafe { hirari_layout_revision_current(revision) };
+        let table = unsafe { hirari_engine_track_table_create() };
         let rings = hirari_engine_rings_create();
         let handles = HirariEngineBlockHandles {
             track_table: table,
             rings: rings.cast(),
             ..HirariEngineBlockHandles::default()
         };
-        let state = unsafe { hirari_engine_block_create(handles, &ops) };
+        let state = unsafe { hirari_engine_block_create(handles) };
         assert!(!state.is_null());
         Self {
             state,
             output: storage(2, 8192),
             table,
             rings: rings.cast(),
+            revision,
             tracks: Vec::new(),
+            start,
         }
     }
 
     /// Adds one published track, the same double-buffered snapshot the engine
     /// hands the head after a structural edit.
     fn track(&mut self, id: u32) -> usize {
-        let null = ptr::null_mut::<c_void>();
-        let runtime = unsafe {
-            hirari_track_runtime_create(
-                id, 0, null, null, null, null, null, null, null, null, null, null, null, null,
-                null, null,
+        let name = b"test track";
+        let mut track = ptr::null_mut();
+        let owner = unsafe {
+            hirari_track_new(
+                id,
+                name.as_ptr(),
+                name.len(),
+                TRACK_TYPE_AUDIO,
+                self.revision,
+                &mut track,
             )
         };
-        let track = Box::into_raw(Box::new(FakeTrack {
-            id,
-            midi: hirari_midi_buffer_create(),
-            strip: unsafe { hirari_channel_strip_create() },
-            runtime,
-            edits: AtomicUsize::new(0),
-        }));
-        self.tracks.push(track.cast());
+        assert!(!track.is_null());
+        assert_eq!(
+            unsafe { hirari_track_prepare(track, SAMPLE_RATE, CAPACITY) },
+            0,
+            "the test track must prepare"
+        );
+        self.tracks.push(track);
         let slot = self.tracks.len() - 1;
+        // The table owns the handle from here, so destroying it releases the
+        // track and every storage it owns.
         unsafe {
-            assert!(hirari_engine_track_insert(
-                self.table,
-                usize::MAX,
-                track.cast(),
-                track.cast()
-            ));
+            assert!(hirari_engine_track_insert(self.table, usize::MAX, owner));
             hirari_engine_track_publish(self.table, GENERATION, true);
         }
         slot
     }
 
-    /// How many control edits the head ran, counting only the protocol around a
-    /// command it actually applied.
-    fn edits(&self, slot: usize) -> usize {
-        unsafe { &*self.tracks[slot].cast::<FakeTrack>() }
-            .edits
-            .load(Ordering::Relaxed)
+    fn handle(&self, slot: usize, kind: u32) -> *mut c_void {
+        unsafe { hirari_track_storage(self.tracks[slot], kind) }
+    }
+
+    /// How many control edits this layout has seen. One edit marks it twice: the
+    /// freeze drop before the store write and the publication after it. Building
+    /// a track is itself an edit, so a contract counts from its own baseline.
+    fn edits(&self) -> u64 {
+        let marks = unsafe { hirari_layout_revision_current(self.revision) } - self.start;
+        marks / 2
     }
 
     fn gain(&self, slot: usize) -> f32 {
-        unsafe {
-            hirari_channel_strip_gain(
-                (*self.tracks[slot].cast::<FakeTrack>()).strip as *const c_void,
-            )
-        }
+        unsafe { hirari_track_get_volume(self.tracks[slot]) }
     }
 
     fn muted(&self, slot: usize) -> bool {
-        unsafe { hirari_track_runtime_is_muted((*self.tracks[slot].cast::<FakeTrack>()).runtime) }
+        unsafe { hirari_track_is_muted(self.tracks[slot]) }
     }
 
     fn midi_events(&self, slot: usize) -> usize {
-        let midi = unsafe { (*self.tracks[slot].cast::<FakeTrack>()).midi };
-        unsafe { hirari_midi_buffer_event_count(midi) }
+        unsafe { hirari_midi_buffer_event_count(self.handle(slot, STORAGE_PLUGIN_MIDI)) }
     }
 
     fn queue(&self, type_: u32, tid: u32, val: f32, generation: u64) {
@@ -280,7 +207,7 @@ impl Engine {
         unsafe { hirari_engine_block_playhead(self.state) }
     }
 
-    fn start(&self) {
+    fn start_playback(&self) {
         unsafe {
             hirari_engine_block_set_playing(self.state, 1);
         }
@@ -294,12 +221,7 @@ impl Drop for Engine {
             hirari_engine_block_destroy(self.state);
             hirari_engine_track_table_destroy(self.table);
             hirari_engine_rings_destroy(self.rings.cast::<EngineRings>());
-            for handle in self.tracks.drain(..) {
-                let track = Box::from_raw(handle.cast::<FakeTrack>());
-                hirari_midi_buffer_destroy(track.midi);
-                hirari_channel_strip_destroy(track.strip);
-                hirari_track_runtime_destroy(track.runtime);
-            }
+            hirari_layout_revision_release(self.revision);
             hirari_audio_buffer_storage_destroy(self.output);
         }
     }
@@ -321,7 +243,7 @@ fn a_stopped_engine_silences_the_window_and_renders_nothing() {
 #[test]
 fn a_block_beyond_the_buffer_is_clamped_and_an_empty_one_declined() {
     let engine = Engine::new();
-    engine.start();
+    engine.start_playback();
 
     let (admitted, frames) = engine.begin(0);
     assert_eq!((admitted, frames), (0, 0), "nothing to render");
@@ -338,7 +260,7 @@ fn a_block_beyond_the_buffer_is_clamped_and_an_empty_one_declined() {
 #[test]
 fn a_playhead_past_the_cycle_restarts_at_the_cycle_start() {
     let engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     assert_eq!(
         unsafe { hirari_engine_block_set_cycle(engine.state, 1_000, 2_000, 1) },
         1
@@ -375,7 +297,7 @@ fn a_playhead_past_the_cycle_restarts_at_the_cycle_start() {
 #[test]
 fn a_config_transition_silences_a_running_engine() {
     let engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     fill(engine.output, &[[8.0; 4], [8.0; 4]]);
     unsafe { hirari_engine_block_set_config_transition(engine.state, 1) };
 
@@ -391,18 +313,19 @@ fn a_config_transition_silences_a_running_engine() {
 #[test]
 fn only_commands_for_the_published_generation_apply() {
     let mut engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     let slot = engine.track(7);
     // A fader move admitted before the device rebuild, and one for this format.
     engine.queue(0, 7, 4.0, GENERATION - 1);
     engine.queue(2, 7, 1.0, GENERATION - 1);
     engine.queue(0, 7, 0.25, GENERATION);
+    let before = engine.edits();
 
     let (admitted, _) = engine.begin(FRAMES);
 
     assert_eq!(admitted, 1);
     assert_eq!(
-        engine.edits(slot),
+        engine.edits() - before,
         1,
         "a command that waited through a rebuild never applies"
     );
@@ -413,7 +336,7 @@ fn only_commands_for_the_published_generation_apply() {
 #[test]
 fn a_command_for_a_retired_track_is_dropped() {
     let mut engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     engine.track(7);
     engine.queue(0, 99, 0.5, GENERATION);
 
@@ -424,10 +347,11 @@ fn a_command_for_a_retired_track_is_dropped() {
 #[test]
 fn the_head_empties_each_tracks_own_midi_input() {
     let mut engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     let slot = engine.track(7);
-    let midi = unsafe { (*engine.tracks[slot].cast::<FakeTrack>()).midi };
-    unsafe { hirari_midi_buffer_add_note_on(midi, 1, 60, 90, 0, 0) };
+    unsafe {
+        hirari_midi_buffer_add_note_on(engine.handle(slot, STORAGE_PLUGIN_MIDI), 1, 60, 90, 0, 0)
+    };
     assert_eq!(engine.midi_events(slot), 1);
 
     let (admitted, _) = engine.begin(FRAMES);
@@ -440,7 +364,9 @@ fn the_head_empties_each_tracks_own_midi_input() {
     );
 
     // A stopped head clears the inputs as well, before it declines the block.
-    unsafe { hirari_midi_buffer_add_note_on(midi, 1, 61, 90, 0, 0) };
+    unsafe {
+        hirari_midi_buffer_add_note_on(engine.handle(slot, STORAGE_PLUGIN_MIDI), 1, 61, 90, 0, 0)
+    };
     unsafe { hirari_engine_block_set_playing(engine.state, 0) };
     assert_eq!(engine.begin(FRAMES).0, 0);
     assert_eq!(engine.midi_events(slot), 0);
@@ -449,7 +375,7 @@ fn the_head_empties_each_tracks_own_midi_input() {
 #[test]
 fn a_saturated_playhead_is_reported_instead_of_wrapping() {
     let mut engine = Engine::new();
-    engine.start();
+    engine.start_playback();
     engine.track(7);
     unsafe { hirari_engine_block_set_playhead(engine.state, u64::MAX - 2) };
 

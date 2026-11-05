@@ -1,6 +1,6 @@
 uint32_t HirariUnifiedEngine::get_track_delay_samples(uint32_t tid) const {
     return queryLockedTrack(tid, uint32_t{0},
-                            [&](const Track& track) { return track.getTrackDelaySamples(); });
+                            [&](void* track) { return hirari_track_delay_samples(track); });
 }
 
 // Routing edit host callbacks. Rust owns the routing graph, the sidechain route
@@ -81,10 +81,9 @@ void HirariUnifiedEngine::installPluginEditHost() {
 }
 
 // The one track-edit session every control-side host shares (track_session.rs).
-// Rust holds the tracks lock for the edit, writes the stores the track owns and
-// keeps the frozen-render/layout-revision protocol; these callbacks are the
-// pieces that physically cannot leave C++: the lock, the live track table, the
-// handles a Track holds, and re-preparing it for playback.
+// The track and every storage it holds are Rust objects now, so the session only
+// needs what physically cannot leave C++: the engine's tracks lock, the live
+// track resolution and the device format a re-prepare must read.
 void HirariUnifiedEngine::installTrackSessionHost() {
     static const HirariTrackSessionOps ops = {
         [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.lock(); },
@@ -92,18 +91,14 @@ void HirariUnifiedEngine::installTrackSessionHost() {
         [](void* host, uint32_t trackId) -> void* {
             return static_cast<HirariUnifiedEngine*>(host)->findTrackLocked(trackId);
         },
-        &HirariUnifiedEngine::trackStorageHandle,
-        [](void* track) -> uint32_t {
-            return track ? static_cast<uint32_t>(static_cast<Track*>(track)->getType()) : 0u;
-        },
-        [](void* track) {
-            if (track) static_cast<Track*>(track)->markProjectLayoutChanged();
-        },
+        &hirari_track_storage,
+        &hirari_track_type,
+        &hirari_track_mark_layout,
         [](void* host, void* track) {
             if (!host || !track) return;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            static_cast<Track*>(track)->prepareToPlay(
-                engine->m_sampleRate.load(std::memory_order_relaxed),
+            (void)hirari_track_prepare(
+                track, engine->m_sampleRate.load(std::memory_order_relaxed),
                 engine->m_blockSize.load(std::memory_order_relaxed));
         },
     };

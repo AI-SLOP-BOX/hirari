@@ -3,10 +3,9 @@ public:
     static constexpr uint32_t kMaxTrackMap = 2048;
 
 private:
-    // Track identity plus the copy/free of the heap `std::shared_ptr<Track>`
-    // handles the table owns. Defined with the rest of the table plumbing.
-    static const HirariEngineTrackOps* trackOps() noexcept;
-    void* m_trackTable = hirari_engine_track_table_create(trackOps());
+    // The document graph, its deferred-destruction list and the double-buffered
+    // snapshot the realtime callback traverses are Rust's (engine_track_table.rs).
+    void* m_trackTable = hirari_engine_track_table_create();
 
     // Incremented around the complete direct callback. Control-side object
     // reclamation must not rely on transport state alone: a CoreAudio
