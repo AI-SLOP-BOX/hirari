@@ -414,7 +414,13 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve_buffer(
         } else {
             b"AUDIO_BUFFER_POINTER_RESIZE_ATTEMPTED"
         };
-        unsafe { crate::status_queue::hirari_status_queue_push_default(3, text.as_ptr(), text.len()) };
+        unsafe {
+            crate::status_queue::hirari_status_queue_push_default(
+                crate::status_queue::SEVERITY_CRITICAL,
+                text.as_ptr(),
+                text.len(),
+            )
+        };
         return if needs_data { 1 } else { 5 };
     }
     if needs_data
@@ -1349,7 +1355,20 @@ mod storage_contract_tests {
             hirari_audio_buffer_realtime_resize_attempts, hirari_audio_buffer_set_realtime_guard,
             AUDIO_BUFFER_INLINE_CHANNELS,
         };
-        use crate::status_queue::{hirari_status_queue_pop_default, StatusMessage};
+        use crate::status_queue::{
+            default_queue_test_lock, hirari_status_queue_pop_default, StatusMessage,
+            SEVERITY_CRITICAL,
+        };
+
+        // The notification sink is process-wide, so this test owns it while it
+        // reads the two rejections below.
+        let _serial = default_queue_test_lock();
+        let mut stale = StatusMessage::default();
+        loop {
+            if !unsafe { hirari_status_queue_pop_default(&mut stale) } {
+                break;
+            }
+        }
 
         let stereo = Storage::owned(2, 16);
         // A wide channel table inside this sample block is declined by the
@@ -1382,7 +1401,7 @@ mod storage_contract_tests {
         for reason in &mut reasons {
             let mut message = StatusMessage::default();
             assert!(unsafe { hirari_status_queue_pop_default(&mut message) });
-            assert_eq!(message.severity, 3);
+            assert_eq!(message.severity, SEVERITY_CRITICAL);
             let end = message
                 .text
                 .iter()

@@ -318,9 +318,49 @@ pub unsafe extern "C" fn hirari_audio_driver_host_destroy(host: *mut c_void) {
     unsafe { device::destroy(host) }
 }
 
+/// Starting the device is the engine's creation policy, so it lives here: the
+/// request is declined for a control-plane client, an offline session or an
+/// isolated native run, and a start that fails on real hardware is published as
+/// a Warning notification instead of being left for the caller to report.
 #[no_mangle]
-pub extern "C" fn hirari_audio_driver_host_start(host: *mut c_void) -> bool {
-    device::start(host)
+pub extern "C" fn hirari_audio_driver_host_start_at_creation(
+    host: *mut c_void,
+    requested: bool,
+) -> bool {
+    if !requested
+        || crate::audio_device_mode::hirari_audio_device_mode_offline()
+        || crate::audio_device_mode::hirari_native_test_isolation()
+    {
+        return false;
+    }
+    if device::start(host) {
+        return true;
+    }
+    report_startup_failure(host);
+    false
+}
+
+/// The driver's own status string and platform error code, as one notification.
+fn report_startup_failure(host: *mut c_void) {
+    let status = unsafe {
+        std::ffi::CStr::from_ptr(device::status(host))
+            .to_string_lossy()
+            .into_owned()
+    };
+    let text = format!(
+        "Audio device startup failed: status={} error={}",
+        status,
+        device::last_error_code(host)
+    );
+    // The notification is diagnostic: a full queue must not fail the engine
+    // that is starting anyway.
+    let _ = unsafe {
+        crate::status_queue::hirari_status_queue_push_default(
+            crate::status_queue::SEVERITY_WARNING,
+            text.as_ptr(),
+            text.len(),
+        )
+    };
 }
 
 #[no_mangle]
@@ -445,7 +485,7 @@ mod tests {
     #[test]
     fn an_absent_host_answers_the_fallback_format_and_never_runs() {
         let null = ptr::null_mut();
-        assert!(!hirari_audio_driver_host_start(null));
+        assert!(!device::start(null));
         assert!(!hirari_audio_driver_host_is_running(null));
         assert_eq!(hirari_audio_driver_host_sample_rate(null), 44_100.0);
         assert_eq!(hirari_audio_driver_host_buffer_size(null), 512);
@@ -515,7 +555,7 @@ mod tests {
         DISPATCHED_BLOCKS.store(0, Ordering::Release);
         DISPATCHED_FRAMES.store(0, Ordering::Release);
         let host = hirari_audio_driver_host_create(Some(count_block), ptr::null_mut());
-        assert!(!hirari_audio_driver_host_start(host));
+        assert!(!device::start(host));
         assert!(!hirari_audio_driver_host_is_running(host));
         assert_eq!(hirari_audio_driver_host_sample_rate(host), 44_100.0);
         assert_eq!(hirari_audio_driver_host_buffer_size(host), 512);
@@ -575,5 +615,41 @@ mod tests {
         assert_eq!(left, [0.0_f32; 4]);
         // SAFETY: the host is this test's own and is not used after this.
         unsafe { hirari_audio_driver_host_destroy(host) };
+    }
+
+    #[test]
+    fn an_unrequested_creation_start_claims_nothing_and_reports_nothing() {
+        let _serial = crate::status_queue::default_queue_test_lock();
+        drain_status();
+        assert!(!hirari_audio_driver_host_start_at_creation(ptr::null_mut(), false));
+        assert!(take_status().is_none());
+    }
+
+    #[test]
+    fn a_failed_device_start_is_published_as_a_warning_with_the_driver_diagnosis() {
+        let _serial = crate::status_queue::default_queue_test_lock();
+        drain_status();
+        report_startup_failure(ptr::null_mut());
+        let message = take_status().expect("the failure is published");
+        assert_eq!(message.severity, crate::status_queue::SEVERITY_WARNING);
+        let end = message
+            .text
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(message.text.len());
+        let text = String::from_utf8_lossy(&message.text[..end]).into_owned();
+        assert!(text.starts_with("Audio device startup failed: status="), "{text}");
+        assert!(text.contains(" error="), "{text}");
+    }
+
+    fn take_status() -> Option<crate::status_queue::StatusMessage> {
+        let mut message = crate::status_queue::StatusMessage::default();
+        // SAFETY: the message is this test's own storage.
+        unsafe { crate::status_queue::hirari_status_queue_pop_default(&mut message) }
+            .then_some(message)
+    }
+
+    fn drain_status() {
+        while take_status().is_some() {}
     }
 }

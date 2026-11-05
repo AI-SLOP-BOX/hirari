@@ -26,17 +26,13 @@ using AudioDriverProcessCallback = void (*)(const float* const*, uint32_t,
 extern "C" {
 void* hirari_audio_driver_host_create(AudioDriverProcessCallback process, void* context);
 void hirari_audio_driver_host_destroy(void* host);
-bool hirari_audio_driver_host_start(void* host);
+// Claiming the device is the Rust host's creation policy: it declines for an
+// offline or isolated session and publishes the failure itself, so the engine
+// has no message formatting or notification code left here.
+bool hirari_audio_driver_host_start_at_creation(void* host, bool requested);
 void hirari_audio_driver_host_stop(void* host);
 bool hirari_audio_driver_host_is_running(void* host);
-double hirari_audio_driver_host_sample_rate(void* host);
-uint32_t hirari_audio_driver_host_buffer_size(void* host);
-const char* hirari_audio_driver_host_status(void* host);
-int32_t hirari_audio_driver_host_last_error_code(void* host);
 void hirari_audio_driver_host_try_reconnect(void* host);
-bool hirari_audio_driver_host_reconfigure(void* host, double sampleRate, uint32_t bufferSize);
-bool hirari_audio_driver_host_select_device(void* host, uint32_t device,
-                                            double sampleRate, uint32_t bufferSize);
 bool hirari_audio_driver_host_dispatch_process(void* host, float* left, float* right,
                                                uint32_t frames);
 }

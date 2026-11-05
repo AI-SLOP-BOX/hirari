@@ -5,6 +5,13 @@ use std::sync::OnceLock;
 const QUEUE_CAPACITY: usize = 256;
 const MESSAGE_TEXT_BYTES: usize = 128;
 
+/// The severities a notification carries. These are the wire values the UI
+/// decodes, and the deleted C++ `StatusSeverity` enum used the same order.
+pub const SEVERITY_INFO: u32 = 0;
+pub const SEVERITY_WARNING: u32 = 1;
+pub const SEVERITY_ERROR: u32 = 2;
+pub const SEVERITY_CRITICAL: u32 = 3;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct StatusMessage {
@@ -172,13 +179,49 @@ pub extern "C" fn hirari_status_queue_take_dropped_default() -> u64 {
 }
 
 #[cfg(test)]
+pub(crate) static DEFAULT_QUEUE_TEST_LOCK: std::sync::Mutex<()> =
+    std::sync::Mutex::new(());
+
+/// Serialises the tests that read and write the process-wide default queue, so
+/// one of them cannot consume another's notification.
+#[cfg(test)]
+pub(crate) fn default_queue_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    DEFAULT_QUEUE_TEST_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
 mod tests {
-    use super::{StatusMessage, StatusQueue, MESSAGE_TEXT_BYTES, QUEUE_CAPACITY};
+    use super::{
+        hirari_status_queue_pop_default, hirari_status_queue_push_default,
+        hirari_status_queue_take_dropped_default, default_queue_test_lock, StatusMessage,
+        StatusQueue, MESSAGE_TEXT_BYTES, QUEUE_CAPACITY, SEVERITY_ERROR, SEVERITY_INFO,
+        SEVERITY_WARNING,
+    };
     use std::sync::Arc;
     use std::thread;
 
-    unsafe extern "C" {
-        fn hirari_status_queue_cpp_wrapper_smoke() -> bool;
+    fn push(severity: u32, text: &str) -> bool {
+        unsafe { hirari_status_queue_push_default(severity, text.as_ptr(), text.len()) }
+    }
+
+    fn pop() -> Option<StatusMessage> {
+        let mut message = StatusMessage::default();
+        unsafe { hirari_status_queue_pop_default(&mut message) }.then_some(message)
+    }
+
+    fn drain() {
+        while pop().is_some() {}
+    }
+
+    fn text_of(message: &StatusMessage) -> String {
+        let end = message
+            .text
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(message.text.len());
+        String::from_utf8_lossy(&message.text[..end]).into_owned()
     }
 
     #[test]
@@ -234,9 +277,32 @@ mod tests {
     }
 
     #[test]
-    fn cpp_status_api_roundtrips_through_rust_owned_queue() {
-        // SAFETY: The C++ smoke helper owns the process singleton and performs
-        // only bounded queue push/pop operations through the public adapter.
-        assert!(unsafe { hirari_status_queue_cpp_wrapper_smoke() });
+    fn the_default_queue_roundtrips_publishes_severity_and_counts_drops() {
+        let _serial = default_queue_test_lock();
+        drain();
+        assert!(push(SEVERITY_WARNING, "bridge status"));
+        let message = pop().expect("the notification is queued");
+        assert_eq!(message.severity, SEVERITY_WARNING);
+        assert_eq!(text_of(&message), "bridge status");
+
+        // The queue is bounded by design: filling it exactly leaves no room, and
+        // the rejected notification is counted rather than lost silently.
+        for _ in 0..QUEUE_CAPACITY {
+            assert!(push(SEVERITY_INFO, "bounded"));
+        }
+        assert!(!push(SEVERITY_ERROR, "overflow"));
+        assert_eq!(hirari_status_queue_take_dropped_default(), 1);
+        drain();
+        assert!(pop().is_none());
+    }
+
+    #[test]
+    fn a_null_payload_is_refused_without_touching_the_queue() {
+        let _serial = default_queue_test_lock();
+        drain();
+        // SAFETY: a null text with a non-zero size is exactly the misuse the
+        // adapter is expected to refuse.
+        assert!(!unsafe { hirari_status_queue_push_default(SEVERITY_INFO, std::ptr::null(), 4) });
+        assert!(pop().is_none());
     }
 }

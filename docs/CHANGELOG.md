@@ -292,6 +292,29 @@ production support.
   2989; the repo-wide C++/Objective-C++ footprint drops 1221 lines, leaving
   2989 in `src` plus the bridge reference TU, 455 in the C++ contract tests and
   3234 in the vendored signalsmith headers.
+- Slice 78 closes the last C++ status-queue surface. Whether a session may claim
+  the audio device at construction, and what a failed start is reported as, moved
+  out of `AudioEngine`'s constructor into the Rust driver host that already owns
+  device lifecycle: `hirari_audio_driver_host_start_at_creation` applies the
+  control-plane, offline and native-test declinations and publishes the driver
+  status plus error code as a Warning notification itself, so the C++ side keeps
+  only the call. `src/core/status_queue.hpp` (the C++ mirror of the queue's
+  severity enum), the `report_hirari_log` relay in `bridge_shims.hpp` and
+  `lib.rs`, the wrapper smoke test and the dead prototypes and POD mirrors in
+  `audio_engine.hpp` and `rust_ffi.hpp` (the `HirariMidiEvent` layout copy and
+  its five `static_assert`s) are gone; the MIDI layout is now pinned by Rust
+  `const _:` size/offset asserts next to the store that owns it, and
+  `MIDI_EVENT_CAPACITY` is public. `tests/realtime_safety_contract.cpp` became
+  `hirari-core-bridge/tests/realtime_safety_contract.rs` and drives the same
+  guarantees over the same flat ABI: table-full overflow with take-once
+  semantics, an empty payload still occupying a slot, and the realtime guard
+  declining growth while naming the reason on the queue. With no runtime C++
+  contract TU left to instrument, the C++ ASan/UBSan and TSan harnesses and the
+  `hirari-test-sanitized` target were retired rather than pointed at a stub; the
+  Rust side of these contracts runs under the normal test gates.
+  Counted C++ 2989 -> 2875 (-114); repo-wide footprint 6598 -> 6512, leaving
+  2833 in `src`, 42 in the bridge reference TU, 403 in the C++ contract tests
+  and 3234 in the vendored signalsmith headers.
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

@@ -118,16 +118,8 @@ add_custom_target(hirari-cli
     COMMENT "Building Hirari declarative CLI"
 )
 
-add_custom_target(hirari-test-sanitized
-    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_cpp_sanitizers.sh"
-    COMMAND /bin/sh "${CMAKE_CURRENT_SOURCE_DIR}/scripts/run_cpp_tsan.sh"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    USES_TERMINAL
-    COMMENT "Running sanitized native contracts"
-)
-
 add_custom_target(hirari-test-all)
-add_dependencies(hirari-test-all hirari-test hirari-test-native hirari-test-sanitized hirari-test-stress)
+add_dependencies(hirari-test-all hirari-test hirari-test-native hirari-test-stress)
 add_dependencies(hirari-test-all hirari-test-ui-integration)
 
 add_custom_target(hirari-audit-session-singletons
@@ -306,6 +298,6 @@ else()
         COMMENT "Verifying Hirari repository health"
     )
 endif()
-add_dependencies(hirari-verify hirari-test hirari-test-native hirari-test-sanitized hirari-test-stress)
+add_dependencies(hirari-verify hirari-test hirari-test-native hirari-test-stress)
 
 add_custom_target(hirari ALL DEPENDS hirari-check)

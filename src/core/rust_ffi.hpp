@@ -159,22 +159,6 @@ extern "C" void hirari_audio_buffer_storage_clear(
 extern "C" uint32_t hirari_audio_buffer_storage_sanitize(const void* storage);
 extern "C" void hirari_audio_buffer_set_realtime_guard(bool is_realtime);
 extern "C" uint64_t hirari_audio_buffer_realtime_resize_attempts();
-// One block's MIDI event, mirrored field for field from the Rust owner's
-// `#[repr(C)]` layout. 256 payload bytes cover MIDI 2.0 UMP packets and bounded
-// SysEx chunks; anything larger is rejected and counted, never truncated.
-struct HirariMidiEvent {
-    uint64_t sampleOffset;
-    uint32_t size;
-    uint8_t data[256];
-    uint8_t articulationId = 0;  // 0 = default, 1+ = technique id
-};
-static_assert(offsetof(HirariMidiEvent, sampleOffset) == 0);
-static_assert(offsetof(HirariMidiEvent, size) == 8);
-static_assert(offsetof(HirariMidiEvent, data) == 12);
-static_assert(offsetof(HirariMidiEvent, articulationId) == 268);
-static_assert(sizeof(HirariMidiEvent) == 272);
-// `MidiBufferState::kMaxEvents` in the Rust owner.
-constexpr size_t kHirariMidiMaxEventsPerBlock = 1024;
 
 extern "C" void* hirari_midi_buffer_create();
 extern "C" void hirari_midi_buffer_destroy(void* state);
@@ -491,7 +475,6 @@ extern "C" size_t hirari_float_buffer_len(const void* buffer);
 extern "C" const float* hirari_float_buffer_data(const void* buffer);
 extern "C" void hirari_float_buffer_destroy(void* buffer);
 // Environment-driven device admission (audio_device_mode.rs).
-extern "C" bool hirari_audio_device_mode_offline();
 extern "C" bool hirari_native_test_isolation();
 // Audio configuration bounds (audio_config_rules.rs).
 extern "C" bool hirari_audio_format_valid(double sampleRate, uint32_t blockSize);
@@ -953,10 +936,6 @@ extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
 extern "C" void hirari_engine_block_clear_midi_events(void* state);
 
-extern "C" bool hirari_status_queue_push_default(
-    uint32_t severity, const uint8_t* text, size_t text_size);
-extern "C" bool hirari_status_queue_pop_default(void* output_message);
-extern "C" uint64_t hirari_status_queue_take_dropped_default();
 extern "C" void* hirari_undo_manager_create(size_t max_depth, uint64_t coalesce_window_ms);
 extern "C" uint64_t hirari_undo_manager_register_native_callback(
     void* state, void* context, void (*invoke)(void*), void (*destroy)(void*));

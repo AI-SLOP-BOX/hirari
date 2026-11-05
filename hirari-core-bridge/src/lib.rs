@@ -495,8 +495,6 @@ pub mod ffi {
             tracks: &Vec<NativeTrackStorages>,
         ) -> bool;
 
-        fn report_hirari_log(level: u32, msg: &str);
-
         fn analysis_spectral_display(spectrum: &[f32], sample_rate: f64) -> Vec<f32>;
         fn analysis_phase_heatmap(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_partials(spectrum: &[f32]) -> Vec<f32>;

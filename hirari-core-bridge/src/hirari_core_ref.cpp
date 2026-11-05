@@ -1,22 +1,6 @@
 #include "hirari-core-bridge/src/lib.rs.h"
-#include <string>
-#include <iostream>
 #include <cmath>
 #include <algorithm>
-
-namespace Hirari::Core::BridgeFFI {
-
-void HIRARI_LOG(uint32_t level, const std::string& msg) {
-    ::Hirari::Core::Bridge::report_hirari_log(level, rust::Str(msg));
-}
-
-} // namespace Hirari::Core::BridgeFFI
-
-#include "core/status_queue.hpp"
-
-namespace Hirari::Core::Bridge {
-
-} // namespace Hirari::Core::Bridge
 
 // Frozen reference for the pre-migration AnalogSaturator / Oversampler2x path.
 extern "C" void hirari_analog_saturator_frozen_reference(
@@ -56,19 +40,3 @@ extern "C" void hirari_analog_saturator_frozen_reference(
         output_right[i] = std::isfinite(out_r) ? out_r : 0.0f;
     }
 }
-
-extern "C" bool hirari_status_queue_cpp_wrapper_smoke() {
-    Hirari::Core::StatusMessage message{};
-    Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Warning, "C++ bridge status");
-    if (!Hirari::Core::popEngineStatus(message) ||
-        message.severity != Hirari::Core::StatusSeverity::Warning ||
-        std::string_view(message.text) != "C++ bridge status") return false;
-    for (size_t index = 0; index < 256; ++index) {
-        Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Info, "bounded");
-    }
-    Hirari::Core::pushEngineStatus(Hirari::Core::StatusSeverity::Error, "overflow");
-    const bool counted = Hirari::Core::takeDroppedEngineStatus() == 1;
-    while (Hirari::Core::popEngineStatus(message)) {}
-    return counted;
-}
-

@@ -1,8 +1,10 @@
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
-const MIDI_EVENT_CAPACITY: usize = 1024;
 const MIDI_EVENT_BYTES: usize = 256;
+/// The event ceiling of one realtime block, the value the deleted C++ contract
+/// mirrored as `kHirariMidiMaxEventsPerBlock`.
+pub const MIDI_EVENT_CAPACITY: usize = 1024;
 
 // C++ MidiBuffer maps these return codes to its existing overflow telemetry.
 const WRITE_OK: u8 = 0;
@@ -19,6 +21,15 @@ struct MidiEvent {
     data: [u8; MIDI_EVENT_BYTES],
     _articulation_id: u8,
 }
+
+// The layout the deleted C++ mirror asserted before it handed one of these
+// across the boundary: 256 payload bytes cover MIDI 2.0 UMP packets and bounded
+// SysEx chunks, and anything larger is rejected and counted, never truncated.
+const _: () = assert!(std::mem::size_of::<MidiEvent>() == 272);
+const _: () = assert!(std::mem::offset_of!(MidiEvent, sample_offset) == 0);
+const _: () = assert!(std::mem::offset_of!(MidiEvent, size) == 8);
+const _: () = assert!(std::mem::offset_of!(MidiEvent, data) == 12);
+const _: () = assert!(std::mem::offset_of!(MidiEvent, _articulation_id) == 268);
 
 #[repr(C)]
 #[derive(Clone, Copy)]
