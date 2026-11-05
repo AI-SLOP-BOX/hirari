@@ -159,10 +159,6 @@ extern "C" void hirari_midi_playback_clock_destroy(void* clock);
 // (preview_sampler.rs); the audio callback only renders through the handle.
 extern "C" void* hirari_preview_sampler_create();
 extern "C" void hirari_preview_sampler_destroy(void* state);
-extern "C" void hirari_preview_sampler_set(
-    void* state, const float* samples, size_t count, double source_rate);
-extern "C" void hirari_preview_sampler_clear(void* state);
-extern "C" void hirari_preview_sampler_reclaim(void* state);
 extern "C" void* hirari_external_sync_create();
 extern "C" void hirari_external_sync_destroy(void* state);
 extern "C" void hirari_external_sync_set_rate(void* state, double bpm);
@@ -422,11 +418,6 @@ extern "C" bool hirari_bounce_cancel(void* session), hirari_bounce_pause(void* s
     hirari_bounce_resume(void* session);
 extern "C" uint32_t hirari_bounce_state(void* session);
 extern "C" float hirari_bounce_progress(void* session);
-extern "C" void hirari_bounce_set_offline_target(void* session, uint32_t track_id);
-extern "C" void hirari_bounce_clear_offline_target(void* session);
-extern "C" void hirari_bounce_set_tail_seconds(void* session, float seconds);
-extern "C" void hirari_bounce_set_render_options(
-    void* session, uint8_t pre_fader, uint8_t include_inserts);
 
 enum HirariRegionEditOp : int32_t {
     // Replace the editable state and republish it (normalising add path).
@@ -727,10 +718,6 @@ extern "C" void hirari_region_store_trim_retired(void* track);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
                                                    uint32_t* out, size_t capacity);
 extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionId);
-extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
-                                                 void* destinationTrack,
-                                                 const uint32_t* regionIds, size_t count);
-extern "C" void hirari_region_store_forget_waveforms(void* host, void* track);
 extern "C" bool hirari_region_store_append_processing(void* track, uint32_t regionId,
                                                       HirariEventStep step);
 extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regionId);
@@ -742,8 +729,6 @@ extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regio
 extern "C" void* hirari_master_meter_create(double sample_rate);
 extern "C" void hirari_master_meter_destroy(void* state);
 extern "C" void hirari_master_meter_prepare(void* state, double sample_rate);
-extern "C" float hirari_master_meter_get(const void* state, uint32_t field);
-extern "C" void hirari_master_meter_analysis_stats(const void* state, float* output);
 
 struct HirariMpeState;
 extern "C" HirariMpeState* hirari_mpe_state_create();
@@ -930,17 +915,6 @@ struct HirariTrackEditHostOps {
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
 
-// Duplicating a track copies the store state of one track onto another, name
-// suffix included. The engine only supplies the two handle sets; the reads, the
-// chain rebuild and the per-node tolerance for a refused sandbox path all live
-// in Rust.
-extern "C" bool hirari_track_clone_state(void* sourceStrip, void* sourceRuntime,
-                                        void* sourceAutomation, void* sourceChain,
-                                        void* sourceName,
-                                        void* destStrip, void* destRuntime,
-                                        void* destAutomation, void* destChain,
-                                        void* destName, bool destIsBus);
-
 // Track and region id allocation lives in Rust (id_host.rs). An emptied
 // project restarts the counters; an installed document resumes them past the
 // highest ids it carries. Both are store-only and safe under the track lock.
@@ -1019,7 +993,6 @@ extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t fra
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
 extern "C" void* hirari_builtin_midi_instrument_create();
 extern "C" void hirari_builtin_midi_instrument_destroy(void* state);
-extern "C" bool hirari_vca_assign_track(uint32_t track_id, uint32_t group_id);
 // Arrangement timeline document (markers and arranger parts) is a Rust-owned
 // store; the engine only keeps the handle and the save path lets Rust read
 // the document directly.
@@ -1201,12 +1174,6 @@ extern "C" uint64_t hirari_engine_block_playhead(const void* state);
 extern "C" void hirari_engine_block_set_playhead(void* state, uint64_t playhead);
 extern "C" uint8_t hirari_engine_block_is_playing(const void* state);
 extern "C" void hirari_engine_block_set_playing(void* state, uint8_t playing);
-extern "C" uint8_t hirari_engine_block_loop_enabled(const void* state);
-extern "C" void hirari_engine_block_set_loop(void* state, uint8_t enabled);
-extern "C" uint64_t hirari_engine_block_cycle_start(const void* state);
-extern "C" uint64_t hirari_engine_block_cycle_end(const void* state);
-extern "C" uint8_t hirari_engine_block_set_cycle(
-    void* state, uint64_t start_sample, uint64_t end_sample, uint8_t enabled);
 extern "C" void hirari_engine_block_set_test_tone(void* state, uint8_t enabled);
 extern "C" uint64_t hirari_engine_block_generation(const void* state);
 extern "C" uint64_t hirari_engine_block_bump_generation(void* state);

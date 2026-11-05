@@ -7,29 +7,10 @@ void HirariUnifiedEngine::waitForAudioCallbacks() const noexcept {
     }
 }
 
-void HirariUnifiedEngine::set_preview_sample(const float* samples, size_t count, double sourceRate) {
-    if (samples == nullptr || count == 0 || !std::isfinite(sourceRate) || sourceRate <= 0.0) {
-        clear_preview_sample();
-        return;
-    }
-    // Retired generations are reclaimed only while the callback is quiescent,
-    // so a running preview never has its buffer freed underneath it.
-    if (!hirari_engine_block_is_playing(m_engineBlock)) {
-        hirari_preview_sampler_clear(m_previewSampler);
-        waitForAudioCallbacks();
-        hirari_preview_sampler_reclaim(m_previewSampler);
-    }
-    hirari_preview_sampler_set(m_previewSampler, samples, count, sourceRate);
-}
-
-void HirariUnifiedEngine::clear_preview_sample() {
-    hirari_preview_sampler_clear(m_previewSampler);
-    if (!hirari_engine_block_is_playing(m_engineBlock)) {
-        waitForAudioCallbacks();
-        hirari_preview_sampler_reclaim(m_previewSampler);
-    }
-}
-
+// The preview-sampler swap and its quiescence protocol are Rust-side now
+// (engine_transport.rs): the delegate asks the block store whether the
+// callback is running, joins it on the control thread and drives the sampler
+// clear/reclaim/set externs directly, so no engine method forwards either.
 void HirariUnifiedEngine::set_playing(bool p) {
     // The voice release and the playback panic are part of stopping; Rust's
     // set_playing asks the callback to perform them on its next block.
@@ -73,28 +54,11 @@ float HirariUnifiedEngine::get_track_pdc_compensation_ms(uint32_t tid) const noe
     });
 }
 
-void HirariUnifiedEngine::set_playhead(uint64_t p) { hirari_engine_block_set_playhead(m_engineBlock, p); }
-uint64_t HirariUnifiedEngine::get_playhead() const { return hirari_engine_block_playhead(m_engineBlock); }
-void HirariUnifiedEngine::set_loop(bool enabled) { hirari_engine_block_set_loop(m_engineBlock, enabled); }
-bool HirariUnifiedEngine::set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled) {
-    return hirari_engine_block_set_cycle(m_engineBlock, start_sample, end_sample, enabled) != 0;
-}
-bool HirariUnifiedEngine::is_loop_enabled() const noexcept {
-    return hirari_engine_block_loop_enabled(m_engineBlock) != 0;
-}
-uint64_t HirariUnifiedEngine::cycle_start() const noexcept { return hirari_engine_block_cycle_start(m_engineBlock); }
-uint64_t HirariUnifiedEngine::cycle_end() const noexcept { return hirari_engine_block_cycle_end(m_engineBlock); }
-void HirariUnifiedEngine::set_test_tone(bool enabled) { hirari_engine_block_set_test_tone(m_engineBlock, enabled); }
-
-bool HirariUnifiedEngine::assign_track_to_vca(uint32_t trackId, uint32_t groupId) {
-    if (trackId == 0 || groupId == 0) return false;
-    {
-        std::lock_guard<std::mutex> lock(m_tracksMutex);
-        if (!findTrackLocked(trackId)) return false;
-    }
-    return hirari_vca_assign_track(trackId, groupId);
-}
-
+// The playhead, loop, cycle, test tone and VCA assignment relays are gone:
+// engine_transport.rs reads and writes the engine-block store and the global
+// VCA manager directly, and the delegate calls it. Only the device-loss and
+// new-project paths in this facade still touch the block store, through the
+// hirari_engine_block_* externs.
 
 void HirariUnifiedEngine::new_project() {
     set_playing(false);
@@ -104,8 +68,8 @@ void HirariUnifiedEngine::new_project() {
     hirari_input_blocks_reset(m_inputBlocks);
     hirari_engine_command_ring_clear(m_engineRings);
     hirari_region_jobs_clear(this);
-    set_test_tone(false);
-    set_playhead(0);
+    hirari_engine_block_set_test_tone(m_engineBlock, 0);
+    hirari_engine_block_set_playhead(m_engineBlock, 0);
     hirari_mpe_state_reset(m_mpeState);
     hirari_mpe_manager_reset(m_mpeManager);
     hirari_undo_manager_clear(m_undoState);

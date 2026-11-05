@@ -58,7 +58,7 @@ fn telemetry_meter_and_spectral_reads_sample_the_rust_stores() {
     assert_eq!(telemetry[5], 0.0);
     assert_eq!(telemetry[7], 0.0, "no driver runs under the test guard");
     assert_eq!(telemetry[8], 0.0, "transport is stopped");
-    assert_eq!(telemetry[9], core.get_playhead() as f32);
+    assert_eq!(telemetry[9], crate::engine_transport::playhead(core) as f32);
 }
 
 #[test]

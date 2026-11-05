@@ -47,6 +47,7 @@ pub mod engine_edit_ext;
 pub mod engine_input_block;
 pub mod engine_rings;
 pub mod engine_track_table;
+pub mod engine_transport;
 pub mod auditor;
 pub mod auto_filter;
 pub mod auto_pitch_corrector;

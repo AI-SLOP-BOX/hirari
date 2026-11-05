@@ -1,7 +1,7 @@
 impl HirariCore {
     pub fn set_playing(&self, p: bool) {
         if let Some(e) = self.engine.as_ref() {
-            let _ = e.try_set_playing(p);
+            let _ = crate::engine_transport::try_set_playing(e, e.get_core(), p);
         }
     }
 
@@ -9,7 +9,7 @@ impl HirariCore {
         let changed = self
             .engine
             .as_ref()
-            .is_some_and(|engine| engine.try_set_playing(p));
+            .is_some_and(|engine| crate::engine_transport::try_set_playing(engine, engine.get_core(), p));
         if changed {
             self.publish_production_event(if p {
                 crate::production_events::ProductionEvent::TransportStarted

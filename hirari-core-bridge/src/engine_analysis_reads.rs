@@ -220,8 +220,8 @@ pub fn runtime_telemetry(engine: &AudioEngine, core: &HirariUnifiedEngine) -> Ve
         telemetry.count as f32,
         (telemetry.version & 0x00ff_ffff) as f32,
         f32::from(device_running),
-        f32::from(core.is_playing()),
-        core.get_playhead() as f32,
+        f32::from(crate::engine_transport::is_playing(core)),
+        crate::engine_transport::playhead(core) as f32,
     ]
 }
 

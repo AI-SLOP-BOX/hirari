@@ -1,5 +1,7 @@
     // Tracks
-    bool assign_track_to_vca(uint32_t track_id, uint32_t group_id);
+    // VCA assignment is answered by Rust now (engine_transport.rs): the track
+    // is resolved under the C++ tracks lock through the session ops and the
+    // assignment lands in the Rust VCA manager, so no engine forwarder is left.
     void new_project();
     // Lock-free window onto the published graph, for read-only control scans
     // such as the analysis bridge. The realtime callback traverses the same one.

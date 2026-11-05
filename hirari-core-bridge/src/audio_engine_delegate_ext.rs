@@ -719,10 +719,11 @@ impl ffi::AudioEngine {
 }
 
 // Simple getters read the inner engine through `get_core`; the AudioEngine
-// forwarders for them are gone.
+// forwarders for them are gone. Transport reads/writes go to
+// `engine_transport`, which drives the Rust-owned engine-block store directly.
 impl ffi::AudioEngine {
     pub fn is_loop_enabled(&self) -> bool {
-        self.get_core().is_loop_enabled()
+        crate::engine_transport::loop_enabled(self.get_core())
     }
 
     pub fn get_master_gain(&self) -> f32 {
@@ -738,10 +739,10 @@ impl ffi::AudioEngine {
 // Rust reaches the same inner engine through `get_core`.
 impl ffi::AudioEngine {
     pub fn cycle_start(&self) -> u64 {
-        self.get_core().cycle_start()
+        crate::engine_transport::cycle_start(self.get_core())
     }
     pub fn cycle_end(&self) -> u64 {
-        self.get_core().cycle_end()
+        crate::engine_transport::cycle_end(self.get_core())
     }
     pub fn is_metronome_enabled(&self) -> bool {
         unsafe { crate::metronome_renderer::hirari_metronome_is_enabled(metronome(self)) }
@@ -751,7 +752,7 @@ impl ffi::AudioEngine {
         self.mark_project_state_changed();
     }
     pub fn get_playhead(&self) -> u64 {
-        self.get_core().get_playhead()
+        crate::engine_transport::playhead(self.get_core())
     }
     pub fn samples_to_beats(&self, samples: u64) -> f64 {
         unsafe {
@@ -814,6 +815,9 @@ impl ffi::AudioEngine {
     pub fn trigger_preview_sample(&self) {
         unsafe { crate::preview_sampler::hirari_preview_sampler_trigger(preview_sampler(self)) }
     }
+    pub fn set_preview_sample(&self, samples: &[f32], source_rate: f64) {
+        crate::engine_transport::set_preview_sample(self.get_core(), samples, source_rate);
+    }
     pub fn non_finite_plugin_samples(&self) -> u64 {
         crate::engine_analysis_reads::non_finite_plugin_samples(self.get_core())
     }
@@ -860,7 +864,7 @@ impl ffi::AudioEngine {
         self.get_core().get_track_correlation(tid)
     }
     pub fn assign_track_to_vca(&self, track_id: u32, group_id: u32) -> bool {
-        pinned(self).assign_track_to_vca(track_id, group_id)
+        crate::engine_transport::assign_track_to_vca(self.get_core(), track_id, group_id)
     }
     pub fn new_project(&self) {
         pinned(self).new_project()
@@ -948,21 +952,21 @@ impl ffi::AudioEngine {
         pinned(self).mark_project_state_changed()
     }
     pub fn set_loop(&self, enabled: bool) {
-        pinned(self).set_loop(enabled);
+        crate::engine_transport::set_loop(self.get_core(), enabled);
         self.mark_project_state_changed();
     }
     pub fn set_cycle_range(&self, start_sample: u64, end_sample: u64, enabled: bool) -> bool {
-        if !pinned(self).set_cycle_range(start_sample, end_sample, enabled) {
+        if !crate::engine_transport::set_cycle_range(self.get_core(), start_sample, end_sample, enabled) {
             return false;
         }
         self.mark_project_state_changed();
         true
     }
     pub fn set_playhead(&self, pos: u64) {
-        pinned(self).set_playhead(pos)
+        crate::engine_transport::set_playhead(self.get_core(), pos)
     }
     pub fn set_test_tone(&self, enabled: bool) {
-        pinned(self).set_test_tone(enabled)
+        crate::engine_transport::set_test_tone(self.get_core(), enabled)
     }
     pub fn set_master_gain(&self, value: f32) -> bool {
         if !pinned(self).set_master_gain(value) {
@@ -991,7 +995,7 @@ impl ffi::AudioEngine {
         self.get_core().get_project_layout_revision()
     }
     pub fn is_playing(&self) -> bool {
-        self.get_core().is_playing()
+        crate::engine_transport::is_playing(self.get_core())
     }
     pub fn set_tempo(&self, bpm: f32) -> bool {
         let core = self.get_core();

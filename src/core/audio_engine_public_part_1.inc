@@ -24,6 +24,9 @@ public:
     uintptr_t log_state() const {
         return m_engine ? reinterpret_cast<uintptr_t>(m_engine->log_state()) : 0;
     }
+    uintptr_t engine_block_state() const {
+        return m_engine ? reinterpret_cast<uintptr_t>(m_engine->engine_block_state()) : 0;
+    }
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = is_driver_running();
@@ -70,9 +73,6 @@ public:
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
 
-    void set_preview_sample(rust::Slice<const float> samples, double sourceRate) const {
-        if (m_engine) m_engine->set_preview_sample(samples.data(), samples.size(), sourceRate);
-    }
     /// Processes one bounded stereo block through the C++ graph. Rust must
     /// not maintain a second production audio graph.
     void process_audio_block(rust::Slice<float> left, rust::Slice<float> right) const noexcept {

@@ -1,5 +1,9 @@
     // Transport
+    // The playhead, loop, cycle and test-tone transport answers come straight
+    // from the Rust engine-block store (engine_transport.rs); only the
+    // device-callback join and the stop-time path stay here.
     bool is_playing() const;
+    void join_audio_callbacks() const noexcept { waitForAudioCallbacks(); }
     bool audio_range_overflowed() const noexcept {
         return hirari_engine_block_range_overflowed(m_engineBlock) != 0;
     }
@@ -8,8 +12,6 @@
     float get_track_latency_ms(uint32_t tid) const noexcept;
     float get_track_pdc_compensation_ms(uint32_t tid) const noexcept;
     void set_playing(bool playing);
-    uint64_t get_playhead() const;
-    void set_playhead(uint64_t pos);
     // Tempo editing moved to Rust; this write survives for the native contract
     // test that drives the engine singleton directly.
     bool set_tempo(float bpm) const;
@@ -48,13 +50,8 @@
     uint64_t get_audio_config_generation() const noexcept {
         return hirari_engine_block_generation(m_engineBlock);
     }
-    void set_loop(bool enabled);
-    bool set_cycle_range(uint64_t start_sample, uint64_t end_sample, bool enabled);
-    bool is_loop_enabled() const noexcept;
-    uint64_t cycle_start() const noexcept;
-    uint64_t cycle_end() const noexcept;
-    void set_test_tone(bool enabled);
-    // Preview sampler bridge. The sample is replaced off the audio thread;
-    // the callback only reads an immutable shared snapshot.
-    void set_preview_sample(const float* samples, size_t count, double sourceRate);
-    void clear_preview_sample();
+    // Rust owns the playhead, loop, cycle and test tone in the engine-block
+    // store (engine_transport.rs); the deleted accessors were one-line
+    // forwarders onto hirari_engine_block_* that Rust now calls directly.
+    // The preview-sampler quiescence protocol is Rust-side too: the delegate
+    // calls the sampler store externs, so no engine forwarder is left.

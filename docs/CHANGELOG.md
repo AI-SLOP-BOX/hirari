@@ -106,6 +106,21 @@ production support.
   the six `rust_ffi.hpp` registry declarations are deleted; a new integration
   test asserts the chain-backed names ("Threshold", "Ratio") and every empty
   guard. C++ 4711 -> 4658 (-53).
+- Transport, preview-sampler and VCA assignment are served straight from the
+  Rust engine-block store. The new `engine_transport.rs` reads and writes the
+  playhead, loop, cycle range and test tone through the `hirari_engine_block_*`
+  externs, gates transport start on the driver actually running, reproduces the
+  stop-time quiescence by joining the device callback and trimming every live
+  track's retired region generations, drives the preview sampler's clear/join/
+  reclaim/set protocol, and checks the track exists under the session's tracks
+  lock before the Rust VCA manager records an assignment. `HirariCore::
+  try_set_playing` now runs that Rust path. The engine lost the nine one-line
+  relay bodies, their declarations and the two preview forwarders; the facade
+  gained a one-line callback join and an `engine_block_state` handle getter,
+  `new_project` rewires its test-tone and playhead resets to the externs, and
+  33 `rust_ffi.hpp` declarations no longer referenced from C++ are deleted —
+  including the dead bounce-offline, master-meter read, region copy/forget,
+  clone-state and engine-block loop/cycle getters. C++ 4658 -> 4588 (-70).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

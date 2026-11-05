@@ -129,18 +129,7 @@ pub mod ffi {
 
         fn set_playing(self: &AudioEngine, p: bool);
         fn try_set_playing(self: &AudioEngine, p: bool) -> bool;
-        fn set_loop(self: Pin<&mut HirariUnifiedEngine>, enabled: bool);
-        fn set_cycle_range(
-            self: Pin<&mut HirariUnifiedEngine>,
-            start_sample: u64,
-            end_sample: u64,
-            enabled: bool,
-        ) -> bool;
-        fn is_loop_enabled(self: &HirariUnifiedEngine) -> bool;
-        fn cycle_start(self: &HirariUnifiedEngine) -> u64;
-        fn cycle_end(self: &HirariUnifiedEngine) -> u64;
-        fn is_playing(self: &HirariUnifiedEngine) -> bool;
-        fn get_playhead(self: &HirariUnifiedEngine) -> u64;
+        fn join_audio_callbacks(self: &HirariUnifiedEngine);
         fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
         fn set_master_gain(self: Pin<&mut HirariUnifiedEngine>, value: f32) -> bool;
         fn control_room_state(self: &AudioEngine) -> usize;
@@ -158,6 +147,7 @@ pub mod ffi {
         fn bounce_session_state(self: &HirariUnifiedEngine) -> usize;
         fn get_track_delay_samples(self: &HirariUnifiedEngine, tid: u32) -> u32;
         fn audio_driver_host(self: &AudioEngine) -> usize;
+        fn engine_block_state(self: &AudioEngine) -> usize;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn try_reconnect_audio_device(self: &AudioEngine);
         fn select_audio_device(
@@ -169,16 +159,8 @@ pub mod ffi {
         fn get_audio_config_generation(self: &AudioEngine) -> u64;
         fn apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32);
         fn try_apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool;
-        fn set_playhead(self: Pin<&mut HirariUnifiedEngine>, pos: u64);
-        fn set_test_tone(self: Pin<&mut HirariUnifiedEngine>, enabled: bool);
-        fn set_preview_sample(self: &AudioEngine, samples: &[f32], source_rate: f64);
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn shutdown(self: &AudioEngine);
-        fn assign_track_to_vca(
-            self: Pin<&mut HirariUnifiedEngine>,
-            track_id: u32,
-            group_id: u32,
-        ) -> bool;
         fn new_project(self: Pin<&mut HirariUnifiedEngine>);
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
