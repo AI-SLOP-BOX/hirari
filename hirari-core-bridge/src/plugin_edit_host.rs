@@ -9,15 +9,15 @@
 //! bump-the-layout protocol, and records exactly one undo entry built from the
 //! pre/post values.
 //!
-//! Two steps really are engine code and stay host callbacks: re-publishing the
-//! track snapshot after the chain changed, and reading the engine's undo handle.
+//! Two steps really are engine code: re-publishing the track snapshot after the
+//! chain changed, which is the engine's own graph resync entry point, and the
+//! undo history, which is a slot of the session bag the host resolves to.
 //! A replayed entry runs after the session that recorded it is gone, so it opens
 //! its own session; the history resyncs the graph, which needs the tracks lock.
 //!
 //! Every entry point runs on the control thread.
 
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
 
 use crate::effect_chain_host::{
     hirari_effect_chain_add_builtin, hirari_effect_chain_add_sandbox, hirari_effect_chain_bypass,
@@ -27,7 +27,9 @@ use crate::effect_chain_host::{
     hirari_effect_chain_remove, hirari_effect_chain_restore, hirari_effect_chain_set_bypass,
     hirari_effect_chain_set_parameter,
 };
+use crate::engine_session::{handle_of_host, H_UNDO};
 use crate::track_session::TrackSession;
+use crate::undo_edit_host::hirari_engine_sync_structural_changes;
 use crate::undo_transaction::{
     hirari_undo_manager_commit, hirari_undo_manager_discard_native_callback,
     hirari_undo_manager_register_native_callback,
@@ -37,37 +39,6 @@ use crate::undo_transaction::{
 pub type SyncStructuralChangesFn = unsafe extern "C" fn(*mut c_void);
 /// Returns the engine's Rust undo history handle.
 pub type UndoStateFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariPluginEditHostOps {
-    pub sync_structural_changes: Option<SyncStructuralChangesFn>,
-    pub undo_state: Option<UndoStateFn>,
-}
-
-// The table only holds function pointers supplied by the native engine.
-unsafe impl Send for HirariPluginEditHostOps {}
-unsafe impl Sync for HirariPluginEditHostOps {}
-
-static HOST_OPS: OnceLock<Mutex<Option<HirariPluginEditHostOps>>> = OnceLock::new();
-
-fn host_ops() -> Option<HirariPluginEditHostOps> {
-    HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
-}
-
-/// Installs the native host callbacks. Passing null clears them.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_edit_host_install(ops: *const HirariPluginEditHostOps) {
-    let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
-    let value = if ops.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ptr::read(ops) })
-    };
-    if let Ok(mut guard) = slot.lock() {
-        *guard = value;
-    }
-}
 
 /// A history callback body. The history owns the box and drops it when the
 /// entry leaves the undo/redo stacks.
@@ -134,10 +105,7 @@ fn record_applied(
     undo: impl Fn() + 'static,
     redo: impl Fn() + 'static,
 ) -> bool {
-    let Some(read_state) = host_ops().and_then(|ops| ops.undo_state) else {
-        return false;
-    };
-    let state = unsafe { read_state(host) };
+    let state = handle_of_host(host, H_UNDO);
     if state.is_null() {
         return false;
     }
@@ -145,9 +113,7 @@ fn record_applied(
 }
 
 fn sync_structural_changes(host: *mut c_void) {
-    if let Some(sync) = host_ops().and_then(|ops| ops.sync_structural_changes) {
-        unsafe { sync(host) };
-    }
+    unsafe { hirari_engine_sync_structural_changes(host) };
 }
 
 /// Upper bound for a plugin state read, matching the preset file limit.
@@ -336,7 +302,7 @@ fn replay_append(host: *mut c_void, track_id: u32, kind: AppendKind<'_>, capture
 /// did before the policy moved here.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_set_bypass(
     host: *mut c_void,
@@ -367,7 +333,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_bypass(
 /// rejected, matching the chain's contract; a rejected move records nothing.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_move(
     host: *mut c_void,
@@ -401,7 +367,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_move(
 /// requested value rather than a clamped read-back, as the engine did.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_set_parameter(
     host: *mut c_void,
@@ -438,7 +404,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_parameter(
 /// hydration and automation replay, where the caller owns the edit log.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_set_parameter_without_undo(
     host: *mut c_void,
@@ -473,7 +439,7 @@ impl Drop for PresetFile {
 /// a failed state restore are all rejected without recording.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect and `path`
+/// `host` must be an engine host pointer whose session bag is still live and `path`
 /// must be readable for `path_length` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_load_preset(
@@ -542,7 +508,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_load_preset(
 /// bytes reach the preset writer.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect and `path`
+/// `host` must be an engine host pointer whose session bag is still live and `path`
 /// must be readable for `path_length` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_save_preset(
@@ -581,7 +547,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_save_preset(
 /// it can hold the whole state. A missing track or plugin reports zero.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect and `out`
+/// `host` must be an engine host pointer whose session bag is still live and `out`
 /// must be writable for `capacity` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_get_state(
@@ -608,7 +574,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_get_state(
 /// Stores a plugin state without touching the undo history.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect and `state`
+/// `host` must be an engine host pointer whose session bag is still live and `state`
 /// must be readable for `size` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_set_state(
@@ -642,7 +608,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_set_state(
 /// it with the same settings.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_add(
     host: *mut c_void,
@@ -680,7 +646,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_add(
 /// as the engine did with the shared path policy.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect and `path`
+/// `host` must be an engine host pointer whose session bag is still live and `path`
 /// must be readable for `path_length` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_add_sandboxed(
@@ -723,7 +689,7 @@ pub unsafe extern "C" fn hirari_plugin_edit_add_sandboxed(
 /// re-inserts the captured processor at the same index.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_plugin_edit_remove(
     host: *mut c_void,

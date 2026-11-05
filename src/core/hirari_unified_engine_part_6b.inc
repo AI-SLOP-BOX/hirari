@@ -50,7 +50,6 @@ namespace {
     HirariUnifiedEngine::installTrackEditHost();
     HirariUnifiedEngine::installSandboxMaintenanceHost();
     HirariUnifiedEngine::installRoutingEditHost();
-    HirariUnifiedEngine::installPluginEditHost();
     HirariUnifiedEngine::installExpressionMapEditHost();
     HirariUnifiedEngine::installTrackFreezeHost();
     HirariUnifiedEngine::installCommandHost();

@@ -261,6 +261,14 @@ production support.
   points, `installControlEditHost()` and the two focus declarations the engine no
   longer calls are gone, and an engine-backed test pins the focus admission that
   moved out of C++. C++ 3126 -> 3061 (-65).
+- The plugin edit host no longer borrows a table from the engine. Its two
+  callbacks were the graph resync and the undo handle: the resync is already an
+  engine entry point, `hirari_engine_sync_structural_changes`, which the Rust
+  history calls for a replayed edit, and the handle is the session bag's undo
+  slot, so `record_applied` reads it from the host the edit was made against.
+  `HirariPluginEditHostOps`, its install entry point and
+  `installPluginEditHost()` are gone, with the table's slot in the engine's
+  one-time install block. C++ 3061 -> 3034 (-27).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

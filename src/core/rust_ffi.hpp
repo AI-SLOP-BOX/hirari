@@ -663,18 +663,6 @@ extern "C" bool hirari_routing_edit_set_sidechain_link(
     void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex, uint32_t tapPoint,
     bool enabled);
 
-// Plugin-chain edit policy (bypass, reordering, parameters and presets). The
-// chain, the frozen render and the layout revision are read and written by Rust
-// through its own track session; only these two steps are engine code.
-struct HirariPluginEditHostOps {
-    // Re-publishes the track snapshot after the chain changed.
-    void (*syncStructuralChanges)(void*) = nullptr;
-    // Returns the engine's Rust undo history handle.
-    void* (*undoState)(void*) = nullptr;
-};
-
-extern "C" void hirari_plugin_edit_host_install(const HirariPluginEditHostOps* ops);
-
 // Track lifecycle edit policy (create, duplicate, remove and their undo). The
 // graph walk, the captures and the replay are Rust's (track_edit_host.rs): it
 // takes the tracks lock, builds the Rust track, moves the Rust track table,

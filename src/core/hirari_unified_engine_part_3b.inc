@@ -31,19 +31,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     hirari_routing_edit_host_install(&ops);
 }
 
-// Plugin-chain edit host callbacks. Rust decides whether an edit is admitted,
-// applies it to the track's own effect chain and records the undo entry; only
-// the graph resync and the history handle are the engine's.
-void HirariUnifiedEngine::installPluginEditHost() {
-    static const HirariPluginEditHostOps ops = {
-        &HirariUnifiedEngine::syncNative,
-        [](void* host) -> void* {
-            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
-        },
-    };
-    hirari_plugin_edit_host_install(&ops);
-}
-
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
                                            uint32_t pluginIndex) const {
     return hirari_sidechain_engine_has_link(
