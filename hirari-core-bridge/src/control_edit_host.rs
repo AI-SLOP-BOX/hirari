@@ -1,9 +1,10 @@
 //! Control-thread edit policy for track naming, input monitoring and macro
 //! MIDI learn.
 //!
-//! The engine keeps the monitoring atomics and the MIDI learn manager because
-//! the audio callback reads them. This module owns the admission rules and the
-//! undo decision: it rejects the edit before anything is touched, applies the
+//! The monitoring atomics, the macro table and the MIDI learn manager are Rust
+//! stores the engine only holds in its session bag, so this module resolves them
+//! from the host pointer it is given and owns the admission rules and the undo
+//! decision itself: it rejects the edit before anything is touched, applies the
 //! resolved mutation through the track's own session, and records exactly one
 //! undo entry.
 //!
@@ -11,11 +12,12 @@
 
 use std::ffi::c_void;
 use std::slice;
-use std::sync::{Mutex, OnceLock};
 
-use crate::plugin_edit_host::{commit_closures, UndoStateFn};
+use crate::engine_input_block::{hirari_input_blocks_clear_focus, hirari_input_blocks_set_focus};
+use crate::engine_session::{handle_of_host, H_INPUT_BLOCKS, H_MACRO_CONTROL, H_MIDI_LEARN, H_UNDO};
+use crate::plugin_edit_host::commit_closures;
 use crate::track_name_store::MAX_TRACK_NAME_BYTES;
-use crate::track_session::TrackSession;
+use crate::track_session::{self, TrackSession};
 
 /// Matches the engine's per-input channel addressing limit.
 const MAX_MONITOR_CHANNEL: u32 = 32;
@@ -26,46 +28,15 @@ const MAX_MIDI_CC14: u16 = 16383;
 /// Matches `HirariUnifiedEngine::kMaxMacros`.
 const MAX_MACROS: u32 = 128;
 
-/// Applies the monitor focus and reports whether the target track exists.
-pub type UpdateMonitorFocusFn =
-    unsafe extern "C" fn(*mut c_void, u32, bool, u32, u32) -> bool;
-/// Hands the Rust-owned macro-control or MIDI-learn store handle to this
-/// module; the engine holds them but never decides what a binding means.
-pub type StoreFn = unsafe extern "C" fn(*mut c_void) -> *mut c_void;
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariControlEditHostOps {
-    pub update_monitor_focus: Option<UpdateMonitorFocusFn>,
-    pub macro_control_store: Option<StoreFn>,
-    pub midi_learn_store: Option<StoreFn>,
-    pub undo_state: Option<UndoStateFn>,
+/// The engine's undo history, or null when the host has no live bag. An edit
+/// with no history still changes the store and records nothing.
+fn undo_state(host: *mut c_void) -> *mut c_void {
+    handle_of_host(host, H_UNDO)
 }
 
-// The table only holds function pointers supplied by the native engine.
-unsafe impl Send for HirariControlEditHostOps {}
-unsafe impl Sync for HirariControlEditHostOps {}
-
-static HOST_OPS: OnceLock<Mutex<Option<HirariControlEditHostOps>>> = OnceLock::new();
-
-fn host_ops() -> Option<HirariControlEditHostOps> {
-    HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
-}
-
-/// Installs the native host callbacks. Passing null clears them.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_control_edit_host_install(
-    ops: *const HirariControlEditHostOps,
-) {
-    let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
-    let value = if ops.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ptr::read(ops) })
-    };
-    if let Ok(mut guard) = slot.lock() {
-        *guard = value;
-    }
+/// The monitoring store, which the audio callback reads through the same slot.
+fn input_blocks(host: *mut c_void) -> *mut c_void {
+    handle_of_host(host, H_INPUT_BLOCKS)
 }
 
 fn valid_track_name(name: &[u8]) -> bool {
@@ -141,10 +112,7 @@ fn rename(host: *mut c_void, track_id: u32, requested: &[u8]) -> bool {
     }
     session.commit_edit(true);
     drop(session);
-    let Some(read_state) = host_ops().and_then(|ops| ops.undo_state) else {
-        return true;
-    };
-    let state = unsafe { read_state(host) };
+    let state = undo_state(host);
     if state.is_null() {
         return true;
     }
@@ -168,7 +136,7 @@ fn replay_name(host: *mut c_void, track_id: u32, name: &[u8]) {
 /// disabling is always accepted, matching the engine's previous contract.
 ///
 /// # Safety
-/// `host` must be the engine pointer the installed callbacks expect.
+/// `host` must be an engine host pointer whose session bag is still live.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_control_edit_set_input_monitor(
     host: *mut c_void,
@@ -177,13 +145,29 @@ pub unsafe extern "C" fn hirari_control_edit_set_input_monitor(
     left_channel: u32,
     right_channel: u32,
 ) -> bool {
-    if !valid_monitor_channels(left_channel, right_channel) {
+    if !valid_monitor_channels(left_channel, right_channel) || !track_session::is_live(host) {
         return false;
     }
-    let Some(update) = host_ops().and_then(|ops| ops.update_monitor_focus) else {
-        return false;
+    let blocks = input_blocks(host);
+    if !enabled {
+        unsafe { hirari_input_blocks_clear_focus(blocks, track_id) };
+        return true;
+    }
+    // Enabling another track moves the focus without touching record-arm state,
+    // but only once the track is there to receive it.
+    let found = {
+        let guard = match track_session::GraphLock::acquire(host) {
+            Some(guard) => guard,
+            None => return false,
+        };
+        let found = !track_session::find(guard.host(), track_id).is_null();
+        drop(guard);
+        found
     };
-    unsafe { update(host, track_id, enabled, left_channel, right_channel) }
+    if !found {
+        return false;
+    }
+    unsafe { hirari_input_blocks_set_focus(blocks, track_id, left_channel, right_channel) }
 }
 
 /// Sets a macro value. Non-finite values are ignored without touching the
@@ -197,11 +181,13 @@ pub unsafe extern "C" fn hirari_control_edit_set_macro_value(
     if !value.is_finite() {
         return;
     }
-    if let Some(control) = host_ops().and_then(|ops| ops.macro_control_store) {
-        unsafe {
-            crate::macro_mapping::hirari_macro_control_set_value(control(host), macro_index, value)
-        };
-    }
+    unsafe {
+        crate::macro_mapping::hirari_macro_control_set_value(
+            handle_of_host(host, H_MACRO_CONTROL),
+            macro_index,
+            value,
+        )
+    };
 }
 
 fn bind_macro(
@@ -218,19 +204,13 @@ fn bind_macro(
     if !valid_macro_binding(macro_index, channel, cc14, controller, minimum, maximum, curve) {
         return false;
     }
-    let Some(ops) = host_ops() else {
-        return false;
-    };
-    let (Some(learn), Some(control)) = (ops.midi_learn_store, ops.macro_control_store) else {
-        return false;
-    };
     // The learn manager stores a pointer to the macro control it drives, so a
     // binding without that target is rejected exactly as the engine did.
-    let macro_state = unsafe { control(host) };
+    let macro_state = handle_of_host(host, H_MACRO_CONTROL);
     if macro_state.is_null() {
         return false;
     }
-    let learn_state = unsafe { learn(host) };
+    let learn_state = handle_of_host(host, H_MIDI_LEARN);
     if cc14 {
         unsafe {
             crate::midi_learn::hirari_midi_learn_add_mapping_14bit(

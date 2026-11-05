@@ -103,9 +103,6 @@ struct HirariInputMonitorBlock {
     float* left;
     float* right;
 };
-extern "C" bool hirari_input_blocks_set_focus(void* blocks, uint32_t track_id,
-                                              uint32_t left_channel, uint32_t right_channel);
-extern "C" void hirari_input_blocks_clear_focus(void* blocks, uint32_t track_id);
 extern "C" void hirari_input_blocks_reset(void* blocks);
 extern "C" void hirari_input_blocks_publish_monitor(void* blocks, const float* const* inputs,
                                                     uint32_t channel_count, uint32_t frames);
@@ -504,14 +501,6 @@ extern "C" void hirari_region_waveform_clear(void* host);
 // Decodes `path`, swaps it into the region and records the undo pair. Rust
 // owns the path/rate policy and the snapshots; C++ performs the swap.
 
-// Automation edit host. Rust reads and writes the curves in each track's own
-// store, so the engine contributes only the undo history.
-struct HirariAutomationHostOps {
-    void* (*undoState)(void* host) = nullptr;
-};
-
-extern "C" void hirari_automation_host_install(const HirariAutomationHostOps* ops);
-
 struct HirariRegionBlockConfig {
     uint64_t regionOffset = 0;
     uint64_t regionLength = 0;
@@ -673,17 +662,6 @@ extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops
 extern "C" bool hirari_routing_edit_set_sidechain_link(
     void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex, uint32_t tapPoint,
     bool enabled);
-
-// Control-thread edit policy (input monitoring, macro learn). The names live in
-// each track's own Rust store, so the engine supplies no naming adapter.
-struct HirariControlEditHostOps {
-    bool (*updateMonitorFocus)(void*, uint32_t, bool, uint32_t, uint32_t) = nullptr;
-    void* (*macroControlStore)(void*) = nullptr;
-    void* (*midiLearnStore)(void*) = nullptr;
-    void* (*undoState)(void*) = nullptr;
-};
-
-extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);
 
 // Plugin-chain edit policy (bypass, reordering, parameters and presets). The
 // chain, the frozen render and the layout revision are read and written by Rust

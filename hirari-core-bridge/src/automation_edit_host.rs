@@ -3,16 +3,17 @@
 //! Every curve a track carries lives in that track's own Rust automation store,
 //! so reading and replacing one needs no host callback at all: this module opens
 //! a track session, validates the packed curve, writes the store and records
-//! exactly one undo entry. The engine contributes the tracks lock, the storage
-//! handle behind it, and the undo history.
+//! exactly one undo entry. The engine contributes nothing but the session bag
+//! the edit's host pointer resolves to, which holds both the undo history and
+//! the tracks lock the curves live behind.
 //!
 //! Every entry point here runs on the control thread. Nothing in this module is
 //! reachable from the audio callback.
 
 use std::os::raw::c_void;
-use std::sync::{Mutex, OnceLock};
 
-use crate::plugin_edit_host::{register_replay, UndoStateFn};
+use crate::engine_session::{handle_of_host, H_UNDO};
+use crate::plugin_edit_host::register_replay;
 use crate::track_automation_store::{
     hirari_track_automation_store_plugin_lane_views, hirari_track_automation_store_points,
     hirari_track_automation_store_replace_plugin_lane, hirari_track_automation_store_set_points,
@@ -41,42 +42,11 @@ const MAX_PLUGIN_TIME: f64 = 9_007_199_254_740_992.0;
 /// The largest curve the editor will copy into one undo entry.
 const MAX_READ_POINTS: usize = 1_000_000;
 
-/// The one thing an automation edit cannot do alone: reach the engine's undo
-/// history. Reading and writing the curves is Rust talking to the track's own
-/// store.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariAutomationHostOps {
-    pub undo_state: Option<UndoStateFn>,
-}
-
-// The table only holds function pointers supplied by the native engine; it
-// carries no data the Rust side mutates.
-unsafe impl Send for HirariAutomationHostOps {}
-unsafe impl Sync for HirariAutomationHostOps {}
-
-static HOST_OPS: OnceLock<Mutex<Option<HirariAutomationHostOps>>> = OnceLock::new();
-
-fn host_ops() -> Option<HirariAutomationHostOps> {
-    HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
-}
-
-/// Installs the native host callbacks. Passing null clears them.
-///
-/// # Safety
-/// `ops` must point to a valid table that stays readable for the duration of
-/// the call.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_automation_host_install(ops: *const HirariAutomationHostOps) {
-    let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
-    let value = if ops.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ptr::read(ops) })
-    };
-    if let Ok(mut guard) = slot.lock() {
-        *guard = value;
-    }
+/// The engine's undo history for one edit, resolved from the bag that host
+/// created. An unknown or retired host has none, which is what an edit without a
+/// history means: the curve still changes but nothing records it.
+fn undo_state(host: *mut c_void) -> *mut c_void {
+    handle_of_host(host, H_UNDO)
 }
 
 /// Validates packed `(time, value, curve)` triples and converts them to points.
@@ -307,16 +277,12 @@ impl OwnedAutomationEdit {
 unsafe impl Send for OwnedAutomationEdit {}
 
 fn record(
-    ops: &HirariAutomationHostOps,
     host: *mut c_void,
     name: &[u8],
     undo: OwnedAutomationEdit,
     redo: OwnedAutomationEdit,
 ) {
-    let Some(read_state) = ops.undo_state else {
-        return;
-    };
-    let state = unsafe { read_state(host) };
+    let state = undo_state(host);
     if state.is_null() {
         return;
     }
@@ -347,7 +313,6 @@ fn record(
 }
 
 fn edit_with(
-    ops: &HirariAutomationHostOps,
     host: *mut c_void,
     track_id: u32,
     kind: i32,
@@ -368,16 +333,15 @@ fn edit_with(
     let undo = OwnedAutomationEdit::new(host, track_id, kind, plugin_index, parameter_id, &before);
     let redo = OwnedAutomationEdit::new(host, track_id, kind, plugin_index, parameter_id, &points);
     // The edit is already applied, so only the undo entry is recorded.
-    record(ops, host, &action_name(kind, track_id), undo, redo);
+    record(host, &action_name(kind, track_id), undo, redo);
     true
 }
 
 /// Replaces one of a track's volume, pan or delay curves.
 ///
 /// # Safety
-/// `host` must be the opaque handle the installed host ops expect, `packed`
-/// must point to `packed_len` doubles, and the installed table must outlive the
-/// call.
+/// `host` must be an engine host pointer whose session bag is still live, and
+/// `packed` must point to `packed_len` doubles for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_automation_edit_track(
     host: *mut c_void,
@@ -387,11 +351,7 @@ pub unsafe extern "C" fn hirari_automation_edit_track(
     packed: *const f64,
     packed_len: usize,
 ) -> bool {
-    let Some(ops) = host_ops() else {
-        return false;
-    };
     edit_with(
-        &ops,
         host,
         track_id,
         kind,
@@ -406,9 +366,8 @@ pub unsafe extern "C" fn hirari_automation_edit_track(
 /// empty.
 ///
 /// # Safety
-/// `host` must be the opaque handle the installed host ops expect, `packed`
-/// must point to `packed_len` doubles, and the installed table must outlive the
-/// call.
+/// `host` must be an engine host pointer whose session bag is still live, and
+/// `packed` must point to `packed_len` doubles for the duration of the call.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_automation_edit_plugin(
     host: *mut c_void,
@@ -418,11 +377,7 @@ pub unsafe extern "C" fn hirari_automation_edit_plugin(
     packed: *const f64,
     packed_len: usize,
 ) -> bool {
-    let Some(ops) = host_ops() else {
-        return false;
-    };
     edit_with(
-        &ops,
         host,
         track_id,
         HIRARI_AUTOMATION_PLUGIN,

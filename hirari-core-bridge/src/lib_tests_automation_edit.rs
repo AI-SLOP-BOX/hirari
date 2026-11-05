@@ -1,7 +1,8 @@
 // The automation edit host reads and writes the curve stores a track owns, so
 // these tests drive it through a real engine: the tracks lock, the store behind
-// it and the engine's undo history are the things under test. Host-op tables are
-// process-global, which is why nothing here swaps them for fakes.
+// it and the engine's undo history are the things under test. Every one of them
+// is a slot of the engine's own session bag, which is why nothing here installs
+// a fake host.
 struct AutomationEditEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
     engine: cxx::UniquePtr<crate::ffi::AudioEngine>,

@@ -512,3 +512,34 @@ fn duplicating_a_track_appends_the_suffix_in_the_copy_own_store() {
     assert_eq!(fixture.name(copy), b"Guitar Copy".to_vec());
     assert_eq!(fixture.name(track), b"Guitar".to_vec());
 }
+
+/// The monitor focus decision is Rust's own now: the track has to exist to take
+/// the focus, the channel pair has to stay inside the engine's addressing limit,
+/// and releasing a monitor is always accepted.
+#[test]
+fn input_monitor_focus_needs_a_track_that_exists() {
+    let fixture = PluginEditEngine::new();
+    let track = fixture.audio_track;
+    let host = fixture.host();
+    let monitor = |id, enabled, left, right| unsafe {
+        crate::control_edit_host::hirari_control_edit_set_input_monitor(
+            host, id, enabled, left, right,
+        )
+    };
+
+    assert!(monitor(track, true, 0, 1), "a real track can take the focus");
+    assert!(
+        !monitor(u32::MAX, true, 0, 1),
+        "a track the engine does not have cannot"
+    );
+    assert!(
+        !monitor(track, true, 0, 32),
+        "both channels stay inside the engine's limit"
+    );
+    assert!(
+        !monitor(track, true, 1, 1),
+        "one input pair means two different channels"
+    );
+    assert!(monitor(track, false, 0, 1), "releasing the monitor is accepted");
+    assert!(monitor(u32::MAX, false, 0, 1), "even for a track that is gone");
+}

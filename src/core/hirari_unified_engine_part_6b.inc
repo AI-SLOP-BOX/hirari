@@ -21,18 +21,6 @@ float HirariUnifiedEngine::get_master_gain() const noexcept {
     return hirari_engine_block_master_gain(handle(kHirariHandleEngineBlock));
 }
 
-namespace {
-
-// The curves live in each track's own Rust automation store, so an edit needs
-// exactly one thing from the engine: the undo history to record it in.
-const HirariAutomationHostOps kAutomationEditHostOps = {
-    [](void* host) -> void* {
-        return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
-    },
-};
-
-}  // namespace
-
 bool HirariUnifiedEngine::execute_auto_arrangement() {
     // Project extent, section boundaries and marker lengths are Rust-owned.
     // The engine keeps the region storage and the event queue behind the
@@ -62,17 +50,18 @@ namespace {
     HirariUnifiedEngine::installTrackEditHost();
     HirariUnifiedEngine::installSandboxMaintenanceHost();
     HirariUnifiedEngine::installRoutingEditHost();
-    HirariUnifiedEngine::installControlEditHost();
     HirariUnifiedEngine::installPluginEditHost();
     HirariUnifiedEngine::installExpressionMapEditHost();
     HirariUnifiedEngine::installTrackFreezeHost();
     HirariUnifiedEngine::installCommandHost();
     // The tracks and their storages are Rust objects, so the spatial-edit host
-    // needs no native table. The region storage host must install before the
-    // region edit host, which routes its data callbacks only once it answers.
+    // needs no native table, and neither do the automation and control edits:
+    // they read the undo history and the stores straight out of the session bag
+    // the engine's address resolves to. The region storage host must install
+    // before the region edit host, which routes its data callbacks only once it
+    // answers.
     hirari_track_region_host_install();
     hirari_region_host_install(&kRegionEditHostOps);
-    hirari_automation_host_install(&kAutomationEditHostOps);
     return true;
 }();
 }  // namespace

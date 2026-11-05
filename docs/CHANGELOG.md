@@ -248,6 +248,19 @@ production support.
   the session's one lock and lookup instead of each keeping a copy of the
   prologue, and the `track_control_host` fixtures now build a real session bag
   rather than pinning a fake table over the engine's. C++ 3176 -> 3126 (-50).
+- The automation and control edits resolve the engine through its session bag,
+  which removes their two host tables. `automation_edit_host.rs` reads the undo
+  history from the bag's undo slot instead of through a callback that only ever
+  returned that handle; `control_edit_host.rs` does the same for the history and
+  takes the macro table, the learn manager and the monitoring store from their own
+  slots. The monitor-focus edit is answered there too: a host whose bag is gone is
+  refused, a disable clears the focus exactly as the engine's callback did, and an
+  enable takes the tracks lock through the native session, looks the track up in
+  the Rust table and moves the focus only when the track is present.
+  `HirariAutomationHostOps`, `HirariControlEditHostOps`, their install entry
+  points, `installControlEditHost()` and the two focus declarations the engine no
+  longer calls are gone, and an engine-backed test pins the focus admission that
+  moved out of C++. C++ 3126 -> 3061 (-65).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

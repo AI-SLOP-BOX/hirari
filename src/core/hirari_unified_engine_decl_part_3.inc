@@ -21,7 +21,6 @@
     bool has_sidechain_link(uint32_t sourceId, uint32_t destId, uint32_t pluginIndex) const;
     // Installs the routing edit host callbacks Rust drives; see part_3b.
     static void installRoutingEditHost();
-    static void installControlEditHost();
     static void installPluginEditHost();
     static void installTrackEditHost();
     static void installTrackFreezeHost();

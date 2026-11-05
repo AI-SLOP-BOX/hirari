@@ -31,37 +31,6 @@ void HirariUnifiedEngine::installRoutingEditHost() {
     hirari_routing_edit_host_install(&ops);
 }
 
-// Control edit host callbacks. Rust validates every monitor/macro edit and
-// decides the undo entry; these handlers only read or apply the mutation. The
-// track name lives in each track's own Rust store, so naming needs no adapter.
-void HirariUnifiedEngine::installControlEditHost() {
-    static const HirariControlEditHostOps ops = {
-        [](void* host, uint32_t trackId, bool enabled, uint32_t leftChannel,
-           uint32_t rightChannel) -> bool {
-            if (!host) return false;
-            auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            if (!enabled) {
-                hirari_input_blocks_clear_focus(engine->handle(kHirariHandleInputBlocks), trackId);
-                return true;
-            }
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                if (!engine->findTrackLocked(trackId)) return false;
-            }
-            // One physical input is monitored at a time, so enabling another
-            // track moves the focus without touching record-arm state.
-            return hirari_input_blocks_set_focus(engine->handle(kHirariHandleInputBlocks), trackId, leftChannel,
-                                                rightChannel);
-        },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleMacroControl); },
-        [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleMidiLearn); },
-        [](void* host) -> void* {
-            return host ? static_cast<HirariUnifiedEngine*>(host)->undo_state() : nullptr;
-        },
-    };
-    hirari_control_edit_host_install(&ops);
-}
-
 // Plugin-chain edit host callbacks. Rust decides whether an edit is admitted,
 // applies it to the track's own effect chain and records the undo entry; only
 // the graph resync and the history handle are the engine's.
