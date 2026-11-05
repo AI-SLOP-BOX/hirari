@@ -126,7 +126,6 @@ struct HirariScheduledMidiNote {
     uint8_t probability;
     uint32_t region_id;
 };
-extern "C" uint64_t hirari_midi_snapshot_store_revision(const void* store);
 using HirariScheduledMidiEventCallback = void (*)(
     void* context, const HirariScheduledMidiNote* note,
     uint64_t sample_offset, uint8_t note_off);
@@ -138,10 +137,6 @@ extern "C" double hirari_external_sync_rate(const void* state);
 extern "C" void hirari_external_sync_tick(void* state, uint64_t timestamp);
 extern "C" uint64_t hirari_external_sync_ticks(const void* state);
 extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
-extern "C" void hirari_project_layout_fingerprint_update(
-    uint64_t* state, const uint8_t* data, size_t length);
-extern "C" uint64_t hirari_project_state_revision_mix(
-    uint64_t layout, uint64_t midi, uint64_t control);
 extern "C" void hirari_master_limiter_prepare(void* state, double sample_rate);
 extern "C" void hirari_master_limiter_reset(void* state);
 extern "C" void hirari_control_room_reset(void* state);
@@ -846,7 +841,6 @@ enum HirariTrackStore : uint32_t {
 };
 // Bumping this revision is the only signal the layout gather observes.
 extern "C" void hirari_layout_revision_mark(void* state);
-extern "C" uint64_t hirari_layout_revision_current(void* state);
 // Builds one track and returns its owning handle; `out_track` receives the
 // object pointer. The caller gives the handle to the track table.
 extern "C" void* hirari_track_new(uint32_t id, const uint8_t* name, size_t name_len,
@@ -971,7 +965,7 @@ enum HirariEngineHandleKind : uint32_t {
     kHirariHandleArrangementDocument = 27,
     kHirariHandleLayoutRevision = 28,
 };
-extern "C" void* hirari_engine_session_create();
+extern "C" void* hirari_engine_session_create(void* host);
 /// The handle of one slot, or null for an unknown kind and a retired slot.
 extern "C" void* hirari_engine_session_handle(const void* state, uint32_t kind);
 /// Retires the track table and the hardware input store after the engine has
@@ -1010,7 +1004,6 @@ extern "C" void hirari_engine_block_callback_enter(void* state);
 extern "C" void hirari_engine_block_callback_leave(void* state);
 /// Waits for every callback in flight; a control path, never the realtime one.
 extern "C" void hirari_engine_block_join_callbacks(const void* state);
-extern "C" uint64_t hirari_engine_block_control_revision(const void* state);
 extern "C" uint64_t hirari_engine_block_mark_control(void* state);
 extern "C" void hirari_engine_block_set_project_scale(
     void* state, int32_t root, int32_t scale);
@@ -1082,42 +1075,14 @@ extern "C" uint64_t hirari_waveform_snapshot_request(
     void* context, uint32_t track_id, uint32_t region_id,
     HirariWaveformComputeCallback compute, HirariSnapshotDestroyCallback destroy_context);
 
-// Project-layout gathering. Rust walks the live engine model through this
-// table (layout_gather.rs), owns the snapshot and its backing blocks, and
-// serializes or saves it in the same call. `begin` takes the tracks lock and
-// drains recorded automation; `end` releases it on every path. The gather then
-// addresses each live track and reads its model through the Rust stores the
-// track owns; only the track name is C++ state.
-using HirariLayoutIsCancelledCallback = bool (*)(const void*);
-struct HirariLayoutHostOps {
-    void (*begin)(void* host) = nullptr;
-    void (*end)(void* host) = nullptr;
-    size_t (*trackCount)(void* host) = nullptr;
-    void* (*trackHandle)(void* host, size_t index) = nullptr;
-    // Every per-track field the layout needs is a Rust storage already.
-    uint32_t (*trackId)(void* track) = nullptr;
-    uint32_t (*trackType)(void* track) = nullptr;
-    /// One of a track's own storages: 0 channel strip, 1 effect chain,
-    /// 2 automation store, 3 freeze store, 4 realtime runtime,
-    /// 5 MIDI articulation state, 6 name store. Rust reads them with its own
-    /// store API.
-    void* (*trackStorage)(void* track, uint32_t kind) = nullptr;
-    void* (*sidechainRoutesStore)(void* host) = nullptr;
-    void* (*routingStore)(void* host) = nullptr;
-    double (*sampleRate)(void* host) = nullptr;
-};
-// Both calls gather, serialize and release inside Rust. The JSON buffer is
-// Rust-owned and must be released with hirari_project_layout_json_free.
-extern "C" bool hirari_layout_json_from_host(
-    void* host, const HirariLayoutHostOps* ops,
-    HirariLayoutIsCancelledCallback is_cancelled, const void* cancel_context,
-    uint8_t** json_data, size_t* json_size);
-extern "C" void hirari_project_layout_json_free(const uint8_t* json_data, size_t json_size);
+// Project-layout gathering. Rust walks the live engine model through the session
+// bag this host address resolves to (layout_gather.rs), owns the snapshot and
+// its backing blocks, and serializes or saves it in one call. The engine
+// contributes its address and the tracks lock the gather brackets with it, so
+// no per-field host table crosses here any more.
+extern "C" uint64_t hirari_project_generation(void* host);
 extern "C" bool hirari_project_save_from_host(
-    void* host, const HirariLayoutHostOps* ops,
-    const uint8_t* path, size_t path_length,
-    const void* tempo_state, const void* routing_state, size_t arrangement_document,
-    double bpm, const void* engine_block);
+    void* host, const uint8_t* path, size_t path_length);
 
 // Rust-owned harmonic context shared by structure analysis and auto-arrangement.
 extern "C" void hirari_harmonic_context_get(

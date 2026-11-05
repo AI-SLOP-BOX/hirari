@@ -83,17 +83,6 @@ fn host_ops() -> Option<HirariPluginSandboxHostOps> {
     HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
 }
 
-/// The engine's live graph, reached through the layout host operations the
-/// engine installs: `begin`/`end` are its tracks lock, and kind `CHAIN` hands
-/// out the Rust plug-in chain that owns every sandboxed processor of a track.
-fn layout_ops(host: *mut c_void) -> Option<&'static crate::layout_gather::HirariLayoutHostOps> {
-    let ops = unsafe { crate::layout_gather::ops_for(host.cast_const().cast()) };
-    if ops.is_null() {
-        return None;
-    }
-    Some(unsafe { &*ops })
-}
-
 /// Reads one track's plug-in chain while the graph is locked, or `None` when
 /// the engine has no such track.
 fn with_track_chain<T>(
@@ -101,41 +90,22 @@ fn with_track_chain<T>(
     track_id: u32,
     read: impl FnOnce(*mut c_void) -> T,
 ) -> Option<T> {
-    let ops = layout_ops(host)?;
-    let mut chain = ptr::null_mut();
-    unsafe { (ops.begin)(host) };
-    for index in 0..unsafe { (ops.track_count)(host) } {
-        let track = unsafe { (ops.track_handle)(host, index) };
-        if !track.is_null() && unsafe { (ops.track_id)(track) } == track_id {
-            chain = unsafe { (ops.track_storage)(track, crate::layout_gather::CHAIN) };
-            break;
-        }
-    }
-    unsafe { (ops.end)(host) };
-    if chain.is_null() {
-        return None;
-    }
-    Some(read(chain))
+    crate::layout_gather::with_track_storage(
+        host.cast_const(),
+        track_id,
+        crate::layout_gather::CHAIN,
+        read,
+    )
 }
 
 /// Visits every track's plug-in chain in engine order, with the graph locked
 /// for the whole walk so the slots stay where the callback left them.
-fn each_track_chain(host: *mut c_void, mut visit: impl FnMut(u32, *mut c_void)) {
-    let Some(ops) = layout_ops(host) else {
-        return;
-    };
-    unsafe { (ops.begin)(host) };
-    for index in 0..unsafe { (ops.track_count)(host) } {
-        let track = unsafe { (ops.track_handle)(host, index) };
-        if track.is_null() {
-            continue;
-        }
-        let chain = unsafe { (ops.track_storage)(track, crate::layout_gather::CHAIN) };
-        if !chain.is_null() {
-            visit(unsafe { (ops.track_id)(track) }, chain);
-        }
-    }
-    unsafe { (ops.end)(host) };
+fn each_track_chain(host: *mut c_void, visit: impl FnMut(u32, *mut c_void)) {
+    crate::layout_gather::each_track_storage(
+        host.cast_const(),
+        crate::layout_gather::CHAIN,
+        visit,
+    );
 }
 
 /// The bundle path one sandbox slot is loading, as the chain stores it.

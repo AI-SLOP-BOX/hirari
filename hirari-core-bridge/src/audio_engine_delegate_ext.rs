@@ -992,7 +992,11 @@ impl ffi::AudioEngine {
         );
     }
     pub fn get_project_layout_revision(&self) -> u64 {
-        self.get_core().get_project_layout_revision()
+        layout_gather::project_layout_revision(core_mut(self) as *const _)
+    }
+
+    pub fn get_project_state_revision(&self) -> u64 {
+        layout_gather::project_state_revision(core_mut(self) as *const _)
     }
     pub fn is_playing(&self) -> bool {
         crate::engine_transport::is_playing(self.get_core())

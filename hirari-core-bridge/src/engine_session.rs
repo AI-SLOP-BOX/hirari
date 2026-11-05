@@ -6,12 +6,19 @@
 //! written list always drifts into. This module owns all of that instead: the
 //! engine holds one handle, and every object the graph, the callback and the
 //! control surface read is a slot in this bag.
+//!
+//! The engine hands its own address to the bag when it creates it, so Rust
+//! reading a `void* host` callback argument can reach the stores behind that
+//! engine without the engine translating the request. The binding is dropped
+//! with the bag, which is what makes a recycled engine address safe.
 
 use crate::engine_block_host::{
     hirari_engine_block_create, hirari_engine_block_destroy, HirariEngineBlockHandles,
 };
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::{Mutex, OnceLock};
 
 /// The largest block the device host may deliver, and the capacity the input
 /// store is sized for.
@@ -53,6 +60,49 @@ pub const H_EXTERNAL_SYNC: u32 = 26;
 pub const H_ARRANGEMENT_DOCUMENT: u32 = 27;
 pub const H_LAYOUT_REVISION: u32 = 28;
 const HANDLE_COUNT: usize = 29;
+
+/// The bags built so far, keyed by the engine host that built them. Rust code
+/// driven from a `void* host` callback argument reads a store through this map;
+/// an entry exists exactly as long as the engine that created the bag does.
+/// Addresses are stored rather than pointers because the map is process-wide
+/// state and only the engine's own lifetime makes either side valid.
+fn hosts() -> &'static Mutex<HashMap<usize, usize>> {
+    static HOSTS: OnceLock<Mutex<HashMap<usize, usize>>> = OnceLock::new();
+    HOSTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn bind_host(host: *mut c_void, session: *mut EngineSession) {
+    if host.is_null() || session.is_null() {
+        return;
+    }
+    let Ok(mut table) = hosts().lock() else { return };
+    table.insert(host as usize, session as usize);
+}
+
+fn unbind_host(host: *mut c_void, session: *const EngineSession) {
+    if host.is_null() {
+        return;
+    }
+    // Only drop the binding this bag owns: an engine released after a later one
+    // took over the same address must not retire the newcomer.
+    let Ok(mut table) = hosts().lock() else { return };
+    if table.get(&(host as usize)) == Some(&(session as usize)) {
+        table.remove(&(host as usize));
+    }
+}
+
+/// The store behind one slot of the bag the given engine host created. Null for
+/// an unknown host, an unknown kind and a slot the bag has already retired.
+pub fn handle_of_host(host: *const c_void, kind: u32) -> *mut c_void {
+    let Ok(table) = hosts().lock() else {
+        return ptr::null_mut();
+    };
+    let Some(session) = table.get(&(host as usize)).copied() else {
+        return ptr::null_mut();
+    };
+    drop(table);
+    hirari_engine_session_handle(session as *const c_void, kind)
+}
 
 extern "C" {
     fn hirari_engine_track_table_create() -> *mut c_void;
@@ -116,6 +166,9 @@ extern "C" {
 }
 
 pub struct EngineSession {
+    /// The engine that built this bag, so the host binding can be dropped with
+    /// it. Null for a bag no engine owns, such as one a test built directly.
+    host: *mut c_void,
     handles: [*mut c_void; HANDLE_COUNT],
 }
 
@@ -182,7 +235,10 @@ impl EngineSession {
                 layout_revision: handles[H_LAYOUT_REVISION as usize],
             })
         };
-        EngineSession { handles }
+        EngineSession {
+            host: ptr::null_mut(),
+            handles,
+        }
     }
 
     /// Takes the graph and the hardware input store out of the bag: the engine
@@ -254,10 +310,16 @@ fn session(state: *mut c_void) -> Option<&'static mut EngineSession> {
     Some(unsafe { &mut *(state as *mut EngineSession) })
 }
 
-/// Builds the engine's whole store set for one engine instance.
+/// Builds the engine's whole store set for one engine instance and records the
+/// engine address that owns it, so a Rust host callback can reach these stores
+/// without asking the engine to translate the request.
 #[no_mangle]
-pub extern "C" fn hirari_engine_session_create() -> *mut c_void {
-    Box::into_raw(Box::new(EngineSession::new())) as *mut c_void
+pub extern "C" fn hirari_engine_session_create(host: *mut c_void) -> *mut c_void {
+    let mut session = Box::new(EngineSession::new());
+    session.host = host;
+    let pointer = Box::into_raw(session);
+    bind_host(host, pointer);
+    pointer.cast()
 }
 
 /// The handle of one slot, or null for an unknown kind and for a slot this bag
@@ -283,11 +345,14 @@ pub extern "C" fn hirari_engine_session_close_graph(state: *mut c_void) {
     }
 }
 
-/// Releases the whole bag and the bag itself.
+/// Releases the whole bag, its host binding and the bag itself.
 #[no_mangle]
 pub extern "C" fn hirari_engine_session_destroy(state: *mut c_void) {
     if state.is_null() {
         return;
     }
-    drop(unsafe { Box::from_raw(state as *mut EngineSession) });
+    let session = state.cast::<EngineSession>();
+    let host = unsafe { (*session).host };
+    unbind_host(host, session);
+    drop(unsafe { Box::from_raw(session) });
 }

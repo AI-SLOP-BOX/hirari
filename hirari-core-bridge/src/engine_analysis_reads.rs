@@ -235,18 +235,19 @@ fn bounce_session(core: &HirariUnifiedEngine) -> *mut c_void {
 /// The track's fader, or -1.0 when the id is not in the graph — the same
 /// fallback the deleted C++ getter returned.
 pub fn track_volume(core: &HirariUnifiedEngine, tid: u32) -> f32 {
-    with_track_storage(core, tid, 0, |storage| {
-        storage.map_or(-1.0, |strip| unsafe {
-            channel_strip::hirari_channel_strip_gain(strip)
-        })
+    layout_gather::with_track_storage(host(core).cast_const(), tid, 0, |strip| unsafe {
+        channel_strip::hirari_channel_strip_gain(strip)
     })
+    .unwrap_or(-1.0)
 }
 
 /// Activates an offline render target. Zero is the master; any other id is
 /// validated against the current graph first, so a stale CLI target cannot
 /// silently render an unrelated output.
 pub fn set_offline_target(core: &HirariUnifiedEngine, tid: u32) -> bool {
-    if tid != 0 && !with_track_storage(core, tid, 0, |storage| storage.is_some()) {
+    if tid != 0
+        && layout_gather::with_track_storage(host(core).cast_const(), tid, 0, |_| ()).is_none()
+    {
         return false;
     }
     unsafe { bounce_driver::hirari_bounce_set_offline_target(bounce_session(core), tid) };
@@ -271,37 +272,6 @@ pub fn set_offline_options(core: &HirariUnifiedEngine, pre_fader: bool, include_
             u8::from(include_inserts),
         )
     };
-}
-
-/// Takes the tracks lock through the layout host ops, finds the id's track and
-/// hands one of its storages (kind 0 is the channel strip) to `read`.
-fn with_track_storage<R>(
-    core: &HirariUnifiedEngine,
-    tid: u32,
-    kind: u32,
-    read: impl FnOnce(Option<*mut c_void>) -> R,
-) -> R {
-    let raw = layout_gather::ops_for(core) as *const layout_gather::HirariLayoutHostOps;
-    if raw.is_null() {
-        return read(None);
-    }
-    let ops = unsafe { &*raw };
-    let host = core as *const HirariUnifiedEngine as *mut c_void;
-    unsafe { (ops.begin)(host) };
-    let found = (|| {
-        let count = unsafe { (ops.track_count)(host) };
-        for index in 0..count {
-            let track = unsafe { (ops.track_handle)(host, index) };
-            if track.is_null() || unsafe { (ops.track_id)(track) } != tid {
-                continue;
-            }
-            return Some(unsafe { (ops.track_storage)(track, kind) });
-        }
-        None
-    })();
-    let result = read(found);
-    unsafe { (ops.end)(host) };
-    result
 }
 
 /// The engine address a track session pins its lock against.

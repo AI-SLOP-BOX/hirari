@@ -63,7 +63,3 @@
         void* track = findTrackLocked(tid);
         return track != nullptr ? fn(track) : missing;
     }
-
-    // Rust owns the layout snapshot (layout_gather.rs); this only exposes the
-    // live-track accessors it reads through.
-    const HirariLayoutHostOps* layoutHostOps() const;

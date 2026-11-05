@@ -214,16 +214,11 @@ pub mod ffi {
             map_hash: u32,
         ) -> bool;
         fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
-        // The Rust layout gather (layout_gather.rs) walks the live tracks
-        // through this table; C++ no longer runs a snapshot session.
-        fn layout_ops_handle(self: &HirariUnifiedEngine) -> usize;
         // Rust analysis reads (engine_analysis_reads.rs) sample telemetry and
         // meter straight from these Rust-owned stores.
         fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
         fn meter_state(self: &HirariUnifiedEngine) -> usize;
         fn get_project_generation(self: &HirariUnifiedEngine) -> u64;
-        fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
-        fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &HirariUnifiedEngine);
 
         fn pdc_state(self: &HirariUnifiedEngine) -> usize;

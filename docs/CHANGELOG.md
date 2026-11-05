@@ -204,6 +204,32 @@ production support.
   slots retired alone and read back null afterwards, an unknown kind answered as
   null, and no two engines sharing a queue, a journal or an undo history.
   C++ 3613 -> 3266 (-347).
+- The engine's session bag now also answers "which bag belongs to this engine".
+  The engine hands its own address to `hirari_engine_session_create`, and
+  `engine_session.rs` keeps a process-wide host-to-bag table, so any Rust
+  routine that is given the `void* host` a callback receives can resolve the
+  stores behind that engine itself. The binding drops with the bag and only the
+  bag that owns the address may drop it, which is what makes a recycled engine
+  pointer safe. `layout_gather.rs` builds its own `HirariLayoutHostOps` from
+  that registry: `begin`/`end` take the engine's tracks lock through two new
+  entry points, the track window comes from the track-table slot, and the
+  sidechain, routing and sample-rate stores come from the bag. The C++ table,
+  `layoutHostOps()`, the `layout_ops_handle()` bridge and the
+  `get_project_layout_revision`/`get_project_state_revision` methods are gone —
+  the project fingerprint, both change tokens, the background snapshot session
+  and the whole save marshalling (tempo, routing, arrangement document, block
+  and tonality included) are Rust reads now, and `hirari_layout_json_from_host`
+  and `hirari_project_save_from_host` lost the host arguments that used to hand
+  them those stores. `hirari_engine_lock_tracks`/`unlock_tracks` are the only
+  engine state left in the gather's path, because the tracks lock still guards
+  the graph the walk reads. The plug-in sandbox maintenance and the analysis
+  reads moved off the ops table onto `with_track_storage`/`each_track_storage`,
+  which take that lock in Rust and hand the caller its store inside it, so the
+  reads stay bracketed exactly as before. The ops table, its cancellation
+  callback alias and seven FFI declarations whose last C++ caller was the
+  deleted code left the header, and `engine_session_contract`
+  gained the test that a host address resolves the bag that created it and reads
+  null once that bag is released. C++ 3266 -> 3176 (-90).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

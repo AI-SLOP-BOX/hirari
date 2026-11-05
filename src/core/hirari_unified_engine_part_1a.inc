@@ -54,3 +54,14 @@ void HirariUnifiedEngine::processBlock(void* output, uint32_t off, uint32_t sz) 
     hirari_engine_block_finish(handle(kHirariHandleEngineBlock), output, off, frames);
 }
 
+// The tracks lock guards the graph a control-plane walk reads. The Rust layout
+// gather brackets its own walk with these, so it addresses the stores directly
+// instead of through a table of C++ host callbacks.
+extern "C" void hirari_engine_lock_tracks(void* host) noexcept {
+    if (host) static_cast<HirariUnifiedEngine*>(host)->lockTracks();
+}
+
+extern "C" void hirari_engine_unlock_tracks(void* host) noexcept {
+    if (host) static_cast<HirariUnifiedEngine*>(host)->unlockTracks();
+}
+

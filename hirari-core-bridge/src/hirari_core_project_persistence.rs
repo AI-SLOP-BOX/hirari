@@ -89,7 +89,7 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return Err(anyhow::anyhow!("AudioEngine is unavailable"));
         };
-        if engine.get_core().get_project_state_revision() != native_revision
+        if engine.get_project_state_revision() != native_revision
             || self.project_state_revision() != project_revision
             || document_seed.as_ref().is_some_and(|document| {
                 (document.sample_rate - engine.get_sample_rate()).abs() > 0.5
@@ -403,7 +403,7 @@ impl HirariCore {
             )
             .collect();
         let stale = if let Some((native_revision, project_revision)) = expected_revisions {
-            engine.get_core().get_project_state_revision() != native_revision
+            engine.get_project_state_revision() != native_revision
                 || self.project_state_revision() != project_revision
         } else {
             self.native_project_layout_fingerprint() != native_layout_fingerprint.unwrap_or(0)

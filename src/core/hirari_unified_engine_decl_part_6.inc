@@ -7,8 +7,10 @@ private:
 
     // Every store the graph, the realtime callback and the control surface read
     // is a slot in one Rust bag (engine_session.rs), which owns their creation
-    // and teardown order. The engine holds the bag and asks it for a handle.
-    void* m_session = hirari_engine_session_create();
+    // and teardown order. The engine holds the bag and asks it for a handle; the
+    // bag also records this engine's address, so a Rust routine handed the host
+    // pointer reaches the same stores without a C++ translation of its own.
+    void* m_session = hirari_engine_session_create(this);
     void* handle(uint32_t kind) const noexcept {
         return hirari_engine_session_handle(m_session, kind);
     }

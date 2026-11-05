@@ -16,18 +16,14 @@
         return reinterpret_cast<uintptr_t>(handle(kHirariHandleBounceSession));
     }
     bool execute_auto_arrangement();
-    // The Rust layout gather (layout_gather.rs) owns the snapshot, its JSON and
-    // the background save session; this hands it the host table it reads.
-    uintptr_t layout_ops_handle() const noexcept {
-        return reinterpret_cast<uintptr_t>(layoutHostOps());
-    }
+    // The tracks lock guards the graph while a control-plane walk reads it. The
+    // Rust layout gather brackets its own walk with these two calls, so it
+    // reaches every store through the session bag instead of a host table.
+    void lockTracks() const { m_tracksMutex.lock(); }
+    void unlockTracks() const { m_tracksMutex.unlock(); }
     // Stable generation token for UI/CLI snapshots. Commands must echo this
     // value back through push_command; a changed layout makes the token stale.
     uint64_t get_project_generation() const;
-    // Cheap monotonic edit token for UI polling. Strict command validation
-    // continues to use get_project_generation().
-    uint64_t get_project_layout_revision() const noexcept;
-    uint64_t get_project_state_revision() const noexcept;
     void mark_project_state_changed() { hirari_engine_block_mark_control(handle(kHirariHandleEngineBlock)); }
     void mark_project_layout_changed() const {
         hirari_layout_revision_mark(hirari_engine_block_layout_revision(handle(kHirariHandleEngineBlock)));

@@ -151,7 +151,7 @@ impl HirariCore {
     pub fn project_state_revision(&self) -> u64 {
         let native = self.engine
             .as_ref()
-            .map_or(0, |engine| engine.get_core().get_project_state_revision());
+            .map_or(0, |engine| engine.get_project_state_revision());
         let revisions = [
             native,
             self.scheduled_midi_notes.revision(),

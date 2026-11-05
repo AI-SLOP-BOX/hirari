@@ -112,6 +112,141 @@ pub struct HirariLayoutHostOps {
     pub sample_rate: unsafe extern "C" fn(*mut c_void) -> f64,
 }
 
+extern "C" {
+    fn hirari_engine_lock_tracks(host: *mut c_void);
+    fn hirari_engine_unlock_tracks(host: *mut c_void);
+}
+
+/// One slot of the bag the given engine host created.
+fn host_store(host: *const c_void, kind: u32) -> *mut c_void {
+    crate::engine_session::handle_of_host(host, kind)
+}
+
+/// The live graph of the given engine host as a borrowed window, valid while
+/// the tracks lock is held.
+fn host_tracks(host: *const c_void) -> (*const *mut c_void, usize) {
+    let table = host_store(host, crate::engine_session::H_TRACK_TABLE);
+    unsafe {
+        (
+            crate::engine_track_table::hirari_engine_track_ptrs(table),
+            crate::engine_track_table::hirari_engine_track_count(table),
+        )
+    }
+}
+
+/// Takes the tracks lock and drains the state a snapshot must not race: the
+/// automation the recorder is still holding and the chain nodes a released
+/// effect has not handed back.
+unsafe extern "C" fn native_begin(host: *mut c_void) {
+    unsafe { hirari_engine_lock_tracks(host) };
+    let (items, count) = host_tracks(host);
+    if items.is_null() {
+        return;
+    }
+    for index in 0..count {
+        let track = unsafe { *items.add(index) };
+        if track.is_null() {
+            continue;
+        }
+        unsafe {
+            crate::engine_track::hirari_track_flush_recorded_automation(track);
+            crate::engine_track::hirari_track_reclaim_chain(track);
+        }
+    }
+}
+
+unsafe extern "C" fn native_end(host: *mut c_void) {
+    unsafe { hirari_engine_unlock_tracks(host) };
+}
+
+unsafe extern "C" fn native_track_count(host: *mut c_void) -> usize {
+    host_tracks(host).1
+}
+
+unsafe extern "C" fn native_track_handle(host: *mut c_void, index: usize) -> *mut c_void {
+    let (items, count) = host_tracks(host);
+    if items.is_null() || index >= count {
+        return std::ptr::null_mut();
+    }
+    unsafe { *items.add(index) }
+}
+
+unsafe extern "C" fn native_sidechain_routes(host: *mut c_void) -> *mut c_void {
+    host_store(host, crate::engine_session::H_SIDECHAIN_ROUTES)
+}
+
+unsafe extern "C" fn native_routing(host: *mut c_void) -> *mut c_void {
+    host_store(host, crate::engine_session::H_ROUTING)
+}
+
+unsafe extern "C" fn native_sample_rate(host: *mut c_void) -> f64 {
+    unsafe {
+        crate::engine_block_host::hirari_engine_block_device_sample_rate(host_store(
+            host,
+            crate::engine_session::H_ENGINE_BLOCK,
+        ))
+    }
+}
+
+/// The gather's own view of a live engine. Every accessor resolves the host to
+/// the session bag that engine created and reads the Rust store behind it, so
+/// the engine contributes the tracks lock and nothing else.
+static NATIVE_OPS: HirariLayoutHostOps = HirariLayoutHostOps {
+    begin: native_begin,
+    end: native_end,
+    track_count: native_track_count,
+    track_handle: native_track_handle,
+    track_id: crate::engine_track::hirari_track_id,
+    track_type: crate::engine_track::hirari_track_type,
+    track_storage: crate::engine_track::hirari_track_storage,
+    sidechain_routes_store: native_sidechain_routes,
+    routing_store: native_routing,
+    sample_rate: native_sample_rate,
+};
+
+/// One storage of the track with this id (kind 0 is the channel strip), read
+/// while the graph is locked. `None` when the engine has no such track.
+pub fn with_track_storage<R>(
+    host: *const c_void,
+    track_id: u32,
+    kind: u32,
+    read: impl FnOnce(*mut c_void) -> R,
+) -> Option<R> {
+    let host = host.cast_mut();
+    unsafe { native_begin(host) };
+    let (items, count) = unsafe { host_tracks(host) };
+    let track = (0..count)
+        .map(|index| unsafe { *items.add(index) })
+        .find(|track| {
+            !track.is_null() && unsafe { crate::engine_track::hirari_track_id(*track) } == track_id
+        });
+    let found = track.and_then(|track| {
+        let storage = unsafe { crate::engine_track::hirari_track_storage(track, kind) };
+        (!storage.is_null()).then(|| read(storage))
+    });
+    unsafe { native_end(host) };
+    found
+}
+
+/// Visits one storage of every track in engine order with the graph locked for
+/// the whole walk, so the slots stay where the realtime callback left them.
+pub fn each_track_storage(host: *const c_void, kind: u32, mut visit: impl FnMut(u32, *mut c_void)) {
+    let host = host.cast_mut();
+    unsafe { native_begin(host) };
+    let (items, count) = unsafe { host_tracks(host) };
+    for index in 0..count {
+        let track = unsafe { *items.add(index) };
+        if track.is_null() {
+            continue;
+        }
+        let storage = unsafe { crate::engine_track::hirari_track_storage(track, kind) };
+        if !storage.is_null() {
+            visit(unsafe { crate::engine_track::hirari_track_id(track) }, storage);
+        }
+    }
+    unsafe { native_end(host) };
+}
+
 struct LaneScratch {
     plugin_index: u32,
     parameter_id: u32,
@@ -716,21 +851,21 @@ pub unsafe extern "C" fn hirari_layout_snapshot(
 }
 
 /// Gathers the layout and serializes it to the Rust-owned JSON buffer in one
-/// call, so C++ never holds a snapshot.
+/// call, so C++ never holds a snapshot. The engine host is only a key: the walk
+/// reads the stores the host's session bag owns.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_layout_json_from_host(
     host: *mut c_void,
-    ops: *const HirariLayoutHostOps,
     is_cancelled: Option<unsafe extern "C" fn(*const c_void) -> bool>,
     cancel_context: *const c_void,
     json_data: *mut *mut u8,
     json_size: *mut usize,
 ) -> bool {
-    if host.is_null() || ops.is_null() || json_data.is_null() || json_size.is_null() {
+    if host.is_null() || json_data.is_null() || json_size.is_null() {
         return false;
     }
     let cancel = is_cancelled.map(|callback| (callback, cancel_context));
-    let Some(owned) = (unsafe { gather(host, &*ops, false, cancel) }) else {
+    let Some(owned) = (unsafe { gather(host, &NATIVE_OPS, false, cancel) }) else {
         return false;
     };
     let snapshot = owned.snapshot();
@@ -741,11 +876,70 @@ pub unsafe extern "C" fn hirari_layout_json_from_host(
     written
 }
 
-/// One background layout snapshot: the engine the worker reads, the table it
-/// reads it through, and the flag the UI raises when it loses interest.
+/// The live layout as a fingerprint. Command admission hashes it rather than
+/// materializing a string, so a stale command is rejected on the generation the
+/// graph actually has.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_project_generation(host: *mut c_void) -> u64 {
+    let mut data: *mut u8 = std::ptr::null_mut();
+    let mut length = 0;
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    if unsafe { hirari_layout_json_from_host(host, None, std::ptr::null(), &mut data, &mut length) }
+        && !data.is_null()
+    {
+        unsafe {
+            crate::project_layout::hirari_project_layout_fingerprint_update(&mut hash, data, length)
+        };
+    }
+    unsafe { crate::project_layout::hirari_project_layout_json_free(data, length) };
+    hash
+}
+
+/// The monotonic edit token the UI polls. It is the mark the engine block's
+/// layout revision was bound to, so a save or a command can compare it without
+/// gathering anything.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_project_layout_revision(host: *const c_void) -> u64 {
+    let block = host_store(host, crate::engine_session::H_ENGINE_BLOCK);
+    let revision = unsafe { crate::engine_block_host::hirari_engine_block_layout_revision(block) };
+    unsafe { crate::engine_track::hirari_layout_revision_current(revision) }
+}
+
+/// The layout token, the drained-MIDI revision and the control revision mixed
+/// into one number, so a background snapshot can tell a usable result from one
+/// that aged out while it was being prepared.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_project_state_revision(host: *const c_void) -> u64 {
+    let layout = unsafe { hirari_project_layout_revision(host) };
+    let midi = unsafe {
+        crate::midi_note_edit::hirari_midi_snapshot_store_revision(host_store(
+            host,
+            crate::engine_session::H_MIDI_SNAPSHOT_STORE,
+        ))
+    };
+    let control = unsafe {
+        crate::engine_block_host::hirari_engine_block_control_revision(host_store(
+            host,
+            crate::engine_session::H_ENGINE_BLOCK,
+        ))
+    };
+    unsafe { crate::project_layout::hirari_project_state_revision_mix(layout, midi, control) }
+}
+
+/// The layout change token of the engine behind this host address.
+pub fn project_layout_revision(host: *const c_void) -> u64 {
+    unsafe { hirari_project_layout_revision(host) }
+}
+
+/// The combined native change token of the engine behind this host address.
+pub fn project_state_revision(host: *const c_void) -> u64 {
+    unsafe { hirari_project_state_revision(host) }
+}
+
+/// One background layout snapshot: the engine host the worker reads through
+/// its session bag, and the flag the UI raises when it loses interest.
 struct LayoutSession {
-    engine: *mut crate::ffi::HirariUnifiedEngine,
-    ops: *const HirariLayoutHostOps,
+    engine: *mut c_void,
     cancelled: std::sync::atomic::AtomicBool,
 }
 
@@ -783,13 +977,12 @@ extern "C" fn session_compute(context: *mut c_void, output: *mut *mut c_void) ->
     if session.cancelled.load(std::sync::atomic::Ordering::Acquire) {
         return false;
     }
-    let before = unsafe { (*session.engine).get_project_state_revision() };
+    let before = unsafe { hirari_project_state_revision(session.engine) };
     let mut data: *mut u8 = std::ptr::null_mut();
     let mut length = 0;
     if !unsafe {
         hirari_layout_json_from_host(
-            session.engine.cast::<c_void>(),
-            session.ops,
+            session.engine,
             Some(session_cancelled),
             (session as *mut LayoutSession).cast::<c_void>(),
             &mut data,
@@ -803,7 +996,7 @@ extern "C" fn session_compute(context: *mut c_void, output: *mut *mut c_void) ->
     } else {
         unsafe { Vec::from_raw_parts(data, length, length) }
     };
-    let after = unsafe { (*session.engine).get_project_state_revision() };
+    let after = unsafe { hirari_project_state_revision(session.engine) };
     *output = Box::into_raw(Box::new(RecordedLayout {
         before,
         after,
@@ -905,20 +1098,10 @@ pub unsafe extern "C" fn hirari_layout_snapshot_owner_release_host(host: *mut c_
     }
 }
 
-pub fn ops_for(
-    engine: *const crate::ffi::HirariUnifiedEngine,
-) -> *const HirariLayoutHostOps {
-    if engine.is_null() {
-        return std::ptr::null();
-    }
-    unsafe { (*engine).layout_ops_handle() as *const HirariLayoutHostOps }
-}
-
-/// The live project layout as JSON. The gather is Rust; C++ contributes the
-/// engine host, its ops table and the tracks lock.
+/// The live project layout as JSON. The gather is Rust and reads the engine's
+/// own stores through its session bag; the host contributes only its address.
 pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> String {
-    let ops = ops_for(core);
-    if ops.is_null() {
+    if core.is_null() {
         return String::new();
     }
     let mut data: *mut u8 = std::ptr::null_mut();
@@ -926,7 +1109,6 @@ pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> Stri
     if !unsafe {
         hirari_layout_json_from_host(
             core.cast_mut().cast::<c_void>(),
-            ops,
             None,
             std::ptr::null(),
             &mut data,
@@ -943,14 +1125,9 @@ pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> Stri
 
 /// Starts the background save's layout snapshot and returns its request id.
 pub fn request_layout_snapshot(engine: *mut crate::ffi::HirariUnifiedEngine) -> u64 {
-    let ops = ops_for(engine);
-    if ops.is_null() {
-        return 0;
-    }
     let owner = owner_for(engine as usize);
     let session = Box::into_raw(Box::new(LayoutSession {
-        engine,
-        ops,
+        engine: engine.cast(),
         cancelled: std::sync::atomic::AtomicBool::new(false),
     }))
     .cast::<c_void>();
@@ -1008,27 +1185,27 @@ pub fn cancel_layout_snapshot(
 }
 
 /// The saver path: gathers with the save-only fields and encodes the project
-/// container directly, without a C++ snapshot in between. The project tonality
-/// comes from the engine's block store, so the caller hands over that handle
-/// instead of two scalars it keeps a copy of.
+/// container directly, without a C++ snapshot in between. The tempo map, the
+/// routing graph, the arrangement document, its bpm and the project tonality all
+/// come from the host's own session bag, so the caller names nothing but the
+/// path it wants written.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_project_save_from_host(
     host: *mut c_void,
-    ops: *const HirariLayoutHostOps,
     path: *const u8,
     path_len: usize,
-    tempo_state: *const c_void,
-    routing_state: *const c_void,
-    arrangement_document: usize,
-    bpm: f64,
-    block: *const c_void,
 ) -> bool {
-    if host.is_null() || ops.is_null() {
+    if host.is_null() {
         return false;
     }
+    let tempo = host_store(host, crate::engine_session::H_TEMPO);
+    let routing = host_store(host, crate::engine_session::H_ROUTING);
+    let arrangement = host_store(host, crate::engine_session::H_ARRANGEMENT_DOCUMENT);
+    let block = host_store(host, crate::engine_session::H_ENGINE_BLOCK);
+    let bpm = unsafe { crate::tempo::hirari_tempo_map_get_current_bpm(tempo) } as f64;
     let root_note = unsafe { crate::engine_block_host::hirari_engine_block_root_note(block) };
     let scale_type = unsafe { crate::engine_block_host::hirari_engine_block_scale_type(block) };
-    let Some(owned) = (unsafe { gather(host, &*ops, true, None) }) else {
+    let Some(owned) = (unsafe { gather(host, &NATIVE_OPS, true, None) }) else {
         return false;
     };
     let snapshot = owned.snapshot();
@@ -1037,9 +1214,9 @@ pub unsafe extern "C" fn hirari_project_save_from_host(
             path,
             path_len,
             &snapshot,
-            tempo_state,
-            routing_state,
-            arrangement_document,
+            tempo,
+            routing,
+            arrangement as usize,
             bpm,
             root_note,
             scale_type,

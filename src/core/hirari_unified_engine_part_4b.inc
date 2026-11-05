@@ -103,10 +103,9 @@
 bool HirariUnifiedEngine::saveProject(std::string_view path) {
     // Rust gathers the same model as the layout JSON writer and encodes the
     // container itself; field mapping, bounds and plug-in id encoding live in
-    // hirari-core-bridge/src/project_save_layout.rs.
+    // hirari-core-bridge/src/project_save_layout.rs, and the tempo, routing,
+    // arrangement and tonality it writes come out of this engine's bag.
     return hirari_project_save_from_host(
-        this, layoutHostOps(), reinterpret_cast<const uint8_t*>(path.data()), path.size(),
-        handle(kHirariHandleTempo), handle(kHirariHandleRouting), reinterpret_cast<size_t>(handle(kHirariHandleArrangementDocument)),
-        hirari_tempo_map_get_current_bpm(handle(kHirariHandleTempo)), handle(kHirariHandleEngineBlock));
+        this, reinterpret_cast<const uint8_t*>(path.data()), path.size());
 }
 
