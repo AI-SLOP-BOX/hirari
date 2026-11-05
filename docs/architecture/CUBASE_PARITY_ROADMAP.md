@@ -21,8 +21,9 @@ README が列挙する技術プレビューの制約に加え、旧C++ UI資産�
 C++エンジン資産である。現行アプリはCargo
 ワークスペースの `hirari-ui` が起動し、`hirari-core-bridge/build.rs` は `src/core` と
 `src`直下のC++実装を橋渡し用にビルドする。グラフィックス実装とネイティブ契約テストが使う
-C++補助ヘッダーは `src/graphics/ui_components/support` へ移し、旧C++ウィンドウ・workspace
-コードを `archive/legacy-cpp-ui` へ退避した。Rust/Slintの実製品UIとC++エンジンの責務を
+C++補助ヘッダーは `src/graphics/ui_components/support` へ、旧C++ウィンドウ・workspace
+コードは `archive/legacy-cpp-ui` へ退避した。いずれもその後ビルドされなくなったため現在は削除済みで、
+`src` に残る C++ は移行中のエンジン実装のみである。Rust/Slintの実製品UIとC++エンジンの責務を
 コード配置でも表す一方、
 最初にRust UIを独立クレート化した設計経緯や、旧UI資産を残した理由はGit履歴・設計資料に
 記録されていない。

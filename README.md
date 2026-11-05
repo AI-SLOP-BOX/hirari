@@ -88,12 +88,12 @@ vendor SDKs and voicebanks remain subject to their own licenses.
     Slint and Rust.
 *   `/hirari-core-bridge`: Rust project/runtime core and DSP modules, plus the
     FFI boundary for native audio components that are still being migrated.
-*   `/src`: Native C++ audio, device, plugin, and graphics integration. The
-    active session core is `hirari-core-bridge::HirariCore`; its owned native
-    audio engine is being migrated to Rust. `HirariUnifiedEngine` is a legacy
-    entry point.
-*   `/archive/legacy-cpp-ui`: Retired native C++ UI sources; they are not part
-    of the application build.
+*   `/src`: Native C++ audio and device integration that is still being
+    migrated. The active session core is `hirari-core-bridge::HirariCore`; its
+    owned native audio engine is being migrated to Rust. `HirariUnifiedEngine`
+    is a legacy entry point.
+*   `/archive`: Retired prototypes that are not part of the application build.
+    The former C++ UI archive is gone; no C++ UI source is kept anywhere.
 
 ## Building and contributing
 

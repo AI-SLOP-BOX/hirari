@@ -281,6 +281,17 @@ production support.
   now run against a real session bag with a live track, and the queue-full,
   stale-generation and per-engine error reports are pinned there.
   C++ 3034 -> 2989 (-45).
+- Housekeeping, not a migration slice: the never-built legacy C++ UI tree
+  `archive/legacy-cpp-ui/` is deleted (1221 lines across eight C++/Objective-C++
+  files, plus its notes that referenced a concurrency header which no longer
+  exists). The owner's target is zero C++ anywhere under Hirari, not only inside
+  the measured `src`/`tests` surface, so the archived copy is removed instead of
+  kept "for reference"; Git history retains it. The four documents that still
+  described that tree and the equally stale `src/graphics/ui_components/support`
+  header directory as present state were corrected. Counted C++ is unchanged at
+  2989; the repo-wide C++/Objective-C++ footprint drops 1221 lines, leaving
+  2989 in `src` plus the bridge reference TU, 455 in the C++ contract tests and
+  3234 in the vendored signalsmith headers.
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

@@ -36,12 +36,11 @@ The active UI and graphics support have separate owners:
 - `hirari-ui/` is the Rust/Slint application crate in the Cargo workspace. It
   owns the production desktop UI and invokes the engine through
   `hirari-core-bridge/`.
-- `src/graphics/ui_components/support/` contains C++ helpers used by the
-  graphics components and native contract tests. They are not a second
-  application UI.
-- The superseded native C++ window and workspace tree is archived under
-  `archive/legacy-cpp-ui/`; it is not compiled by the production bridge build.
-  The former root-level `src/ui/` directory has been retired.
+- `src/graphics/` contains only shader source (Metal and GLSL). There is no C++
+  UI helper tree any more: the graphics support headers and the superseded
+  native C++ window and workspace code have both been removed, and the
+  root-level `src/ui/` directory was retired earlier. All remaining C++ under
+  `src/` is engine code being migrated to Rust.
 
 `hirari-ui/` was already the production UI crate at the repository's current
 base revision; the Hirari work renames that existing crate rather than adding

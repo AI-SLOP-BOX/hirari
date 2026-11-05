@@ -23,10 +23,10 @@ Hirari source.
 | **Face** (UI) | Rust/Slint application in `hirari-ui` | Desktop interface and command client with `AboutSlint` attribution. |
 | **Appendages** (Plugins) | Isolated plugin worker and format adapters | Sandboxed plugin hosting over IPC. |
 
-The C++ helper headers used by graphics components and native contracts live
-under `src/graphics/ui_components/support`. The superseded C++ window and
-workspace implementation is archived under `archive/legacy-cpp-ui`; neither
-directory provides the desktop application's UI, which is owned by `hirari-ui`.
+No C++ UI code exists in either place. `src/graphics/` holds shader source only;
+the C++ helper headers used by the old native UI and the superseded C++ window
+and workspace implementation have been deleted, so the desktop application's UI
+is owned entirely by `hirari-ui`.
 
 ## 4. Performance Goals (2026 Standards)
 - **Shared Memory Zero-Copy**: Eliminating memory-copy overhead for cross-process buffers.
