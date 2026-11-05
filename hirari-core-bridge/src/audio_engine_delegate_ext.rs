@@ -855,7 +855,7 @@ impl ffi::AudioEngine {
         self.get_core().get_bounce_state()
     }
     pub fn audio_range_overflowed(&self) -> bool {
-        self.get_core().audio_range_overflowed()
+        crate::engine_transport::range_overflowed(self.get_core())
     }
     pub fn get_video_frame_revision(&self) -> u64 {
         crate::video_system::video_service().frame_revision()

@@ -127,9 +127,11 @@ pub mod ffi {
         fn new_audio_engine() -> UniquePtr<AudioEngine>;
         fn new_audio_engine_offline() -> UniquePtr<AudioEngine>;
 
-        fn set_playing(self: &AudioEngine, p: bool);
-        fn try_set_playing(self: &AudioEngine, p: bool) -> bool;
         fn join_audio_callbacks(self: &HirariUnifiedEngine);
+        // Rebuilding the graph for a new device format stays in C++; Rust's
+        // config transaction calls it once its own gates pass.
+        #[cxx_name = "prepareToPlay"]
+        fn prepare_to_play(self: Pin<&mut HirariUnifiedEngine>, sample_rate: f64, block_size: u32);
         fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
         fn set_master_gain(self: Pin<&mut HirariUnifiedEngine>, value: f32) -> bool;
         fn control_room_state(self: &AudioEngine) -> usize;
@@ -150,15 +152,12 @@ pub mod ffi {
         fn engine_block_state(self: &AudioEngine) -> usize;
         fn is_audio_device_ready(self: &AudioEngine) -> bool;
         fn try_reconnect_audio_device(self: &AudioEngine);
-        fn select_audio_device(
-            self: &AudioEngine,
-            device_id: u32,
-            sample_rate: f64,
-            buffer_size: u32,
-        ) -> bool;
+        // The device-config transaction itself, including device selection, is
+        // Rust-owned (`engine_config.rs`); only the session mutex it shares with
+        // the destructor, shutdown and reconnect paths is handed across here.
+        fn lock_config(self: &AudioEngine);
+        fn unlock_config(self: &AudioEngine);
         fn get_audio_config_generation(self: &AudioEngine) -> u64;
-        fn apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32);
-        fn try_apply_config(self: &AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool;
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn shutdown(self: &AudioEngine);
         fn new_project(self: Pin<&mut HirariUnifiedEngine>);
@@ -227,7 +226,6 @@ pub mod ffi {
         fn get_project_layout_revision(self: &HirariUnifiedEngine) -> u64;
         fn get_project_state_revision(self: &HirariUnifiedEngine) -> u64;
         fn mark_project_layout_changed(self: &HirariUnifiedEngine);
-        fn audio_range_overflowed(self: &HirariUnifiedEngine) -> bool;
 
         fn get_block_size(self: &AudioEngine) -> u32;
         fn get_latency_ms(self: &HirariUnifiedEngine) -> f32;

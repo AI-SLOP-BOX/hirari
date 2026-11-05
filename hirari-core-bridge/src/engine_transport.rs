@@ -40,6 +40,13 @@ pub fn is_playing(core: &HirariUnifiedEngine) -> bool {
     unsafe { engine_block_host::hirari_engine_block_is_playing(block(core) as *const c_void) != 0 }
 }
 
+/// The audio-range overflow flag published by the block's render gate.
+pub fn range_overflowed(core: &HirariUnifiedEngine) -> bool {
+    unsafe {
+        engine_block_host::hirari_engine_block_range_overflowed(block(core) as *const c_void) != 0
+    }
+}
+
 pub fn playhead(core: &HirariUnifiedEngine) -> u64 {
     unsafe { engine_block_host::hirari_engine_block_playhead(block(core) as *const c_void) }
 }

@@ -1,12 +1,10 @@
     // Transport
     // The playhead, loop, cycle and test-tone transport answers come straight
     // from the Rust engine-block store (engine_transport.rs); only the
-    // device-callback join and the stop-time path stay here.
-    bool is_playing() const;
+    // device-callback join and the stop-time path stay here. Transport start
+    // and stop reach the block store from Rust too, so this facade keeps no
+    // play-state relay at all.
     void join_audio_callbacks() const noexcept { waitForAudioCallbacks(); }
-    bool audio_range_overflowed() const noexcept {
-        return hirari_engine_block_range_overflowed(m_engineBlock) != 0;
-    }
     uint32_t get_block_size() const noexcept;
     float get_latency_ms() const noexcept;
     float get_track_latency_ms(uint32_t tid) const noexcept;
@@ -22,6 +20,10 @@
     void set_midi_clock_rate(double bpm) const noexcept { hirari_external_sync_set_rate(m_externalSync, bpm); }
     bool set_master_gain(float value);
     void* control_room_state() const noexcept { return m_controlRoomState; }
+    // The driver callback stages its hardware buffers straight into this
+    // Rust-owned input store, so the facade reads the handle rather than
+    // forwarding a publish per path.
+    void* input_blocks() const noexcept { return m_inputBlocks; }
     // Rust owns the tempo map, the undo history and the diagnostic ring; these
     // hand those addresses to Rust callers so an edit can work on the very
     // objects this engine's render path and history read, instead of crossing
@@ -47,9 +49,6 @@
     float get_master_gain() const noexcept;
     uint32_t get_track_delay_samples(uint32_t tid) const;
     double get_sample_rate() const { return m_sampleRate.load(std::memory_order_relaxed); }
-    uint64_t get_audio_config_generation() const noexcept {
-        return hirari_engine_block_generation(m_engineBlock);
-    }
     // Rust owns the playhead, loop, cycle and test tone in the engine-block
     // store (engine_transport.rs); the deleted accessors were one-line
     // forwarders onto hirari_engine_block_* that Rust now calls directly.

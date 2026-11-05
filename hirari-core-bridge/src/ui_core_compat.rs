@@ -374,7 +374,7 @@ impl HirariCore {
             match command {
                 crate::sync_transport::MmcCommand::Stop
                 | crate::sync_transport::MmcCommand::RecordPunchOut => {
-                    let _ = engine.try_set_playing(false);
+                    let _ = crate::engine_transport::try_set_playing(engine, engine.get_core(), false);
                 }
                 crate::sync_transport::MmcCommand::Play
                 | crate::sync_transport::MmcCommand::DeferredPlay
@@ -389,7 +389,7 @@ impl HirariCore {
                             engine.set_playhead(samples.min(u64::MAX as f64) as u64);
                         }
                     }
-                    let _ = engine.try_set_playing(true);
+                    let _ = crate::engine_transport::try_set_playing(engine, engine.get_core(), true);
                 }
             }
         }
@@ -420,7 +420,7 @@ impl HirariCore {
                     engine.set_playhead(samples.min(u64::MAX as f64) as u64);
                 }
             }
-            let _ = engine.try_set_playing(sync.running);
+            let _ = crate::engine_transport::try_set_playing(engine, engine.get_core(), sync.running);
         }
         serde_json::json!({"ok":true,"operation":"mtc","running":sync.running,"timecode":timecode})
             .to_string()

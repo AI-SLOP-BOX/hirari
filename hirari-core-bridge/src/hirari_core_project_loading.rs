@@ -259,7 +259,7 @@ impl HirariCore {
             }
         };
 
-        engine.set_playing(false);
+        crate::engine_transport::set_playing(engine, engine.get_core(), false);
         engine.new_project();
         // new_project creates a starter track for an empty UI. Remove it so
         // the persisted track list is reproduced exactly. Track ID 1 is the

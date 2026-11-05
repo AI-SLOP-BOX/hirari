@@ -45,7 +45,7 @@ impl HirariCore {
             // stayed at the engine's default 44100 and any project saved at
             // another rate (e.g. `hirari project init <proj> 48000`) failed
             // to load with "loaded engine sample rate differs from project".
-            engine_ref.set_playing(false);
+            crate::engine_transport::set_playing(engine_ref, engine_ref.get_core(), false);
         }
         // Engine bootstrap/template setup is not a user edit and must not
         // appear as the first undoable action of a new Core instance.

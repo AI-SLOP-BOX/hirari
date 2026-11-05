@@ -8,20 +8,12 @@ public:
     HirariUnifiedEngine();
     ~HirariUnifiedEngine();
 
-    void apply_config(const EngineConfig& cfg);
     void processBlock(void* output, uint32_t offset, uint32_t size);
     void processBlockDirect(float** buffers, uint32_t numChannels, uint32_t numSamples);
-    // Publishes the hardware input block for the realtime input-monitor path.
-    // The caller owns the input buffers; this method copies into fixed storage
-    // so the graph never retains driver pointers beyond the callback.
-    void publish_input_monitor_block(const float* const* inputs,
-                                     uint32_t numChannels,
-                                     uint32_t numSamples) noexcept;
-    // Publishes a mono hardware input snapshot for the dedicated Control
-    // Room talkback path. The audio graph never retains driver-owned buffers.
-    void publish_talkback_input_block(const float* const* inputs,
-                                      uint32_t numChannels,
-                                      uint32_t numSamples) noexcept;
+    // The hardware input publish and the config transaction are Rust-side now
+    // (engine_config.rs): the driver callback stages its buffers through the
+    // input-block externs and prepareToPlay is called directly, so no relay
+    // method forwards either.
     void waitForAudioCallbacks() const noexcept;
     void prepareToPlay(double sr, uint32_t sz);
     void syncStructuralChanges();

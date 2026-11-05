@@ -74,24 +74,6 @@ HirariUnifiedEngine::~HirariUnifiedEngine() {
     hirari_undo_manager_destroy(m_undoState);
 }
 
-void HirariUnifiedEngine::publish_input_monitor_block(const float* const* inputs,
-                                                    uint32_t numChannels,
-                                                    uint32_t numSamples) noexcept {
-    hirari_input_blocks_publish_monitor(m_inputBlocks, inputs, numChannels, numSamples);
-}
-
-void HirariUnifiedEngine::publish_talkback_input_block(const float* const* inputs,
-                                                       uint32_t numChannels,
-                                                       uint32_t numSamples) noexcept {
-    hirari_input_blocks_publish_talkback(m_inputBlocks, inputs, numChannels, numSamples,
-                                         m_controlRoomState);
-}
-
-void HirariUnifiedEngine::apply_config(const EngineConfig& cfg) {
-    hirari_tempo_map_set_current_bpm(m_tempoState, cfg.tempo);
-    prepareToPlay(cfg.sampleRate, cfg.blockSize);
-}
-
 void HirariUnifiedEngine::shutdown() {
     const bool wasShutdown = m_isShutdown.exchange(true, std::memory_order_acq_rel);
     hirari_engine_block_set_playing(m_engineBlock, 0);

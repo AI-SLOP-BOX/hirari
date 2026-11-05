@@ -34,14 +34,6 @@ namespace Hirari::Core::Engine {
 
 class Track;
 
-struct EngineConfig {
-    float tempo;
-    uint32_t timeSigNum;
-    uint32_t timeSigDen;
-    uint32_t sampleRate;
-    uint32_t blockSize;
-};
-
 class HirariUnifiedEngine {
 #include "hirari_unified_engine_decl_part_1.inc"
 #include "hirari_unified_engine_decl_part_2.inc"

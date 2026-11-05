@@ -104,7 +104,7 @@ void HirariUnifiedEngine::installCommandHost() {
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
             if (!engine) return false;
             *project = engine->get_project_generation();
-            *audio = engine->get_audio_config_generation();
+            *audio = hirari_engine_block_generation(engine->m_engineBlock);
             return true;
         },
         [](void* host) { return static_cast<HirariUnifiedEngine*>(host)->m_engineRings; },

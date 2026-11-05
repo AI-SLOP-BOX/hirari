@@ -1,17 +1,7 @@
 private:
-    // Mirrors the format the device negotiated into the graph. Device selection
-    // must apply the same transaction as any other reconfiguration, so the
-    // quiesce/apply sequence lives here instead of once per driver branch.
-    void applyNegotiatedDriverConfig() const {
-        if (!m_driver || !m_engine) return;
-        m_engine->waitForAudioCallbacks();
-        ::Hirari::Core::Engine::EngineConfig cfg;
-        cfg.tempo = hirari_tempo_map_get_current_bpm(
-            reinterpret_cast<const void*>(m_engine->tempo_state()));
-        cfg.sampleRate = hirari_audio_driver_host_sample_rate(m_driver);
-        cfg.blockSize = hirari_audio_driver_host_buffer_size(m_driver);
-        m_engine->apply_config(cfg);
-    }
+    // The negotiated device format is applied by Rust (engine_config.rs), which
+    // reaches the driver host, the tempo map and the input-block store through
+    // their own externs, so this facade keeps no config-transaction member.
     static void process_driver_block(const float* const* inputs, uint32_t inputChannelCount,
                                      float* const* outputs, uint32_t outputChannelCount,
                                      uint32_t frames,
@@ -22,9 +12,14 @@ private:
             frames > ::Hirari::Core::Engine::HirariUnifiedEngine::kMaxAudioBlockSize) return;
         for (uint32_t channel = 0; channel < outputChannelCount; ++channel)
             if (!outputs[channel]) return;
+        // The caller owns these buffers; the Rust input store copies what the
+        // graph needs so no driver pointer is retained beyond the callback.
         if (inputs && inputChannelCount > 0 && inputs[0])
-            self->m_engine->publish_input_monitor_block(inputs, inputChannelCount, frames);
-        self->m_engine->publish_talkback_input_block(inputs, inputChannelCount, frames);
+            hirari_input_blocks_publish_monitor(self->m_engine->input_blocks(), inputs,
+                                                 inputChannelCount, frames);
+        hirari_input_blocks_publish_talkback(self->m_engine->input_blocks(), inputs,
+                                             inputChannelCount, frames,
+                                             self->m_engine->control_room_state());
         std::array<float*, 32> mutableOutputs{};
         std::copy_n(outputs, outputChannelCount, mutableOutputs.begin());
         self->m_engine->processBlockDirect(mutableOutputs.data(), outputChannelCount, frames);

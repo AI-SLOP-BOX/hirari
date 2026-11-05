@@ -565,7 +565,6 @@ extern "C" void hirari_float_buffer_destroy(void* buffer);
 extern "C" bool hirari_audio_device_mode_offline();
 extern "C" bool hirari_native_test_isolation();
 // Audio configuration bounds (audio_config_rules.rs).
-extern "C" bool hirari_audio_config_valid(float tempo, double sampleRate, uint32_t blockSize);
 extern "C" bool hirari_audio_format_valid(double sampleRate, uint32_t blockSize);
 extern "C" void* hirari_region_waveform(
     void* host, uint32_t trackId, uint32_t regionId, uint32_t numPeaks);
@@ -1186,7 +1185,6 @@ extern "C" uint8_t hirari_engine_block_prepare_tracks(
     void* state, double sample_rate, uint32_t block_frames);
 extern "C" void hirari_engine_block_set_config_transition(
     void* state, uint8_t transition);
-extern "C" uint8_t hirari_engine_block_range_overflowed(const void* state);
 extern "C" void hirari_engine_block_clear_midi_events(void* state);
 
 // Publication state of the frozen render. The store owns the Rust audio

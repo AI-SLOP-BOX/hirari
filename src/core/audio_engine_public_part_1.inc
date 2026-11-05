@@ -3,14 +3,12 @@ public:
     explicit AudioEngine(bool startDevice);
     ~AudioEngine();
 
-    void set_playing(bool playing) const {
-        (void)try_set_playing(playing);
-    }
-    bool try_set_playing(bool playing) const {
-        if (!m_engine) return false;
-        if (playing && !is_driver_running()) return false;
-        m_engine->set_playing(playing);
-        return true;
+    // Transport start/stop is Rust-owned (`engine_transport.rs`); the facade
+    // keeps no relay, only the engine-side safety stops below.
+    bool transport_playing() const {
+        return m_engine &&
+               hirari_engine_block_is_playing(
+                   reinterpret_cast<const void*>(m_engine->engine_block_state())) != 0;
     }
     uintptr_t control_room_state() const {
         return m_engine ? reinterpret_cast<uintptr_t>(m_engine->control_room_state()) : 0;
@@ -30,7 +28,7 @@ public:
     bool is_audio_device_ready() const {
         std::lock_guard<std::mutex> lock(m_configMutex);
         const bool ready = is_driver_running();
-        if (!ready && m_engine && m_engine->is_playing()) {
+        if (!ready && m_engine && transport_playing()) {
             // Device loss is a transport safety boundary, not merely a UI
             // status change. Stop the graph even when no UI poll is running.
             m_engine->set_playing(false);
@@ -59,17 +57,15 @@ public:
             if (!is_driver_running() && m_engine) m_engine->set_playing(false);
         }
     }
-    bool select_audio_device(uint32_t deviceId, double sampleRate, uint32_t bufferSize) const {
-        if (!m_driver || !m_engine ||
-            !hirari_audio_driver_host_select_device(m_driver, deviceId, sampleRate, bufferSize) ||
-            !is_driver_running()) return false;
-        applyNegotiatedDriverConfig();
-        return std::abs(m_engine->get_sample_rate() -
-                            hirari_audio_driver_host_sample_rate(m_driver)) < 0.5 &&
-               m_engine->get_block_size() == hirari_audio_driver_host_buffer_size(m_driver);
-    }
+    // The configuration transaction is Rust-owned (`engine_config.rs`). Device
+    // selection, reconfiguration and the graph rebuild all serialize through
+    // this session lock, so Rust takes and releases it around one transaction.
+    void lock_config() const { m_configMutex.lock(); }
+    void unlock_config() const { m_configMutex.unlock(); }
     uint64_t get_audio_config_generation() const {
-        return m_engine ? m_engine->get_audio_config_generation() : 0;
+        return m_engine ? hirari_engine_block_generation(
+                             reinterpret_cast<const void*>(m_engine->engine_block_state()))
+                        : 0;
     }
     uint32_t get_block_size() const { return m_engine ? m_engine->get_block_size() : 0; }
 
@@ -96,62 +92,8 @@ public:
         if (m_engine) m_engine->processBlockDirect(channels, 2, static_cast<uint32_t>(left.size()));
     }
 
-    void apply_config(float tempo, uint32_t sr, uint32_t bs) const {
-        std::lock_guard<std::mutex> lock(m_configMutex);
-        (void)apply_config_locked(tempo, sr, bs);
-    }
-
-    // Configuration is a control-plane transaction.  Keeping the driver
-    // transition and graph rebuild under the same session lock prevents two
-    // UI/CLI callers from interleaving a device reconfigure with a second
-    // prepareToPlay and publishing a generation that describes neither one.
-    bool apply_config_locked(float tempo, uint32_t sr, uint32_t bs) const {
-        // Keep the legacy void ABI, but make every entrypoint obey the same
-        // configuration contract as try_apply_config. Invalid direct callers
-        // must not quiesce the callback or advance the audio generation; the
-        // bounds live in Rust (audio_config_rules.rs).
-        if (!m_engine || !hirari_audio_config_valid(tempo, static_cast<double>(sr), bs)) return false;
-        // A configuration transition is a stop-the-world control operation.
-        // Do not silently stop a live transport here: callers must perform
-        // the explicit transport transition first, and the check is made
-        // while m_configMutex is held so a concurrent start cannot slip
-        // between the UI preflight and driver reconfiguration.
-        if (m_engine->is_playing()) return false;
-        ::Hirari::Core::Engine::EngineConfig cfg;
-        cfg.tempo = tempo; cfg.sampleRate = sr; cfg.blockSize = bs;
-        // The graph and the device must be rebuilt as one transaction. Updating
-        // only the graph leaves the device callback on the previous format.
-        if (!hirari_native_test_isolation() && is_driver_running()) {
-            if (!hirari_audio_driver_host_reconfigure(m_driver, static_cast<double>(sr), bs)) {
-                return false;
-            }
-        } else {
-            // A running device host must be rebuilt together with the graph so
-            // the callback never keeps the previous format. An engine that owns
-            // no running device (CLI renders, automation, isolated tests, a
-            // platform with no backend) has nothing to reconfigure, and routing
-            // it through the driver made every reconfigure fail and silently
-            // leave the graph at its default 44100. Apply the config to the
-            // detached graph directly, the branch the HIRARI_NATIVE_TEST_ISOLATION
-            // sandbox already used.
-            m_engine->waitForAudioCallbacks();
-            m_engine->apply_config(cfg);
-        }
-        return true;
-    }
-    bool try_apply_config(float tempo, uint32_t sr, uint32_t bs) const {
-        if (!m_engine || !hirari_audio_config_valid(tempo, static_cast<double>(sr), bs)) return false;
-        std::lock_guard<std::mutex> lock(m_configMutex);
-        const uint64_t before = m_engine->get_audio_config_generation();
-        if (!apply_config_locked(tempo, sr, bs)) return false;
-        // No separate device-reconciliation step: apply_config_locked already
-        // rebuilds a running CoreAudio host together with the graph, and an
-        // engine that owns no device has nothing left to reconcile. An earlier
-        // guard here undid the just-applied config and returned false whenever
-        // no driver was running, which left offline/CLI/test engines stuck at
-        // their default 44100 and made them reject every project saved at a
-        // different rate.
-        return m_engine->get_audio_config_generation() != before &&
-               std::abs(m_engine->get_sample_rate() - static_cast<double>(sr)) < 0.5 &&
-               m_engine->get_block_size() == bs;
-    }
+    // The whole configuration transaction — validity gate, transport guard,
+    // driver reconfigure and graph rebuild under the session lock — is
+    // Rust-owned (`engine_config.rs`), which drives the driver host, the tempo
+    // map and prepareToPlay through their own entry points. No EngineConfig
+    // struct and no apply/try pair survives on this side.

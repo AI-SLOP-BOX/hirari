@@ -25,9 +25,6 @@ void HirariUnifiedEngine::set_playing(bool p) {
         }
     }
 }
-bool HirariUnifiedEngine::is_playing() const {
-    return hirari_engine_block_is_playing(m_engineBlock) != 0;
-}
 uint32_t HirariUnifiedEngine::get_block_size() const noexcept {
     return m_blockSize.load(std::memory_order_relaxed);
 }

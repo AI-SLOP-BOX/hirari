@@ -121,6 +121,31 @@ production support.
   33 `rust_ffi.hpp` declarations no longer referenced from C++ are deleted —
   including the dead bounce-offline, master-meter read, region copy/forget,
   clone-state and engine-block loop/cycle getters. C++ 4658 -> 4588 (-70).
+- The device-config transaction, the transport relay and the driver-block input
+  publish are Rust-owned. `engine_config.rs` takes the whole stop-the-world
+  sequence: the C++ `apply_config`, `apply_config_locked`, `try_apply_config`,
+  `select_audio_device` and `applyNegotiatedDriverConfig` are deleted, with the
+  `EngineConfig` struct and the engine's own `apply_config` relay behind them.
+  Rust locks the session mutex through `lock_config`/`unlock_config`, reads the
+  play-state gate straight from the engine-block store, rebuilds a running
+  device host or quiesces and prepares the detached graph through
+  `prepareToPlay`, keeps the tempo write in the branch that had it, and compares
+  the block generation before and after so a caller still learns whether the
+  format landed. The realtime callback stops crossing two engine methods to
+  stage its buffers: `process_driver_block` publishes the monitor and talkback
+  blocks into the Rust input store through the `hirari_input_blocks_*` externs,
+  which retires the engine's `publish_input_monitor_block` and
+  `publish_talkback_input_block`. Transport end-to-end moved with it — the
+  facade's `set_playing`/`try_set_playing` inlines and the engine's `is_playing`,
+  `audio_range_overflowed` and `get_audio_config_generation` are gone, so
+  `engine_transport.rs` owns start/stop with its driver-running gate, callback
+  join and retired-region trim, and `AudioEngine` reads play state and generation
+  from the block handle itself. Only the engine's `set_playing` survives, for the
+  device-loss, reconnect and project-load stops that must still iterate C++
+  tracks. Two `rust_ffi.hpp` declarations (`hirari_audio_config_valid`,
+  `hirari_engine_block_range_overflowed`) lost their last C++ consumer, and a new
+  `engine_config` test drives a detached engine through one rejected and one
+  accepted transition. C++ 4588 -> 4485 (-103).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

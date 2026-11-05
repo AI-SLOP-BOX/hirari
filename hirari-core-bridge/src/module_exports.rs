@@ -43,6 +43,7 @@ pub mod audio_test_tone;
 pub mod audio_engine_delegate_ext;
 pub mod engine_block_host;
 pub mod engine_analysis_reads;
+pub mod engine_config;
 pub mod engine_edit_ext;
 pub mod engine_input_block;
 pub mod engine_rings;

@@ -346,7 +346,7 @@ impl HirariCore {
         }
         self.engine.as_ref().is_some_and(|engine| {
             if engine.is_playing() {
-                engine.set_playing(false);
+                crate::engine_transport::set_playing(engine, engine.get_core(), false);
             }
             engine.try_apply_config(engine.get_tempo(), sample_rate, buffer_size)
         })
