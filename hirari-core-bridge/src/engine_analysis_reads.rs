@@ -26,7 +26,7 @@ use crate::region_store;
 use crate::tempo;
 use crate::track_channel_eq;
 use crate::track_runtime;
-use crate::track_session::{self, HirariTrackSessionOps, TrackSession};
+use crate::track_session::{self, TrackSession};
 use std::ffi::c_void;
 
 fn block_handle(core: &HirariUnifiedEngine) -> *const c_void {
@@ -285,35 +285,19 @@ fn session(core: &HirariUnifiedEngine, tid: u32) -> Option<TrackSession> {
     TrackSession::open(host(core), tid)
 }
 
-/// Releases the tracks lock when the walk leaves, including on a panic.
-struct TracksLock<'a> {
-    ops: &'a HirariTrackSessionOps,
-    host: *mut c_void,
-}
-
-impl Drop for TracksLock<'_> {
-    fn drop(&mut self) {
-        self.ops.unlock_tracks(self.host);
-    }
-}
-
 /// Visits every live track's effect chain with the tracks lock held, in graph
 /// order — the walk the deleted C++ diagnostic polls performed over
 /// `lockedTracks()`.
 fn for_each_chain(core: &HirariUnifiedEngine, mut visit: impl FnMut(*mut c_void)) {
-    let Some(ops) = track_session::engine_ops() else {
-        return;
+    let address = host(core);
+    let _guard = match track_session::GraphLock::acquire(address) {
+        Some(guard) => guard,
+        None => return,
     };
     let table = unsafe { hirari_engine_block_track_table(block_handle(core)) };
     if table.is_null() {
         return;
     }
-    let address = host(core);
-    ops.lock_tracks(address);
-    let _guard = TracksLock {
-        ops: &ops,
-        host: address,
-    };
     let count = unsafe { engine_track_table::hirari_engine_track_count(table) };
     let pointers = unsafe { engine_track_table::hirari_engine_track_ptrs(table) };
     if pointers.is_null() {
@@ -324,7 +308,10 @@ fn for_each_chain(core: &HirariUnifiedEngine, mut visit: impl FnMut(*mut c_void)
         if track.is_null() {
             continue;
         }
-        visit(ops.storage(track, track_session::STORAGE_CHAIN));
+        visit(track_session::storage(
+            track,
+            track_session::STORAGE_CHAIN,
+        ));
     }
 }
 

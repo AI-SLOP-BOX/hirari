@@ -76,62 +76,32 @@ pub unsafe extern "C" fn hirari_track_clear_hrtf_kernel(host: *mut c_void, track
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine_track::{
-        hirari_layout_revision_create, hirari_layout_revision_current, hirari_layout_revision_release,
-        hirari_track_new, TRACK_TYPE_AUDIO,
+    use crate::engine_session::{
+        hirari_engine_session_create, hirari_engine_session_destroy, hirari_engine_session_handle,
+        H_LAYOUT_REVISION, H_TRACK_TABLE,
     };
-    use crate::engine_track_table::{
-        hirari_engine_track_find, hirari_engine_track_insert, hirari_engine_track_table_create,
-        hirari_engine_track_table_destroy,
-    };
-    use crate::track_session::{hirari_track_session_install, HirariTrackSessionOps};
+    use crate::engine_track::{hirari_layout_revision_current, hirari_track_new, TRACK_TYPE_AUDIO};
+    use crate::engine_track_table::hirari_engine_track_insert;
 
-    unsafe extern "C" fn no_lock(_host: *mut c_void) {}
-
-    unsafe extern "C" fn find(host: *mut c_void, track_id: u32) -> *mut c_void {
-        unsafe { hirari_engine_track_find(host, track_id) }
-    }
-
-    /// The session table is process-global and the engine installs its own copy
-    /// at startup, so the pin these tests install is handed back to it after.
-    struct SessionGuard(Option<HirariTrackSessionOps>);
-
-    impl SessionGuard {
-        fn install() -> Self {
-            let previous = crate::track_session::engine_ops();
-            let ops = HirariTrackSessionOps {
-                lock: Some(no_lock),
-                unlock: Some(no_lock),
-                track: Some(find),
-                ..HirariTrackSessionOps::default()
-            };
-            unsafe { hirari_track_session_install(&ops) };
-            Self(previous)
-        }
-    }
-
-    impl Drop for SessionGuard {
-        fn drop(&mut self) {
-            match self.0 {
-                Some(ops) => unsafe { hirari_track_session_install(&ops) },
-                None => unsafe { hirari_track_session_install(std::ptr::null()) },
-            }
-        }
-    }
-
-    /// One real track in the engine's own table, with the layout revision the
-    /// track marks for every edit it applies. The host the session resolves
-    /// through is the table itself.
+    /// One real track in a session bag's own table, with the layout revision the
+    /// track marks for every edit it applies. The bag holds no tracks mutex: a
+    /// fixture has no audio thread to exclude, and a session over it reads that
+    /// as a lock nobody needs to wait for.
     struct Engine {
-        table: *mut c_void,
+        host: *mut c_void,
+        session: *mut c_void,
         revision: *mut c_void,
-        track: *mut c_void,
     }
 
     impl Engine {
         fn new(id: u32) -> Self {
-            let table = unsafe { hirari_engine_track_table_create() };
-            let revision = unsafe { hirari_layout_revision_create() };
+            // The bag records this address as its engine, which is how the
+            // control entry points below resolve a track without a host table.
+            let host: *mut c_void =
+                std::ptr::from_mut(Box::leak(Box::new(0u64))).cast::<std::ffi::c_void>();
+            let session = hirari_engine_session_create(host, std::ptr::null_mut());
+            let table = hirari_engine_session_handle(session, H_TRACK_TABLE);
+            let revision = hirari_engine_session_handle(session, H_LAYOUT_REVISION);
             let mut track = std::ptr::null_mut();
             let owner = unsafe {
                 hirari_track_new(
@@ -144,7 +114,11 @@ mod tests {
                 )
             };
             assert!(unsafe { hirari_engine_track_insert(table, usize::MAX, owner) });
-            Self { table, revision, track }
+            Self {
+                host,
+                session,
+                revision,
+            }
         }
 
         /// How many times the track marked the layout: one edit marks it twice,
@@ -156,67 +130,61 @@ mod tests {
 
     impl Drop for Engine {
         fn drop(&mut self) {
-            unsafe {
-                // The table holds the only owning handle, so destroying it runs
-                // the track's own storage teardown.
-                hirari_engine_track_table_destroy(self.table);
-                hirari_layout_revision_release(self.revision);
-            }
+            // Releasing the bag runs the track's own storage teardown and retires
+            // the host binding, so the address cannot be read by a later session.
+            unsafe { hirari_engine_session_destroy(self.session) };
         }
     }
 
     #[test]
     fn an_unresolved_track_is_refused() {
-        let _guard = SessionGuard::install();
         let engine = Engine::new(5);
         let before = engine.marks();
         assert!(
-            !unsafe { hirari_track_set_spatial_position(engine.table, 99, 1.0, 2.0, 3.0) },
+            !unsafe { hirari_track_set_spatial_position(engine.host, 99, 1.0, 2.0, 3.0) },
             "a retired id cannot be written"
         );
-        assert!(!unsafe { hirari_track_clear_hrtf_kernel(engine.table, 99) });
+        assert!(!unsafe { hirari_track_clear_hrtf_kernel(engine.host, 99) });
         assert_eq!(engine.marks(), before, "and nothing was marked");
     }
 
     #[test]
     fn spatial_position_rejects_non_finite_coordinates_before_the_lookup() {
-        let _guard = SessionGuard::install();
         let engine = Engine::new(5);
         let before = engine.marks();
-        assert!(!unsafe { hirari_track_set_spatial_position(engine.table, 5, f32::NAN, 0.0, 0.0) });
+        assert!(!unsafe { hirari_track_set_spatial_position(engine.host, 5, f32::NAN, 0.0, 0.0) });
         assert!(
-            !unsafe { hirari_track_set_spatial_position(engine.table, 5, 0.0, f32::INFINITY, 0.0) },
+            !unsafe { hirari_track_set_spatial_position(engine.host, 5, 0.0, f32::INFINITY, 0.0) },
             "an infinite coordinate never reaches the panner"
         );
         assert!(!unsafe {
-            hirari_track_set_spatial_position(engine.table, 5, 0.0, 0.0, f32::NEG_INFINITY)
+            hirari_track_set_spatial_position(engine.host, 5, 0.0, 0.0, f32::NEG_INFINITY)
         });
         assert_eq!(engine.marks(), before, "a rejected edit marks no layout");
 
-        assert!(unsafe { hirari_track_set_spatial_position(engine.table, 5, 1.0, 2.0, 3.0) });
+        assert!(unsafe { hirari_track_set_spatial_position(engine.host, 5, 1.0, 2.0, 3.0) });
         assert_eq!(engine.marks(), before + 2, "and an accepted one is an edit");
     }
 
     #[test]
     fn hrtf_admits_only_a_complete_matching_kernel() {
-        let _guard = SessionGuard::install();
         let engine = Engine::new(5);
         let before = engine.marks();
         let taps = vec![0.5f32; MAX_HRTF_TAPS + 1];
         assert!(
             !unsafe {
-                hirari_track_set_hrtf_kernel(engine.table, 5, std::ptr::null(), 0, std::ptr::null(), 0)
+                hirari_track_set_hrtf_kernel(engine.host, 5, std::ptr::null(), 0, std::ptr::null(), 0)
             },
             "an empty kernel is not a kernel"
         );
         assert!(
-            !unsafe { hirari_track_set_hrtf_kernel(engine.table, 5, taps.as_ptr(), 2, taps.as_ptr(), 3) },
+            !unsafe { hirari_track_set_hrtf_kernel(engine.host, 5, taps.as_ptr(), 2, taps.as_ptr(), 3) },
             "the two taps have to describe the same length"
         );
         assert!(
             !unsafe {
                 hirari_track_set_hrtf_kernel(
-                    engine.table,
+                    engine.host,
                     5,
                     taps.as_ptr(),
                     MAX_HRTF_TAPS + 1,
@@ -231,24 +199,23 @@ mod tests {
         let left = [0.5f32, 0.25];
         let right = [0.75f32, 0.125];
         assert!(unsafe {
-            hirari_track_set_hrtf_kernel(engine.table, 5, left.as_ptr(), 2, right.as_ptr(), 2)
+            hirari_track_set_hrtf_kernel(engine.host, 5, left.as_ptr(), 2, right.as_ptr(), 2)
         });
         assert_eq!(engine.marks(), before + 2, "a valid kernel is installed");
 
-        assert!(unsafe { hirari_track_clear_hrtf_kernel(engine.table, 5) });
+        assert!(unsafe { hirari_track_clear_hrtf_kernel(engine.host, 5) });
         assert_eq!(engine.marks(), before + 4, "and clearing it is an edit too");
     }
 
     #[test]
     fn a_kernel_the_panner_rejects_still_retires_the_frozen_render() {
-        let _guard = SessionGuard::install();
         let engine = Engine::new(5);
         let before = engine.marks();
         let left = [f32::NAN, 0.25];
         let right = [0.75f32, 0.125];
         assert!(
             !unsafe {
-                hirari_track_set_hrtf_kernel(engine.table, 5, left.as_ptr(), 2, right.as_ptr(), 2)
+                hirari_track_set_hrtf_kernel(engine.host, 5, left.as_ptr(), 2, right.as_ptr(), 2)
             },
             "a non-finite sample is refused by the store"
         );

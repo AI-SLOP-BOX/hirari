@@ -10,8 +10,8 @@ use hirari_core_bridge::engine_session::{
     handle_of_host, hirari_engine_session_close_graph, hirari_engine_session_create,
     hirari_engine_session_destroy, hirari_engine_session_handle, H_ARRANGEMENT_DOCUMENT,
     H_BOUNCE_SESSION, H_CONTROL_ROOM, H_ENGINE_BLOCK, H_ENGINE_RINGS, H_FORENSIC_JOURNAL,
-    H_INPUT_BLOCKS, H_LAYOUT_REVISION, H_MIDI_PLAYBACK_CLOCK, H_MIDI_SNAPSHOT_STORE, H_TRACK_TABLE,
-    H_UNDO,
+    H_INPUT_BLOCKS, H_LAYOUT_REVISION, H_MIDI_PLAYBACK_CLOCK, H_MIDI_SNAPSHOT_STORE,
+    H_TRACKS_MUTEX, H_TRACK_TABLE, H_UNDO,
 };
 
 /// A stand-in for the C++ engine object. The bag only records the address it is
@@ -24,7 +24,7 @@ fn engine_host() -> *mut std::ffi::c_void {
 /// because the block binds them before the engine's own constructor body runs.
 #[test]
 fn a_new_engine_has_every_store_it_renders_with() {
-    let session = hirari_engine_session_create(engine_host());
+    let session = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
     assert!(!session.is_null());
     for kind in [
         H_TRACK_TABLE,
@@ -52,7 +52,7 @@ fn a_new_engine_has_every_store_it_renders_with() {
 /// the very counter the tracks bump.
 #[test]
 fn the_layout_revision_slot_is_the_one_the_block_marks() {
-    let session = hirari_engine_session_create(engine_host());
+    let session = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
     let revision = hirari_engine_session_handle(session, H_LAYOUT_REVISION);
     assert_eq!(
         revision,
@@ -71,7 +71,7 @@ fn the_layout_revision_slot_is_the_one_the_block_marks() {
 /// bag stays live; the retired slots read null and a second close is a no-op.
 #[test]
 fn closing_the_graph_retires_only_the_tracks_and_the_hardware_input() {
-    let session = hirari_engine_session_create(engine_host());
+    let session = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
     hirari_engine_session_close_graph(session);
     assert!(hirari_engine_session_handle(session, H_TRACK_TABLE).is_null());
     assert!(hirari_engine_session_handle(session, H_INPUT_BLOCKS).is_null());
@@ -84,7 +84,7 @@ fn closing_the_graph_retires_only_the_tracks_and_the_hardware_input() {
 /// that no longer belongs to a store.
 #[test]
 fn an_unknown_slot_or_a_released_bag_reads_null() {
-    let session = hirari_engine_session_create(engine_host());
+    let session = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
     assert!(hirari_engine_session_handle(session, u32::MAX).is_null());
     hirari_engine_session_destroy(session);
     assert!(hirari_engine_session_handle(std::ptr::null(), H_ENGINE_BLOCK).is_null());
@@ -95,8 +95,8 @@ fn an_unknown_slot_or_a_released_bag_reads_null() {
 /// per instance, which is what let offline engines and tests run side by side.
 #[test]
 fn each_engine_bag_holds_its_own_stores() {
-    let first = hirari_engine_session_create(engine_host());
-    let second = hirari_engine_session_create(engine_host());
+    let first = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
+    let second = hirari_engine_session_create(engine_host(), std::ptr::null_mut());
     for kind in [
         H_ENGINE_RINGS,
         H_UNDO,
@@ -113,13 +113,29 @@ fn each_engine_bag_holds_its_own_stores() {
     hirari_engine_session_destroy(second);
 }
 
+/// The bag holds the engine's tracks lock as a borrowed slot: it hands back the
+/// very address it was given, and a released bag leaves nothing to lock.
+#[test]
+fn the_bag_borrows_the_engine_tracks_mutex() {
+    let host = engine_host();
+    let mutex = std::ptr::from_mut(&mut 0u64).cast::<std::ffi::c_void>();
+    let session = hirari_engine_session_create(host, mutex);
+    assert_eq!(
+        handle_of_host(host, H_TRACKS_MUTEX),
+        mutex,
+        "a Rust walk locks the mutex the engine's own edits take"
+    );
+    hirari_engine_session_destroy(session);
+    assert!(handle_of_host(host, H_TRACKS_MUTEX).is_null());
+}
+
 /// The registry a Rust routine uses when it is handed only the engine's
 /// address: the host resolves to the bag it created, and the binding goes away
 /// with the bag so a recycled address cannot read a released store.
 #[test]
 fn a_host_address_resolves_the_bag_it_created() {
     let host = engine_host();
-    let session = hirari_engine_session_create(host);
+    let session = hirari_engine_session_create(host, std::ptr::null_mut());
     assert_eq!(
         handle_of_host(host, H_ENGINE_BLOCK),
         hirari_engine_session_handle(session, H_ENGINE_BLOCK),

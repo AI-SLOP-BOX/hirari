@@ -75,30 +75,6 @@ void HirariUnifiedEngine::installPluginEditHost() {
     hirari_plugin_edit_host_install(&ops);
 }
 
-// The one track-edit session every control-side host shares (track_session.rs).
-// The track and every storage it holds are Rust objects now, and so is the
-// device format a re-prepare needs, so the session only carries what physically
-// cannot leave C++: the engine's tracks lock and the live track resolution.
-void HirariUnifiedEngine::installTrackSessionHost() {
-    static const HirariTrackSessionOps ops = {
-        [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.lock(); },
-        [](void* host) { static_cast<HirariUnifiedEngine*>(host)->m_tracksMutex.unlock(); },
-        [](void* host, uint32_t trackId) -> void* {
-            return static_cast<HirariUnifiedEngine*>(host)->findTrackLocked(trackId);
-        },
-        &hirari_track_storage,
-        &hirari_track_type,
-        &hirari_track_mark_layout,
-        [](void* host, void* track) {
-            if (!host || !track) return;
-            (void)hirari_engine_block_prepare_track(
-                static_cast<HirariUnifiedEngine*>(host)->handle(kHirariHandleEngineBlock), track);
-        },
-    };
-    hirari_track_session_install(&ops);
-}
-
-
 bool HirariUnifiedEngine::has_sidechain_link(uint32_t sourceId, uint32_t destId,
                                            uint32_t pluginIndex) const {
     return hirari_sidechain_engine_has_link(

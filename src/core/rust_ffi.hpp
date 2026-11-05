@@ -685,32 +685,9 @@ struct HirariControlEditHostOps {
 
 extern "C" void hirari_control_edit_host_install(const HirariControlEditHostOps* ops);
 
-// One control-thread session over a live track (track_session.rs). Rust owns
-// the edit protocol — resolve the track, mutate its own Rust stores, drop the
-// frozen render, bump the layout revision — so an edit host needs no callbacks
-// of its own. These are the only steps that are genuinely engine code: the lock
-// the tracks live behind, the handles a Track physically owns, re-preparing a
-// chain for playback and marking the project layout dirty.
-struct HirariTrackSessionOps {
-    void (*lockTracks)(void*) = nullptr;
-    void (*unlockTracks)(void*) = nullptr;
-    // Resolves a live track under the held lock; null when it is gone.
-    void* (*liveTrack)(void*, uint32_t) = nullptr;
-    /// One of a track's own storages: 0 channel strip, 1 effect chain,
-    /// 2 automation store, 3 freeze store, 4 realtime runtime,
-    /// 5 MIDI articulation state — the numbering the layout gather uses.
-    void* (*trackStorage)(void*, uint32_t) = nullptr;
-    uint32_t (*trackType)(void*) = nullptr;
-    void (*markTrackLayout)(void*) = nullptr;
-    // Re-prepares the track at the engine's current rate and block size.
-    void (*prepareTrack)(void*, void*) = nullptr;
-};
-
-extern "C" void hirari_track_session_install(const HirariTrackSessionOps* ops);
-
 // Plugin-chain edit policy (bypass, reordering, parameters and presets). The
 // chain, the frozen render and the layout revision are read and written by Rust
-// through the track session above; only these two steps are engine code.
+// through its own track session; only these two steps are engine code.
 struct HirariPluginEditHostOps {
     // Re-publishes the track snapshot after the chain changed.
     void (*syncStructuralChanges)(void*) = nullptr;
@@ -787,7 +764,7 @@ extern "C" bool hirari_engine_push_command(void* host, uint32_t type, uint32_t t
                                            uint64_t expectedAudioGeneration);
 
 // Track control policy (spatial validation, HRTF admission, auto-mix curve)
-// is Rust's; it pins a track through the track session host below.
+// is Rust's; it pins a track through its own session over the engine's graph.
 extern "C" bool hirari_plugin_edit_set_bypass(
     void* host, uint32_t trackId, uint32_t pluginIndex, bool bypassed);
 
@@ -965,7 +942,7 @@ enum HirariEngineHandleKind : uint32_t {
     kHirariHandleArrangementDocument = 27,
     kHirariHandleLayoutRevision = 28,
 };
-extern "C" void* hirari_engine_session_create(void* host);
+extern "C" void* hirari_engine_session_create(void* host, void* tracks_mutex);
 /// The handle of one slot, or null for an unknown kind and a retired slot.
 extern "C" void* hirari_engine_session_handle(const void* state, uint32_t kind);
 /// Retires the track table and the hardware input store after the engine has

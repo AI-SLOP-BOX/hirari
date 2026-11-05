@@ -10,7 +10,7 @@ use crate::engine_track_table;
 use crate::ffi::{AudioEngine, HirariUnifiedEngine};
 use crate::realtime_vca_manager::hirari_vca_assign_track;
 use crate::region_store;
-use crate::track_session::{self, HirariTrackSessionOps};
+use crate::track_session::{self, TrackSession};
 use std::ffi::c_void;
 
 fn block(core: &HirariUnifiedEngine) -> *mut c_void {
@@ -23,17 +23,6 @@ fn address(core: &HirariUnifiedEngine) -> *mut c_void {
 
 fn sampler(core: &HirariUnifiedEngine) -> *mut c_void {
     core.preview_sampler() as *mut c_void
-}
-
-struct TracksLock<'a> {
-    ops: &'a HirariTrackSessionOps,
-    host: *mut c_void,
-}
-
-impl Drop for TracksLock<'_> {
-    fn drop(&mut self) {
-        self.ops.unlock_tracks(self.host);
-    }
 }
 
 pub fn is_playing(core: &HirariUnifiedEngine) -> bool {
@@ -104,16 +93,15 @@ fn join_audio_callbacks(core: &HirariUnifiedEngine) {
 /// The stop-time trim: every live track's retired region generations are
 /// released on the control thread, once no callback can be holding them.
 fn trim_retired_regions(core: &HirariUnifiedEngine) {
-    let Some(ops) = track_session::engine_ops() else {
-        return;
+    let host = address(core);
+    let _guard = match track_session::GraphLock::acquire(host) {
+        Some(guard) => guard,
+        None => return,
     };
     let table = unsafe { hirari_engine_block_track_table(block(core) as *const c_void) };
     if table.is_null() {
         return;
     }
-    let host = address(core);
-    ops.lock_tracks(host);
-    let _guard = TracksLock { ops: &ops, host };
     let count = unsafe { engine_track_table::hirari_engine_track_count(table) };
     let pointers = unsafe { engine_track_table::hirari_engine_track_ptrs(table) };
     if pointers.is_null() {
@@ -189,11 +177,6 @@ pub fn assign_track_to_vca(core: &HirariUnifiedEngine, track_id: u32, group_id: 
     if track_id == 0 || group_id == 0 {
         return false;
     }
-    let lives = track_session::engine_ops().is_some_and(|ops| {
-        let host = address(core);
-        ops.lock_tracks(host);
-        let _guard = TracksLock { ops: &ops, host };
-        !ops.find(host, track_id).is_null()
-    });
-    lives && unsafe { hirari_vca_assign_track(track_id, group_id) }
+    TrackSession::open(address(core), track_id).is_some()
+        && unsafe { hirari_vca_assign_track(track_id, group_id) }
 }

@@ -230,6 +230,24 @@ production support.
   deleted code left the header, and `engine_session_contract`
   gained the test that a host address resolves the bag that created it and reads
   null once that bag is released. C++ 3266 -> 3176 (-90).
+- The track session resolves its engine in Rust, which removes the shared table
+  every control-side edit host used to borrow its graph through.
+  `track_session.rs` takes the engine's address, looks up the session bag that
+  address created and answers the graph itself: the tracks lock comes from a new
+  borrowed slot the engine fills with `&m_tracksMutex` as it creates the bag —
+  two entry points lock and unlock that address, so a Rust walk and the C++
+  edits still in this class exclude each other exactly as before — the track
+  lookup reads the Rust track table, the storages, the track type and the layout
+  mark are Rust's own, and a re-prepare takes the engine-block slot the bag
+  binds. A host with no live bag is refused just as an uninstalled table used to
+  be, and a bag carrying no mutex, which is what a fixture with no audio thread
+  builds, has nothing to wait for. `HirariTrackSessionOps`, its install entry
+  point, `installTrackSessionHost()` and the engine's `lockTracks`/`unlockTracks`
+  accessors are gone, with their header block; `engine_analysis_reads`,
+  `track_edit_host`, `bounce_driver`, `engine_transport` and `layout_gather` use
+  the session's one lock and lookup instead of each keeping a copy of the
+  prologue, and the `track_control_host` fixtures now build a real session bag
+  rather than pinning a fake table over the engine's. C++ 3176 -> 3126 (-50).
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

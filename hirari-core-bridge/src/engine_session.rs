@@ -59,7 +59,11 @@ pub const H_CONTROL_ROOM: u32 = 25;
 pub const H_EXTERNAL_SYNC: u32 = 26;
 pub const H_ARRANGEMENT_DOCUMENT: u32 = 27;
 pub const H_LAYOUT_REVISION: u32 = 28;
-const HANDLE_COUNT: usize = 29;
+/// The address of the engine's own tracks mutex, borrowed rather than owned: it
+/// is a C++ member, so the bag never releases it. A bag built without an engine
+/// — a test fixture — carries null, which its sessions read as no lock to take.
+pub const H_TRACKS_MUTEX: u32 = 29;
+const HANDLE_COUNT: usize = 30;
 
 /// The bags built so far, keyed by the engine host that built them. Rust code
 /// driven from a `void* host` callback argument reads a store through this map;
@@ -175,9 +179,12 @@ pub struct EngineSession {
 impl EngineSession {
     /// Builds the bag in the order the stores depend on: every store the block
     /// traverses exists before the block binds them, and the PDC control-thread
-    /// binding is taken before any graph edit can reach it.
-    fn new() -> Self {
+    /// binding is taken before any graph edit can reach it. `tracks_mutex` is the
+    /// engine's own lock, borrowed so a Rust walk brackets the same graph the
+    /// engine's remaining C++ edits do.
+    fn new(tracks_mutex: *mut c_void) -> Self {
         let mut handles: [*mut c_void; HANDLE_COUNT] = [ptr::null_mut(); HANDLE_COUNT];
+        handles[H_TRACKS_MUTEX as usize] = tracks_mutex;
         handles[H_TRACK_TABLE as usize] = unsafe { hirari_engine_track_table_create() };
         handles[H_INPUT_BLOCKS as usize] = unsafe { hirari_input_blocks_create(MAX_BLOCK_FRAMES) };
         handles[H_METRONOME as usize] = unsafe { hirari_metronome_create(DEFAULT_SAMPLE_RATE) };
@@ -312,10 +319,11 @@ fn session(state: *mut c_void) -> Option<&'static mut EngineSession> {
 
 /// Builds the engine's whole store set for one engine instance and records the
 /// engine address that owns it, so a Rust host callback can reach these stores
-/// without asking the engine to translate the request.
+/// without asking the engine to translate the request. `tracks_mutex` is the
+/// address of the engine's own graph lock, or null for a bag with no engine.
 #[no_mangle]
-pub extern "C" fn hirari_engine_session_create(host: *mut c_void) -> *mut c_void {
-    let mut session = Box::new(EngineSession::new());
+pub extern "C" fn hirari_engine_session_create(host: *mut c_void, tracks_mutex: *mut c_void) -> *mut c_void {
+    let mut session = Box::new(EngineSession::new(tracks_mutex));
     session.host = host;
     let pointer = Box::into_raw(session);
     bind_host(host, pointer);

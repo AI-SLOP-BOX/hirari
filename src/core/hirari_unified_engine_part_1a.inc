@@ -54,14 +54,15 @@ void HirariUnifiedEngine::processBlock(void* output, uint32_t off, uint32_t sz) 
     hirari_engine_block_finish(handle(kHirariHandleEngineBlock), output, off, frames);
 }
 
-// The tracks lock guards the graph a control-plane walk reads. The Rust layout
-// gather brackets its own walk with these, so it addresses the stores directly
-// instead of through a table of C++ host callbacks.
-extern "C" void hirari_engine_lock_tracks(void* host) noexcept {
-    if (host) static_cast<HirariUnifiedEngine*>(host)->lockTracks();
+// The tracks lock guards the graph a control-plane walk reads. The engine hands
+// the mutex's address to its session bag, so the Rust layout gather and every
+// Rust track session bracket the same graph the edits here still lock, without
+// the engine translating a request per walk.
+extern "C" void hirari_tracks_mutex_lock(void* tracksMutex) noexcept {
+    if (tracksMutex) static_cast<std::mutex*>(tracksMutex)->lock();
 }
 
-extern "C" void hirari_engine_unlock_tracks(void* host) noexcept {
-    if (host) static_cast<HirariUnifiedEngine*>(host)->unlockTracks();
+extern "C" void hirari_tracks_mutex_unlock(void* tracksMutex) noexcept {
+    if (tracksMutex) static_cast<std::mutex*>(tracksMutex)->unlock();
 }
 

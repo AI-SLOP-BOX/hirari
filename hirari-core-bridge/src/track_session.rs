@@ -5,18 +5,19 @@
 //! bump the layout revision, release the lock. The C++ side kept that shape as
 //! one lambda per edit, so each new edit host added another set of them.
 //!
-//! This module owns the protocol once. C++ contributes only the lock, the track
-//! lookup, the storage handles a track physically owns and the two steps that
-//! really are engine code (re-preparing a chain for playback and marking the
-//! project layout dirty). Everything between `open` and `Drop` is Rust reading
-//! and writing the Rust stores the track already holds.
+//! This module owns the protocol once, and owns it entirely in Rust: the engine
+//! contributes its tracks lock and the address it handed to its session bag,
+//! and the bag resolves the track table, the engine block and every storage a
+//! track holds. A host that never created a bag — a unit test, or an engine
+//! that has already closed its graph — is refused exactly as an absent host
+//! table used to be.
 //!
 //! A session must not nest and must not outlive the edit it guards: the engine
 //! lock it holds is not recursive, so calls that take it themselves — the graph
 //! resync, another session — run only after the session is dropped.
 
+use crate::engine_session::{handle_of_host, H_ENGINE_BLOCK, H_TRACKS_MUTEX, H_TRACK_TABLE};
 use std::ffi::c_void;
-use std::sync::{Mutex, OnceLock};
 
 /// Storage kinds a track exposes, matching the numbering the Rust layout gather
 /// (`layout_gather.rs`) reads them with.
@@ -32,102 +33,89 @@ pub const STORAGE_WORK_BUFFER: u32 = 7;
 /// `Track::Type::Bus`.
 pub const TRACK_TYPE_BUS: u32 = 3;
 
-type LockFn = unsafe extern "C" fn(*mut c_void);
-type TrackFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
-type StorageFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
-type TrackTypeFn = unsafe extern "C" fn(*mut c_void) -> u32;
-type MarkFn = unsafe extern "C" fn(*mut c_void);
-type PrepareFn = unsafe extern "C" fn(*mut c_void, *mut c_void);
-
-/// The engine contributions a session needs. The table is installed once by the
-/// native engine; passing null clears it.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct HirariTrackSessionOps {
-    pub lock: Option<LockFn>,
-    pub unlock: Option<LockFn>,
-    pub track: Option<TrackFn>,
-    pub storage: Option<StorageFn>,
-    pub track_type: Option<TrackTypeFn>,
-    pub mark_layout: Option<MarkFn>,
-    pub prepare: Option<PrepareFn>,
+extern "C" {
+    fn hirari_tracks_mutex_lock(mutex: *mut c_void);
+    fn hirari_tracks_mutex_unlock(mutex: *mut c_void);
 }
 
-// Only function pointers supplied by the native engine, plus its host address.
-unsafe impl Send for HirariTrackSessionOps {}
-unsafe impl Sync for HirariTrackSessionOps {}
-
-static HOST_OPS: OnceLock<Mutex<Option<HirariTrackSessionOps>>> = OnceLock::new();
-
-fn host_ops() -> Option<HirariTrackSessionOps> {
-    HOST_OPS.get()?.lock().ok().and_then(|guard| *guard)
+/// True while this host addresses an engine whose graph is still in the bag.
+pub fn is_live(host: *const c_void) -> bool {
+    !handle_of_host(host, H_TRACK_TABLE).is_null()
 }
 
-/// The engine contributions for a caller that runs a longer protocol than one
-/// track edit: the lifecycle host walks the whole graph while holding the same
-/// lock, so it resolves tracks and storages itself instead of opening a session.
-pub fn engine_ops() -> Option<HirariTrackSessionOps> {
-    host_ops()
-}
-
-impl HirariTrackSessionOps {
-    pub fn lock_tracks(&self, host: *mut c_void) {
-        if let Some(lock) = self.lock {
-            unsafe { lock(host) };
-        }
-    }
-
-    pub fn unlock_tracks(&self, host: *mut c_void) {
-        if let Some(unlock) = self.unlock {
-            unsafe { unlock(host) };
-        }
-    }
-
-    /// Resolves a track id in the live graph; null when it is not there.
-    pub fn find(&self, host: *mut c_void, track_id: u32) -> *mut c_void {
-        self.track
-            .map_or(std::ptr::null_mut(), |find| unsafe { find(host, track_id) })
-    }
-
-    pub fn storage(&self, track: *mut c_void, kind: u32) -> *mut c_void {
-        self.storage
-            .map_or(std::ptr::null_mut(), |resolve| unsafe { resolve(track, kind) })
-    }
-
-    pub fn track_type(&self, track: *mut c_void) -> u32 {
-        self.track_type
-            .map_or(0, |kind| unsafe { kind(track) })
-    }
-
-    pub fn mark_layout(&self, track: *mut c_void) {
-        if let Some(mark) = self.mark_layout {
-            unsafe { mark(track) };
-        }
-    }
-
-    pub fn prepare_track(&self, host: *mut c_void, track: *mut c_void) {
-        if let Some(prepare) = self.prepare {
-            unsafe { prepare(host, track) };
-        }
+/// Takes the engine's tracks lock. The mutex is the engine's own, so the graph
+/// is guarded against the C++ edits that still lock it directly; a bag carrying
+/// no mutex belongs to a fixture with no audio thread to exclude.
+pub fn lock_tracks(host: *mut c_void) {
+    let mutex = handle_of_host(host as *const c_void, H_TRACKS_MUTEX);
+    if !mutex.is_null() {
+        unsafe { hirari_tracks_mutex_lock(mutex) };
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_session_install(ops: *const HirariTrackSessionOps) {
-    let slot = HOST_OPS.get_or_init(|| Mutex::new(None));
-    let value = if ops.is_null() {
-        None
-    } else {
-        Some(unsafe { std::ptr::read(ops) })
-    };
-    if let Ok(mut guard) = slot.lock() {
-        *guard = value;
+pub fn unlock_tracks(host: *mut c_void) {
+    let mutex = handle_of_host(host as *const c_void, H_TRACKS_MUTEX);
+    if !mutex.is_null() {
+        unsafe { hirari_tracks_mutex_unlock(mutex) };
     }
+}
+
+/// The engine's tracks lock, held for one graph walk. The lock is not recursive,
+/// so a call that takes it itself — the graph resync — runs once this drops.
+pub struct GraphLock {
+    host: *mut c_void,
+}
+
+impl GraphLock {
+    /// Locks the engine's graph, or refuses a host whose bag has no live graph.
+    pub fn acquire(host: *mut c_void) -> Option<Self> {
+        if host.is_null() || !is_live(host) {
+            return None;
+        }
+        lock_tracks(host);
+        Some(Self { host })
+    }
+
+    pub fn host(&self) -> *mut c_void {
+        self.host
+    }
+}
+
+impl Drop for GraphLock {
+    fn drop(&mut self) {
+        unlock_tracks(self.host);
+    }
+}
+
+/// Resolves a track id in the live graph; null when it is not there. The caller
+/// holds the tracks lock.
+pub fn find(host: *mut c_void, track_id: u32) -> *mut c_void {
+    let table = handle_of_host(host as *const c_void, H_TRACK_TABLE);
+    unsafe { crate::engine_track_table::hirari_engine_track_find(table, track_id) }
+}
+
+/// One of a track's own storages, by the numbering above.
+pub fn storage(track: *mut c_void, kind: u32) -> *mut c_void {
+    unsafe { crate::engine_track::hirari_track_storage(track, kind) }
+}
+
+pub fn track_type(track: *mut c_void) -> u32 {
+    unsafe { crate::engine_track::hirari_track_type(track) }
+}
+
+pub fn mark_layout(track: *mut c_void) {
+    unsafe { crate::engine_track::hirari_track_mark_layout(track) };
+}
+
+/// Re-prepares one track for the device format the engine block currently
+/// holds.
+pub fn prepare_track(host: *mut c_void, track: *mut c_void) {
+    let block = handle_of_host(host as *const c_void, H_ENGINE_BLOCK);
+    unsafe { crate::engine_block_host::hirari_engine_block_prepare_track(block, track) };
 }
 
 /// A live track with the engine lock held for it.
 pub struct TrackSession {
-    ops: HirariTrackSessionOps,
     host: *mut c_void,
     track: *mut c_void,
 }
@@ -137,64 +125,52 @@ impl TrackSession {
     /// missing-track as the same rejection, so a caller never mutates through a
     /// stale handle.
     pub fn open(host: *mut c_void, track_id: u32) -> Option<Self> {
-        let ops = host_ops()?;
-        let (Some(lock), Some(unlock), Some(find)) = (ops.lock, ops.unlock, ops.track) else {
-            return None;
-        };
-        if host.is_null() {
-            return None;
-        }
-        unsafe { lock(host) };
-        let track = unsafe { find(host, track_id) };
+        let guard = GraphLock::acquire(host)?;
+        let track = find(guard.host(), track_id);
         if track.is_null() {
-            unsafe { unlock(host) };
             return None;
         }
-        Some(Self { ops, host, track })
-    }
-
-    fn storage(&self, kind: u32) -> *mut c_void {
-        self.ops
-            .storage
-            .map_or(std::ptr::null_mut(), |resolve| unsafe { resolve(self.track, kind) })
+        let host = guard.host();
+        std::mem::forget(guard);
+        Some(Self { host, track })
     }
 
     /// The track's Rust channel strip: fader, pan, solo and record-arm state.
     pub fn strip(&self) -> *mut c_void {
-        self.storage(STORAGE_STRIP)
+        storage(self.track, STORAGE_STRIP)
     }
 
     /// The track's Rust effect chain.
     pub fn chain(&self) -> *mut c_void {
-        self.storage(STORAGE_CHAIN)
+        storage(self.track, STORAGE_CHAIN)
     }
 
     /// The track's Rust automation store: the volume, pan and delay curves and
     /// the plugin parameter lanes.
     pub fn automation(&self) -> *mut c_void {
-        self.storage(STORAGE_AUTOMATION)
+        storage(self.track, STORAGE_AUTOMATION)
     }
 
     /// The track's Rust frozen-render store.
     pub fn frozen(&self) -> *mut c_void {
-        self.storage(STORAGE_FROZEN)
+        storage(self.track, STORAGE_FROZEN)
     }
 
     /// The track's Rust name store.
     pub fn name_store(&self) -> *mut c_void {
-        self.storage(STORAGE_NAME)
+        storage(self.track, STORAGE_NAME)
     }
 
     /// The track's Rust realtime runtime — the entry an offline freeze render
     /// drives block by block.
     pub fn runtime(&self) -> *mut c_void {
-        self.storage(STORAGE_RUNTIME)
+        storage(self.track, STORAGE_RUNTIME)
     }
 
     /// The track's active work buffer — the Rust audio storage the block
     /// pipeline renders into, which a sidechain source taps.
     pub fn work_buffer(&self) -> *mut c_void {
-        self.storage(STORAGE_WORK_BUFFER)
+        storage(self.track, STORAGE_WORK_BUFFER)
     }
 
     /// The engine's address of this track. The Rust region store keys on it, so
@@ -220,23 +196,17 @@ impl TrackSession {
     }
 
     pub fn is_bus(&self) -> bool {
-        self.ops
-            .track_type
-            .is_some_and(|kind| unsafe { kind(self.track) } == TRACK_TYPE_BUS)
+        track_type(self.track) == TRACK_TYPE_BUS
     }
 
     pub fn mark_layout(&self) {
-        if let Some(mark) = self.ops.mark_layout {
-            unsafe { mark(self.track) };
-        }
+        mark_layout(self.track);
     }
 
     /// Re-prepares the track for the engine's current rate and block size, as
     /// the engine's initial plugin insert did.
     pub fn prepare(&self) {
-        if let Some(prepare) = self.ops.prepare {
-            unsafe { prepare(self.host, self.track) };
-        }
+        prepare_track(self.host, self.track);
     }
 
     /// Drops the rendered freeze so stale audio cannot outlive the edit, then
@@ -268,8 +238,6 @@ impl TrackSession {
 
 impl Drop for TrackSession {
     fn drop(&mut self) {
-        if let Some(unlock) = self.ops.unlock {
-            unsafe { unlock(self.host) };
-        }
+        unlock_tracks(self.host);
     }
 }

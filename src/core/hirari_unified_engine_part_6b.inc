@@ -59,7 +59,6 @@ namespace {
 // the install order is deterministic instead of depending on a linker's
 // cross-file static order.
 [[maybe_unused]] const bool kEngineHostTablesInstalled = [] {
-    HirariUnifiedEngine::installTrackSessionHost();
     HirariUnifiedEngine::installTrackEditHost();
     HirariUnifiedEngine::installSandboxMaintenanceHost();
     HirariUnifiedEngine::installRoutingEditHost();

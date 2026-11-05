@@ -112,11 +112,6 @@ pub struct HirariLayoutHostOps {
     pub sample_rate: unsafe extern "C" fn(*mut c_void) -> f64,
 }
 
-extern "C" {
-    fn hirari_engine_lock_tracks(host: *mut c_void);
-    fn hirari_engine_unlock_tracks(host: *mut c_void);
-}
-
 /// One slot of the bag the given engine host created.
 fn host_store(host: *const c_void, kind: u32) -> *mut c_void {
     crate::engine_session::handle_of_host(host, kind)
@@ -138,7 +133,7 @@ fn host_tracks(host: *const c_void) -> (*const *mut c_void, usize) {
 /// automation the recorder is still holding and the chain nodes a released
 /// effect has not handed back.
 unsafe extern "C" fn native_begin(host: *mut c_void) {
-    unsafe { hirari_engine_lock_tracks(host) };
+    crate::track_session::lock_tracks(host);
     let (items, count) = host_tracks(host);
     if items.is_null() {
         return;
@@ -156,7 +151,7 @@ unsafe extern "C" fn native_begin(host: *mut c_void) {
 }
 
 unsafe extern "C" fn native_end(host: *mut c_void) {
-    unsafe { hirari_engine_unlock_tracks(host) };
+    crate::track_session::unlock_tracks(host);
 }
 
 unsafe extern "C" fn native_track_count(host: *mut c_void) -> usize {

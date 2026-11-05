@@ -49,8 +49,7 @@ use crate::sidechain_route_store::{
     hirari_sidechain_routes_release, hirari_sidechain_routes_restore,
 };
 use crate::track_session::{
-    self, HirariTrackSessionOps, STORAGE_AUTOMATION, STORAGE_CHAIN, STORAGE_NAME,
-    STORAGE_RUNTIME, STORAGE_STRIP,
+    self, STORAGE_AUTOMATION, STORAGE_CHAIN, STORAGE_NAME, STORAGE_RUNTIME, STORAGE_STRIP,
 };
 
 /// The engine stores a lifecycle walk visits, as `store` numbers them.
@@ -116,22 +115,8 @@ pub unsafe extern "C" fn hirari_track_edit_host_install(ops: *const HirariTrackE
     }
 }
 
-/// The engine's tracks lock, held for one graph walk. The lock is not recursive,
-/// so a call that takes it itself — the graph resync — runs once this drops.
-struct TracksLock<'a> {
-    ops: &'a HirariTrackSessionOps,
-    host: *mut c_void,
-}
-
-impl Drop for TracksLock<'_> {
-    fn drop(&mut self) {
-        self.ops.unlock_tracks(self.host);
-    }
-}
-
 /// The handles one lifecycle walk visits, resolved from the engine host.
 struct Stores {
-    session: HirariTrackSessionOps,
     host: *mut c_void,
     block: *mut c_void,
     table: *mut c_void,
@@ -144,10 +129,11 @@ struct Stores {
 
 impl Stores {
     fn new(ops: &HirariTrackEditHostOps, host: *mut c_void) -> Option<Self> {
-        let session = track_session::engine_ops()?;
+        if !track_session::is_live(host) {
+            return None;
+        }
         let store = ops.store?;
         Some(Self {
-            session,
             host,
             block: unsafe { store(host, STORE_ENGINE_BLOCK) },
             table: unsafe { store(host, STORE_TRACK_TABLE) },
@@ -159,12 +145,8 @@ impl Stores {
         })
     }
 
-    fn lock(&self) -> TracksLock<'_> {
-        self.session.lock_tracks(self.host);
-        TracksLock {
-            ops: &self.session,
-            host: self.host,
-        }
+    fn lock(&self) -> Option<track_session::GraphLock> {
+        track_session::GraphLock::acquire(self.host)
     }
 
     fn find(&self, track_id: u32) -> *mut c_void {
@@ -231,7 +213,7 @@ impl Stores {
         let track = unsafe { hirari_track_owner_object(owner) };
         let owned = unsafe { hirari_track_owner_retain(owner) };
         if unsafe { hirari_engine_track_insert(self.table, index, owned) } {
-            self.session.mark_layout(track);
+            track_session::mark_layout(track);
         }
         index
     }
@@ -252,7 +234,7 @@ impl Stores {
         if owner.is_null() {
             return std::ptr::null_mut();
         }
-        self.session.mark_layout(track);
+        track_session::mark_layout(track);
         self.publish(false);
         owner
     }
@@ -266,7 +248,7 @@ impl Stores {
         }
         let owner = unsafe { hirari_track_owner_retain(captured.owner) };
         if unsafe { hirari_engine_track_insert(self.table, captured.index, owner) } {
-            self.session.mark_layout(captured.track);
+            track_session::mark_layout(captured.track);
             self.publish(stamp);
         }
     }
@@ -659,23 +641,23 @@ fn duplicate_track_impl(
             return 0;
         }
         // The copy is named by the clone step, so it starts nameless.
-        let (owner, copy) = stores.build(stores.session.track_type(source), new_id, "");
+        let (owner, copy) = stores.build(track_session::track_type(source), new_id, "");
         let owner = TrackOwner { owner };
         // The copy's own storages are the destination, name included: the reads
         // and writes go store to store, so the copy suffix is Rust's rule.
         let cloned = unsafe {
             hirari_track_clone_state(
-                stores.session.storage(source, STORAGE_STRIP),
-                stores.session.storage(source, STORAGE_RUNTIME),
-                stores.session.storage(source, STORAGE_AUTOMATION),
-                stores.session.storage(source, STORAGE_CHAIN),
-                stores.session.storage(source, STORAGE_NAME),
-                stores.session.storage(copy, STORAGE_STRIP),
-                stores.session.storage(copy, STORAGE_RUNTIME),
-                stores.session.storage(copy, STORAGE_AUTOMATION),
-                stores.session.storage(copy, STORAGE_CHAIN),
-                stores.session.storage(copy, STORAGE_NAME),
-                stores.session.track_type(copy) == TRACK_TYPE_BUS,
+                track_session::storage(source, STORAGE_STRIP),
+                track_session::storage(source, STORAGE_RUNTIME),
+                track_session::storage(source, STORAGE_AUTOMATION),
+                track_session::storage(source, STORAGE_CHAIN),
+                track_session::storage(source, STORAGE_NAME),
+                track_session::storage(copy, STORAGE_STRIP),
+                track_session::storage(copy, STORAGE_RUNTIME),
+                track_session::storage(copy, STORAGE_AUTOMATION),
+                track_session::storage(copy, STORAGE_CHAIN),
+                track_session::storage(copy, STORAGE_NAME),
+                track_session::track_type(copy) == TRACK_TYPE_BUS,
             )
         };
         let regions =

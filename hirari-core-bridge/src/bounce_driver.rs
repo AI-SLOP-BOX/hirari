@@ -29,7 +29,7 @@ use crate::midi_note_edit::{
     hirari_midi_scheduled_note_end, ScheduledMidiNoteFfi,
 };
 use crate::region_store::{hirari_region_store_count, hirari_region_store_span_at};
-use crate::track_session::{self, HirariTrackSessionOps};
+use crate::track_session;
 use crate::tpdf_dither::{
     hirari_tpdf_dither_create_with_seed, hirari_tpdf_dither_destroy, hirari_tpdf_dither_next,
 };
@@ -394,31 +394,13 @@ impl BounceSession {
     }
 }
 
-/// The engine's tracks lock, held for one plan walk. The lock is not recursive,
-/// so nothing that takes it itself may run inside the guard.
-struct TracksLock<'a> {
-    ops: &'a HirariTrackSessionOps,
-    host: *mut c_void,
-}
-
-impl Drop for TracksLock<'_> {
-    fn drop(&mut self) {
-        self.ops.unlock_tracks(self.host);
-    }
-}
-
 /// Every region span in the live graph, in track order. The region store takes
 /// its own lock per track, so the spans are read while the table is pinned.
-fn arrangement_spans(
-    session: &HirariTrackSessionOps,
-    host: *mut c_void,
-    table: *mut c_void,
-) -> Vec<RegionSpan> {
+fn arrangement_spans(host: *mut c_void, table: *mut c_void) -> Vec<RegionSpan> {
     let mut spans = Vec::new();
-    session.lock_tracks(host);
-    let _guard = TracksLock {
-        ops: session,
-        host,
+    let _guard = match track_session::GraphLock::acquire(host) {
+        Some(guard) => guard,
+        None => return spans,
     };
     let count = unsafe { hirari_engine_track_count(table) };
     let pointers = unsafe { hirari_engine_track_ptrs(table) };
@@ -489,8 +471,7 @@ fn gather_plan(
     let regions = if table.is_null() {
         Vec::new()
     } else {
-        track_session::engine_ops()
-            .map_or_else(Vec::new, |tracks| arrangement_spans(&tracks, host, table))
+        arrangement_spans(host, table)
     };
     let note_ends = scheduled_note_ends(midi);
     plan_extent(&BouncePlanInput {

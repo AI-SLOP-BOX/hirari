@@ -16,11 +16,6 @@
         return reinterpret_cast<uintptr_t>(handle(kHirariHandleBounceSession));
     }
     bool execute_auto_arrangement();
-    // The tracks lock guards the graph while a control-plane walk reads it. The
-    // Rust layout gather brackets its own walk with these two calls, so it
-    // reaches every store through the session bag instead of a host table.
-    void lockTracks() const { m_tracksMutex.lock(); }
-    void unlockTracks() const { m_tracksMutex.unlock(); }
     // Stable generation token for UI/CLI snapshots. Commands must echo this
     // value back through push_command; a changed layout makes the token stale.
     uint64_t get_project_generation() const;
