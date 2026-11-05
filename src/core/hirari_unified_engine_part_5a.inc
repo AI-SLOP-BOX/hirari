@@ -40,49 +40,18 @@ const HirariBounceHostOps* HirariUnifiedEngine::bounceOps() {
                 if (track) track->resetForOfflineRender();
             }
         },
-        [](void* host, HirariBouncePlan* out) -> int32_t {
+        // The plan walk is Rust's (bounce_driver.rs): it pins the tracks, reads
+        // the region spans, the MIDI snapshot, the device rate and the limiter
+        // tail from the stores it already owns. C++ only names them.
+        [](void* host, uint32_t kind) -> void* {
+            if (!host) return nullptr;
             auto* engine = static_cast<HirariUnifiedEngine*>(host);
-            std::vector<HirariBounceRegionSpan> regionSpans;
-            {
-                std::lock_guard<std::mutex> lock(engine->m_tracksMutex);
-                for (Track* track : engine->lockedTracks()) {
-                    if (!track) continue;
-                    const size_t regionCount = hirari_region_store_count(track);
-                    for (size_t index = 0; index < regionCount; ++index) {
-                        uint64_t start = 0, length = 0;
-                        uint32_t loopCount = 0;
-                        if (hirari_region_store_span_at(track, index, &start,
-                                                        &length, &loopCount))
-                            regionSpans.push_back({start, length, loopCount});
-                    }
-                }
+            switch (kind) {
+                case kHirariBounceStoreTrackTable: return engine->m_trackTable;
+                case kHirariBounceStoreEngineBlock: return engine->m_engineBlock;
+                case kHirariBounceStoreMidiSnapshot: return engine->m_midiSnapshotStore;
+                default: return engine->m_masterLimiter;
             }
-            // MIDI-only projects define their extent through scheduled notes.
-            std::vector<uint64_t> midiNoteEnds;
-            size_t midiNoteCount = 0;
-            auto* midiNotes = hirari_midi_notes_snapshot_take(
-                reinterpret_cast<const void*>(engine->midi_snapshot_store()), &midiNoteCount);
-            midiNoteEnds.reserve(midiNoteCount);
-            for (size_t i = 0; i < midiNoteCount; ++i)
-                midiNoteEnds.push_back(hirari_midi_scheduled_note_end(midiNotes + i));
-            hirari_midi_notes_snapshot_take_free(midiNotes, midiNoteCount);
-            HirariBouncePlanInput input{};
-            input.regions = regionSpans.data();
-            input.region_count = regionSpans.size();
-            input.midi_note_ends = midiNoteEnds.data();
-            input.midi_note_count = midiNoteEnds.size();
-            input.sample_rate = engine->m_sampleRate.load(std::memory_order_acquire);
-            input.tail_millis = hirari_bounce_tail_millis(engine->m_bounceSession);
-            input.limiter_tail = engine->m_masterLimiter
-                ? hirari_master_limiter_tail(engine->m_masterLimiter) : 0;
-            const int32_t status = hirari_bounce_render_extent(&input, out);
-            if (status != 0) {
-                // A rejected plan must publish a terminal state, not look
-                // like an immortal render.
-                hirari_log_post(
-                    1, 0, status == -2 ? "BOUNCE_INVALID_RANGE" : "BOUNCE_INVALID_SAMPLE_RATE");
-            }
-            return status;
         },
         // The driver's channel pairs are wrapped, not copied, so the offline
         // graph renders straight into the caller's block buffers.

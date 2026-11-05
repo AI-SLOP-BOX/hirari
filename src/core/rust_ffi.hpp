@@ -147,10 +147,6 @@ struct HirariScheduledMidiNote {
 extern "C" void* hirari_midi_snapshot_store_create();
 extern "C" void hirari_midi_snapshot_store_destroy(void* store);
 extern "C" uint64_t hirari_midi_snapshot_store_revision(const void* store);
-extern "C" uint64_t hirari_midi_scheduled_note_end(const HirariScheduledMidiNote* note);
-extern "C" HirariScheduledMidiNote* hirari_midi_notes_snapshot_take(
-    const void* store, size_t* count);
-extern "C" void hirari_midi_notes_snapshot_take_free(HirariScheduledMidiNote*, size_t);
 using HirariScheduledMidiEventCallback = void (*)(
     void* context, const HirariScheduledMidiNote* note,
     uint64_t sample_offset, uint8_t note_off);
@@ -186,7 +182,6 @@ extern "C" void hirari_master_limiter_destroy(void* state);
 extern "C" void hirari_master_limiter_prepare(void* state, double sample_rate);
 extern "C" void hirari_master_limiter_reset(void* state);
 extern "C" uint32_t hirari_master_limiter_latency(const void* state);
-extern "C" uint32_t hirari_master_limiter_tail(const void* state);
 extern "C" void* hirari_control_room_state_create();
 extern "C" void hirari_control_room_state_destroy(void* state);
 extern "C" void hirari_control_room_reset(void* state);
@@ -383,49 +378,27 @@ struct HirariRegionState {
 // returns the new right-hand id, or 0.
 // Duplicates a region at `startSample` and returns the new id, or 0.
 
-// Bounce planning is Rust-owned. C++ supplies the arrangement spans and the
-// streaming writers; the acceptance rules and the render extent live in
-// `hirari-core-bridge/src/bounce_plan.rs`.
-struct HirariBounceRegionSpan {
-    uint64_t start = 0;
-    uint64_t len = 0;
-    uint32_t loop_count = 1;
+// Bounce planning is Rust-owned end to end: the driver walks the region, MIDI,
+// device-format and limiter stores it already has handles for and computes the
+// render extent itself (`hirari-core-bridge/src/bounce_plan.rs`,
+// `bounce_driver.rs`). C++ contributes only the store handles below.
+enum HirariBounceStore : uint32_t {
+    kHirariBounceStoreTrackTable = 0,
+    kHirariBounceStoreEngineBlock = 1,
+    kHirariBounceStoreMidiSnapshot = 2,
+    kHirariBounceStoreMasterLimiter = 3,
 };
-
-struct HirariBouncePlanInput {
-    const HirariBounceRegionSpan* regions = nullptr;
-    size_t region_count = 0;
-    const uint64_t* midi_note_ends = nullptr;
-    size_t midi_note_count = 0;
-    double sample_rate = 0.0;
-    uint8_t range_active = 0;
-    uint64_t range_start = 0;
-    uint64_t range_end = 0;
-    uint32_t tail_millis = 0;
-    uint64_t limiter_tail = 0;
-};
-
-struct HirariBouncePlan {
-    uint64_t total_samples = 0;
-    uint32_t output_rate = 0;
-    uint64_t playhead_start = 0;
-};
-
-// 0 on success; -1 for an unsupported sample rate; -2 for an inverted render
-// range. The engine maps each code to its existing failure path.
-extern "C" int32_t hirari_bounce_render_extent(
-    const HirariBouncePlanInput* input, HirariBouncePlan* out);
 
 // Host operations for the Rust bounce driver. Only the audio graph stays here:
-// the render block, the plan's region and MIDI contents, the transport and the
-// reproducible-reset pass. Everything else a bounce owns - offline-render
-// ownership, progress, the lifecycle state, cancel/pause, the async worker and
-// the publish boundary - is Rust state (bounce_driver.rs) below. Every entry
-// must be set: a missing operation fails the render.
+// the render block, the transport, the reproducible-reset pass and the handles
+// of the stores the Rust plan walk reads. Everything else a bounce owns - the
+// plan, offline-render ownership, progress, the lifecycle state, cancel/pause,
+// the async worker and the publish boundary - is Rust state (bounce_driver.rs)
+// below. Every entry must be set: a missing operation fails the render.
 struct HirariBounceHostOps {
     uint8_t (*run)(void* host, const uint8_t* path, size_t path_length, uint32_t format);
     void (*reset)(void* host);
-    int32_t (*plan)(void* host, HirariBouncePlan* out);
+    void* (*store)(void* host, uint32_t kind);
     void (*render)(void* host, float* left, float* right, uint32_t frames);
     uint32_t (*render_chunk)(void* host);
     void (*read_transport)(void* host, uint64_t* playhead, uint8_t* playing);
@@ -448,7 +421,6 @@ extern "C" void hirari_bounce_join(void* session);
 extern "C" bool hirari_bounce_cancel(void* session), hirari_bounce_pause(void* session),
     hirari_bounce_resume(void* session);
 extern "C" uint32_t hirari_bounce_state(void* session);
-extern "C" uint32_t hirari_bounce_tail_millis(void* session);
 extern "C" float hirari_bounce_progress(void* session);
 extern "C" void hirari_bounce_set_offline_target(void* session, uint32_t track_id);
 extern "C" void hirari_bounce_clear_offline_target(void* session);
@@ -758,15 +730,12 @@ extern "C" void hirari_region_storage_host_install(const HirariRegionStorageHost
 extern "C" void hirari_region_store_install(void* track, uint32_t trackId);
 extern "C" void hirari_region_store_forget(void* track);
 extern "C" void hirari_region_store_trim_retired(void* track);
-extern "C" size_t hirari_region_store_count(void* track);
 extern "C" size_t hirari_region_store_list_regions(void* host, uint32_t trackId,
                                                    uint32_t* out, size_t capacity);
 extern "C" void* hirari_region_store_note_snapshot(void* track, uint32_t regionId);
 extern "C" bool hirari_region_store_copy_regions(void* sourceTrack,
                                                  void* destinationTrack,
                                                  const uint32_t* regionIds, size_t count);
-extern "C" bool hirari_region_store_span_at(void* track, size_t index, uint64_t* start,
-                                            uint64_t* length, uint32_t* loopCount);
 extern "C" void hirari_region_store_forget_waveforms(void* host, void* track);
 extern "C" bool hirari_region_store_append_processing(void* track, uint32_t regionId,
                                                       HirariEventStep step);

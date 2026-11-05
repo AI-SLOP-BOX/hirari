@@ -78,6 +78,20 @@ production support.
 
 ### Changed
 
+- The bounce plan is now gathered and computed entirely in Rust.
+  `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
+  region store for every track in the table, drains the MIDI snapshot for its
+  scheduled note ends, and reads the device sample rate and the master limiter
+  tail straight from those stores before calling the pure `plan_extent`; the
+  rejected-plan logging and the terminal-status publish moved with it. The host
+  table keeps the same seven entries but `plan(host, out)` became
+  `store(host, kind)`, so `HirariUnifiedEngine::bounceOps()` is now a four-case
+  handle getter and `HirariBounceRegionSpan`, `HirariBouncePlanInput`,
+  `HirariBouncePlan`, `hirari_bounce_render_extent` and the six declarations
+  only that walk needed are gone. Two new tests cover the store-driven extent
+  (device rate plus session and limiter tails) and a rejected device rate, on
+  top of the engine-backed project renders the integration suite already
+  bounces. C++ 4872 -> 4810 (-62).
 - The track create / duplicate / remove lifecycle now runs from Rust.
   `track_edit_host.rs` walks the graph itself over the shared track session: it
   takes the engine's tracks lock, names the new track, appends the handle the C++

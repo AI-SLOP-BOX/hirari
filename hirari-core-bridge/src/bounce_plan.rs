@@ -1,16 +1,18 @@
 //! Bounce render planning.
 //!
-//! The native engine owns the audio graph, the transport and the streaming
-//! writers, but every decision about what a bounce is allowed to write lives
-//! here: which output paths and formats are acceptable, and how many frames
-//! the offline render covers for the current arrangement.
+//! The native engine owns the audio graph and the transport, but every decision
+//! about what a bounce is allowed to write lives here: which output paths and
+//! formats are acceptable, and how many frames the offline render covers for
+//! the current arrangement. The driver gathers the arrangement straight from
+//! the Rust stores — the region table, the MIDI snapshot, the device format and
+//! the master limiter — so no plan data crosses the FFI boundary.
 
 use std::slice;
 
 /// One timeline span contributed by a region. `loop_count` below one is
 /// treated as a single pass, matching the engine's region contract.
-#[repr(C)]
-pub struct HirariBounceRegionSpan {
+#[derive(Clone, Copy)]
+pub struct RegionSpan {
     pub start: u64,
     pub len: u64,
     pub loop_count: u32,
@@ -19,21 +21,18 @@ pub struct HirariBounceRegionSpan {
 /// Everything the extent calculation needs. `limiter_tail` and `tail_millis`
 /// are separate because they have different owners: the user-selected effect
 /// tail and the master limiter's look-ahead.
-#[repr(C)]
-pub struct HirariBouncePlanInput {
-    pub regions: *const HirariBounceRegionSpan,
-    pub region_count: usize,
-    pub midi_note_ends: *const u64,
-    pub midi_note_count: usize,
+pub(crate) struct BouncePlanInput<'a> {
+    pub regions: &'a [RegionSpan],
+    pub midi_note_ends: &'a [u64],
     pub sample_rate: f64,
-    pub range_active: u8,
+    pub range_active: bool,
     pub range_start: u64,
     pub range_end: u64,
     pub tail_millis: u32,
     pub limiter_tail: u64,
 }
 
-#[repr(C)]
+/// The extent one offline render covers.
 #[derive(Default, PartialEq, Debug)]
 pub struct HirariBouncePlan {
     pub total_samples: u64,
@@ -49,7 +48,7 @@ pub const BOUNCE_PLAN_INVALID_RANGE: i32 = -2;
 
 /// Timeline end of the arrangement. Region spans saturate instead of
 /// wrapping; a loop count of zero renders one pass.
-fn arrangement_end(regions: &[HirariBounceRegionSpan], midi_note_ends: &[u64]) -> u64 {
+fn arrangement_end(regions: &[RegionSpan], midi_note_ends: &[u64]) -> u64 {
     let mut end = 0_u64;
     for region in regions {
         let loop_count = u64::from(region.loop_count.max(1));
@@ -62,7 +61,7 @@ fn arrangement_end(regions: &[HirariBounceRegionSpan], midi_note_ends: &[u64]) -
     end
 }
 
-fn plan_extent(input: &HirariBouncePlanInput) -> Result<HirariBouncePlan, i32> {
+pub(crate) fn plan_extent(input: &BouncePlanInput) -> Result<HirariBouncePlan, i32> {
     if !input.sample_rate.is_finite()
         || input.sample_rate <= 0.0
         || input.sample_rate > 384_000.0
@@ -70,26 +69,11 @@ fn plan_extent(input: &HirariBouncePlanInput) -> Result<HirariBouncePlan, i32> {
         return Err(BOUNCE_PLAN_INVALID_RATE);
     }
     let output_rate = input.sample_rate as u32;
-    let range_active = input.range_active != 0;
-    if range_active && input.range_start >= input.range_end {
+    if input.range_active && input.range_start >= input.range_end {
         return Err(BOUNCE_PLAN_INVALID_RANGE);
     }
 
-    let regions = if input.region_count == 0 {
-        &[][..]
-    } else {
-        // SAFETY: the caller passes a buffer of `region_count` entries that
-        // stays alive for the duration of this call.
-        unsafe { slice::from_raw_parts(input.regions, input.region_count) }
-    };
-    let midi_note_ends = if input.midi_note_count == 0 {
-        &[][..]
-    } else {
-        // SAFETY: same contract as `regions` above.
-        unsafe { slice::from_raw_parts(input.midi_note_ends, input.midi_note_count) }
-    };
-
-    let project_end = arrangement_end(regions, midi_note_ends);
+    let project_end = arrangement_end(input.regions, input.midi_note_ends);
     // Empty projects still need a valid, non-zero render; one second is the
     // compact fallback. Real arrangements are bounded by their content.
     let fallback_length = u64::from(output_rate);
@@ -98,7 +82,7 @@ fn plan_extent(input: &HirariBouncePlanInput) -> Result<HirariBouncePlan, i32> {
     } else {
         fallback_length
     };
-    if range_active {
+    if input.range_active {
         bounded_length = input.range_end - input.range_start;
     }
     // Stateful processors keep sounding after the last region. The effect
@@ -112,26 +96,12 @@ fn plan_extent(input: &HirariBouncePlanInput) -> Result<HirariBouncePlan, i32> {
     Ok(HirariBouncePlan {
         total_samples: bounded_length.min(u64::from(u32::MAX)),
         output_rate,
-        playhead_start: if range_active { input.range_start } else { 0 },
+        playhead_start: if input.range_active {
+            input.range_start
+        } else {
+            0
+        },
     })
-}
-
-/// Plans one offline render. Returns [`BOUNCE_PLAN_OK`] with `out` filled, or
-/// a negative reason code that the engine maps to its own failure path.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_bounce_render_extent(
-    input: *const HirariBouncePlanInput,
-    out: *mut HirariBouncePlan,
-) -> i32 {
-    if input.is_null() || out.is_null() {
-        return BOUNCE_PLAN_INVALID_RATE;
-    }
-    let plan = match plan_extent(&*input) {
-        Ok(plan) => plan,
-        Err(reason) => return reason,
-    };
-    *out = plan;
-    BOUNCE_PLAN_OK
 }
 
 fn is_wav_suffix(suffix: &[u8]) -> bool {
@@ -210,8 +180,8 @@ pub extern "C" fn hirari_bounce_state_resumable(state: u32) -> bool {
 mod tests {
     use super::*;
 
-    fn span(start: u64, len: u64, loop_count: u32) -> HirariBounceRegionSpan {
-        HirariBounceRegionSpan {
+    fn span(start: u64, len: u64, loop_count: u32) -> RegionSpan {
+        RegionSpan {
             start,
             len,
             loop_count,
@@ -219,16 +189,14 @@ mod tests {
     }
 
     fn input<'a>(
-        regions: &'a [HirariBounceRegionSpan],
+        regions: &'a [RegionSpan],
         notes: &'a [u64],
-    ) -> HirariBouncePlanInput {
-        HirariBouncePlanInput {
-            regions: regions.as_ptr(),
-            region_count: regions.len(),
-            midi_note_ends: notes.as_ptr(),
-            midi_note_count: notes.len(),
+    ) -> BouncePlanInput<'a> {
+        BouncePlanInput {
+            regions,
+            midi_note_ends: notes,
             sample_rate: 48_000.0,
-            range_active: 0,
+            range_active: false,
             range_start: 0,
             range_end: 0,
             tail_millis: 0,
@@ -260,8 +228,9 @@ mod tests {
 
     #[test]
     fn range_tail_and_limiter_add_up() {
-        let mut values = input(&[span(0, 10_000, 1)], &[]);
-        values.range_active = 1;
+        let regions = [span(0, 10_000, 1)];
+        let mut values = input(&regions, &[]);
+        values.range_active = true;
         values.range_start = 1_000;
         values.range_end = 3_000;
         values.tail_millis = 500;
@@ -274,7 +243,7 @@ mod tests {
     #[test]
     fn inverted_range_is_a_range_failure() {
         let mut values = input(&[], &[]);
-        values.range_active = 1;
+        values.range_active = true;
         values.range_start = 10;
         values.range_end = 10;
         assert_eq!(plan_extent(&values), Err(BOUNCE_PLAN_INVALID_RANGE));
@@ -299,25 +268,6 @@ mod tests {
         assert!(!output_path_supported(b"mix", 0));
         assert!(!output_path_supported(b"mix.wav", 4));
         assert!(!output_path_supported(b"", 0));
-    }
-
-    #[test]
-    fn extent_entry_point_validates_pointers() {
-        let mut plan = HirariBouncePlan::default();
-        assert_eq!(
-            unsafe { hirari_bounce_render_extent(std::ptr::null(), &mut plan) },
-            BOUNCE_PLAN_INVALID_RATE
-        );
-        let values = input(&[], &[]);
-        assert_eq!(
-            unsafe { hirari_bounce_render_extent(&values, std::ptr::null_mut()) },
-            BOUNCE_PLAN_INVALID_RATE
-        );
-        assert_eq!(
-            unsafe { hirari_bounce_render_extent(&values, &mut plan) },
-            BOUNCE_PLAN_OK
-        );
-        assert_eq!(plan.total_samples, 48_000);
     }
 
     #[test]

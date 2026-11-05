@@ -2,24 +2,34 @@
 //!
 //! A bounce is a control-plane transaction, so all of its state lives here:
 //! offline-render ownership, the async worker lifecycle, progress and state
-//! publication, the cancel/pause control plane and the publish boundary. C++
+//! publication, the cancel/pause control plane and the publish boundary — and
+//! so does its plan, gathered from the Rust stores the graph already owns. C++
 //! keeps only the audio graph, so [`HirariBounceHostOps`] is the short list of
 //! operations that genuinely need the native track list.
 
 use crate::bounce_plan::{
-    hirari_bounce_output_path_supported, BOUNCE_STATE_CANCELLED, BOUNCE_STATE_COMPLETED,
-    BOUNCE_STATE_FAILED, BOUNCE_STATE_PAUSED, BOUNCE_STATE_QUEUED, BOUNCE_STATE_RENDERING,
-    HirariBouncePlan,
+    hirari_bounce_output_path_supported, plan_extent, BOUNCE_PLAN_INVALID_RANGE,
+    BOUNCE_STATE_CANCELLED, BOUNCE_STATE_COMPLETED, BOUNCE_STATE_FAILED, BOUNCE_STATE_PAUSED,
+    BOUNCE_STATE_QUEUED, BOUNCE_STATE_RENDERING, BouncePlanInput, HirariBouncePlan, RegionSpan,
 };
 use crate::bounce_plan::{
     hirari_bounce_state_cancellable, hirari_bounce_state_pausable, hirari_bounce_state_resumable,
     hirari_bounce_state_terminal,
 };
+use crate::engine_block_host::hirari_engine_block_device_sample_rate;
+use crate::engine_track_table::{hirari_engine_track_count, hirari_engine_track_ptrs};
 use crate::export::{
     hirari_bounce_stream_create, hirari_bounce_stream_finish, hirari_bounce_stream_free,
     hirari_bounce_stream_write,
 };
 use crate::log_buffer::{hirari_log_buffer_default_state, hirari_log_buffer_post};
+use crate::master_limiter::hirari_master_limiter_tail;
+use crate::midi_note_edit::{
+    hirari_midi_notes_snapshot_take, hirari_midi_notes_snapshot_take_free,
+    hirari_midi_scheduled_note_end, ScheduledMidiNoteFfi,
+};
+use crate::region_store::{hirari_region_store_count, hirari_region_store_span_at};
+use crate::track_session::{self, HirariTrackSessionOps};
 use crate::tpdf_dither::{
     hirari_tpdf_dither_create_with_seed, hirari_tpdf_dither_destroy, hirari_tpdf_dither_next,
 };
@@ -103,6 +113,15 @@ pub extern "C" fn hirari_callback_thread_token() -> u64 {
     })
 }
 
+/// The engine stores the Rust plan walk visits, as `store` numbers them.
+pub const STORE_TRACK_TABLE: u32 = 0;
+pub const STORE_ENGINE_BLOCK: u32 = 1;
+pub const STORE_MIDI_SNAPSHOT: u32 = 2;
+pub const STORE_MASTER_LIMITER: u32 = 3;
+
+/// One of the engine's stores by `STORE_*` kind.
+pub type BounceStoreFn = unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void;
+
 /// Engine operations the driver still needs from C++. Every entry is
 /// mandatory; a missing operation fails the render instead of guessing.
 #[repr(C)]
@@ -111,7 +130,9 @@ pub struct HirariBounceHostOps {
     pub run: Option<unsafe extern "C" fn(*mut c_void, *const u8, usize, u32) -> u8>,
     /// Resets the master limiter and every track for a reproducible render.
     pub reset: Option<unsafe extern "C" fn(*mut c_void)>,
-    pub plan: Option<unsafe extern "C" fn(*mut c_void, *mut HirariBouncePlan) -> i32>,
+    /// Resolves the Rust stores the plan walk reads — the track table, the
+    /// engine block, the MIDI snapshot and the master limiter.
+    pub store: Option<BounceStoreFn>,
     pub render: Option<unsafe extern "C" fn(*mut c_void, *mut f32, *mut f32, u32)>,
     pub render_chunk: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
     pub read_transport: Option<unsafe extern "C" fn(*mut c_void, *mut u64, *mut u8)>,
@@ -121,7 +142,7 @@ pub struct HirariBounceHostOps {
 fn missing(ops: &HirariBounceHostOps) -> bool {
     ops.run.is_none()
         || ops.reset.is_none()
-        || ops.plan.is_none()
+        || ops.store.is_none()
         || ops.render.is_none()
         || ops.render_chunk.is_none()
         || ops.read_transport.is_none()
@@ -373,6 +394,123 @@ impl BounceSession {
     }
 }
 
+/// The engine's tracks lock, held for one plan walk. The lock is not recursive,
+/// so nothing that takes it itself may run inside the guard.
+struct TracksLock<'a> {
+    ops: &'a HirariTrackSessionOps,
+    host: *mut c_void,
+}
+
+impl Drop for TracksLock<'_> {
+    fn drop(&mut self) {
+        self.ops.unlock_tracks(self.host);
+    }
+}
+
+/// Every region span in the live graph, in track order. The region store takes
+/// its own lock per track, so the spans are read while the table is pinned.
+fn arrangement_spans(
+    session: &HirariTrackSessionOps,
+    host: *mut c_void,
+    table: *mut c_void,
+) -> Vec<RegionSpan> {
+    let mut spans = Vec::new();
+    session.lock_tracks(host);
+    let _guard = TracksLock {
+        ops: session,
+        host,
+    };
+    let count = unsafe { hirari_engine_track_count(table) };
+    let pointers = unsafe { hirari_engine_track_ptrs(table) };
+    if pointers.is_null() {
+        return spans;
+    }
+    // SAFETY: the table's buffer holds `count` entries while its lock is held.
+    for &track in unsafe { slice::from_raw_parts(pointers, count) } {
+        if track.is_null() {
+            continue;
+        }
+        for index in 0..hirari_region_store_count(track) {
+            let (mut start, mut len, mut loop_count) = (0_u64, 0_u64, 0_u32);
+            // SAFETY: the three out-parameters are live locals.
+            if unsafe {
+                hirari_region_store_span_at(track, index, &mut start, &mut len, &mut loop_count)
+            } {
+                spans.push(RegionSpan {
+                    start,
+                    len,
+                    loop_count,
+                });
+            }
+        }
+    }
+    spans
+}
+
+/// The end of every scheduled note. A MIDI-only project has no regions, so its
+/// extent comes from the notes the playback snapshot publishes.
+fn scheduled_note_ends(store: *mut c_void) -> Vec<u64> {
+    let mut count = 0_usize;
+    // SAFETY: `count` is a live local and the store may be unknown (null).
+    let notes: *const ScheduledMidiNoteFfi =
+        unsafe { hirari_midi_notes_snapshot_take(store as *const c_void, &mut count) };
+    if notes.is_null() {
+        return Vec::new();
+    }
+    let mut ends = Vec::with_capacity(count);
+    for index in 0..count {
+        // SAFETY: the taken buffer holds `count` notes and belongs to this call
+        // until it is freed below.
+        ends.push(unsafe { hirari_midi_scheduled_note_end(notes.add(index)) });
+    }
+    unsafe { hirari_midi_notes_snapshot_take_free(notes as *mut ScheduledMidiNoteFfi, count) };
+    ends
+}
+
+/// Plans the render extent from the engine's own Rust stores. The caller logs a
+/// rejection, because a rejected plan must publish a terminal state rather than
+/// look like an immortal render.
+fn gather_plan(
+    host: *mut c_void,
+    store: BounceStoreFn,
+    session: &BounceSession,
+) -> Result<HirariBouncePlan, i32> {
+    // SAFETY: the host supplies the store handles its own graph owns.
+    let (table, block, midi, limiter) = unsafe {
+        (
+            store(host, STORE_TRACK_TABLE),
+            store(host, STORE_ENGINE_BLOCK),
+            store(host, STORE_MIDI_SNAPSHOT),
+            store(host, STORE_MASTER_LIMITER),
+        )
+    };
+    // Without a graph — or without the engine's track session to pin it — there
+    // is nothing to walk, and the arrangement falls back to one second.
+    let regions = if table.is_null() {
+        Vec::new()
+    } else {
+        track_session::engine_ops()
+            .map_or_else(Vec::new, |tracks| arrangement_spans(&tracks, host, table))
+    };
+    let note_ends = scheduled_note_ends(midi);
+    plan_extent(&BouncePlanInput {
+        regions: &regions,
+        midi_note_ends: &note_ends,
+        // SAFETY: the block handle is the engine's own.
+        sample_rate: unsafe { hirari_engine_block_device_sample_rate(block as *const c_void) },
+        range_active: false,
+        range_start: 0,
+        range_end: 0,
+        tail_millis: session.tail_millis.load(Ordering::Acquire),
+        limiter_tail: u64::from(if limiter.is_null() {
+            0
+        } else {
+            // SAFETY: the handle is the engine's master limiter.
+            unsafe { hirari_master_limiter_tail(limiter as *const c_void) }
+        }),
+    })
+}
+
 /// A started render's body. The engine owns the session and outlives the
 /// worker because teardown joins through [`BounceSession::join`], and the
 /// operation table the worker calls through has static storage.
@@ -494,9 +632,9 @@ pub unsafe extern "C" fn hirari_bounce_render_driver(
     if missing(ops) {
         return false;
     }
-    let (reset, plan, render, render_chunk) = (
+    let (reset, store, render, render_chunk) = (
         ops.reset.unwrap(),
-        ops.plan.unwrap(),
+        ops.store.unwrap(),
         ops.render.unwrap(),
         ops.render_chunk.unwrap(),
     );
@@ -517,13 +655,22 @@ pub unsafe extern "C" fn hirari_bounce_render_driver(
         _ => return false,
     }
 
-    let mut plan_result = HirariBouncePlan::default();
-    // SAFETY: `plan_result` is a live out-parameter owned by this frame.
-    if unsafe { plan(host, &mut plan_result) } != 0 {
-        session.publish(0.0, BOUNCE_STATE_FAILED);
-        session.end();
-        return false;
-    }
+    let plan_result = match gather_plan(host, store, session) {
+        Ok(plan) => plan,
+        Err(reason) => {
+            log(
+                1,
+                if reason == BOUNCE_PLAN_INVALID_RANGE {
+                    b"BOUNCE_INVALID_RANGE"
+                } else {
+                    b"BOUNCE_INVALID_SAMPLE_RATE"
+                },
+            );
+            session.publish(0.0, BOUNCE_STATE_FAILED);
+            session.end();
+            return false;
+        }
+    };
 
     // Public formats map onto the Rust stream ABI: PCM16, WAVE64 float,
     // float32 RIFF/RF64, PCM24.
@@ -809,6 +956,11 @@ pub extern "C" fn hirari_bounce_join(handle: *mut c_void) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bounce_plan::BOUNCE_PLAN_INVALID_RATE;
+    use crate::engine_block_host::{
+        hirari_engine_block_create, hirari_engine_block_destroy, HirariEngineBlockHandles,
+    };
+    use crate::master_limiter::{hirari_master_limiter_create, hirari_master_limiter_destroy};
 
     struct Handle(*mut c_void);
 
@@ -824,6 +976,53 @@ mod tests {
 
     fn borrow(handle: &Handle) -> &'static BounceSession {
         unsafe { &*(handle.0.cast::<BounceSession>()) }
+    }
+
+    /// A host that owns the Rust stores the plan walk reads, so the extent can
+    /// be checked against real handles instead of a scripted callback.
+    struct FakeEngine {
+        block: *mut c_void,
+        limiter: *mut c_void,
+    }
+
+    impl FakeEngine {
+        fn new() -> Self {
+            Self {
+                // SAFETY: the handles are read once and the operations table is
+                // optional.
+                block: unsafe {
+                    hirari_engine_block_create(HirariEngineBlockHandles::default(), std::ptr::null())
+                },
+                limiter: hirari_master_limiter_create(44_100.0),
+            }
+        }
+
+        fn host(&self) -> *mut c_void {
+            self as *const Self as *mut c_void
+        }
+
+        fn plan(&self, session: &BounceSession) -> Result<HirariBouncePlan, i32> {
+            gather_plan(self.host(), fake_store, session)
+        }
+    }
+
+    impl Drop for FakeEngine {
+        fn drop(&mut self) {
+            unsafe {
+                hirari_engine_block_destroy(self.block);
+                hirari_master_limiter_destroy(self.limiter);
+            }
+        }
+    }
+
+    /// The graph stores stay absent: an empty arrangement is the fallback case.
+    unsafe extern "C" fn fake_store(host: *mut c_void, kind: u32) -> *mut c_void {
+        let engine = unsafe { &*(host as *const FakeEngine) };
+        match kind {
+            STORE_ENGINE_BLOCK => engine.block,
+            STORE_MASTER_LIMITER => engine.limiter,
+            _ => std::ptr::null_mut(),
+        }
     }
 
     /// The fake host doubles as the session: the worker body only publishes.
@@ -855,7 +1054,7 @@ mod tests {
         let ops = HirariBounceHostOps {
             run: None,
             reset: None,
-            plan: None,
+            store: None,
             render: None,
             render_chunk: None,
             read_transport: None,
@@ -879,13 +1078,48 @@ mod tests {
     }
 
     #[test]
+    fn the_plan_extends_the_device_rate_with_the_session_and_limiter_tails() {
+        let engine = FakeEngine::new();
+        let guard = new_session();
+        let session = borrow(&guard);
+        let baseline = engine.plan(session).expect("empty arrangement");
+        assert_eq!(baseline.output_rate, 44_100);
+        assert_eq!(baseline.playhead_start, 0);
+        // The fallback one second plus the master limiter's own release tail.
+        assert_eq!(
+            baseline.total_samples,
+            44_100 + u64::from(unsafe { hirari_master_limiter_tail(engine.limiter as *const c_void) })
+        );
+        hirari_bounce_set_tail_seconds(guard.0, 0.5);
+        let extended = engine.plan(session).expect("tailed plan");
+        assert_eq!(extended.total_samples, baseline.total_samples + 22_050);
+    }
+
+    #[test]
+    fn an_unsupported_device_rate_rejects_the_render() {
+        unsafe extern "C" fn zero_rate(_: *mut c_void, _: u32) -> *mut c_void {
+            std::ptr::null_mut()
+        }
+        let guard = new_session();
+        // No engine block means no known rate, which is a rejected plan rather
+        // than a silent one-second render.
+        let error = gather_plan(
+            &mut 0_u8 as *mut u8 as *mut c_void,
+            zero_rate,
+            borrow(&guard),
+        )
+        .expect_err("rate must be read from the graph");
+        assert_eq!(error, BOUNCE_PLAN_INVALID_RATE);
+    }
+
+    #[test]
     fn unsupported_output_publishes_a_failed_state() {
         unsafe extern "C" fn run(_: *mut c_void, _: *const u8, _: usize, _: u32) -> u8 {
             1
         }
         unsafe extern "C" fn reset(_: *mut c_void) {}
-        unsafe extern "C" fn plan(_: *mut c_void, _: *mut HirariBouncePlan) -> i32 {
-            0
+        unsafe extern "C" fn store(_: *mut c_void, _: u32) -> *mut c_void {
+            std::ptr::null_mut()
         }
         unsafe extern "C" fn render(_: *mut c_void, _: *mut f32, _: *mut f32, _: u32) {}
         unsafe extern "C" fn chunk(_: *mut c_void) -> u32 {
@@ -901,7 +1135,7 @@ mod tests {
         let ops = HirariBounceHostOps {
             run: Some(run),
             reset: Some(reset),
-            plan: Some(plan),
+            store: Some(store),
             render: Some(render),
             render_chunk: Some(chunk),
             read_transport: Some(read),
@@ -1046,7 +1280,7 @@ mod tests {
         static OPS: HirariBounceHostOps = HirariBounceHostOps {
             run: Some(run),
             reset: None,
-            plan: None,
+            store: None,
             render: None,
             render_chunk: None,
             read_transport: None,
@@ -1081,16 +1315,6 @@ mod tests {
             1
         }
         unsafe extern "C" fn reset(_: *mut c_void) {}
-        unsafe extern "C" fn plan(_: *mut c_void, out: *mut HirariBouncePlan) -> i32 {
-            unsafe {
-                *out = HirariBouncePlan {
-                    total_samples: 4,
-                    output_rate: 44_100,
-                    playhead_start: 0,
-                };
-            }
-            0
-        }
         unsafe extern "C" fn render(_: *mut c_void, left: *mut f32, right: *mut f32, frames: u32) {
             for index in 0..frames as usize {
                 unsafe {
@@ -1100,7 +1324,7 @@ mod tests {
             }
         }
         unsafe extern "C" fn chunk(_: *mut c_void) -> u32 {
-            2
+            1_024
         }
         unsafe extern "C" fn read(_: *mut c_void, playhead: *mut u64, playing: *mut u8) {
             unsafe {
@@ -1112,23 +1336,27 @@ mod tests {
             LAST_TRANSPORT.store(playhead, Ordering::SeqCst);
         }
         static LAST_TRANSPORT: AtomicU64 = AtomicU64::new(0);
+        let engine = FakeEngine::new();
         let ops = HirariBounceHostOps {
             run: Some(run),
             reset: Some(reset),
-            plan: Some(plan),
+            store: Some(fake_store),
             render: Some(render),
             render_chunk: Some(chunk),
             read_transport: Some(read),
             set_transport: Some(set),
         };
         let guard = new_session();
+        let plan = engine
+            .plan(borrow(&guard))
+            .expect("the fake graph plans a render");
         let directory = std::env::temp_dir().join(format!("hirari-bounce-{:p}", guard.0));
         std::fs::create_dir_all(&directory).expect("temp directory");
         let path = directory.join("mix.wav");
         let raw = path.to_string_lossy().into_owned();
         let ok = unsafe {
             hirari_bounce_render_driver(
-                &mut 0_u8 as *mut u8 as *mut c_void,
+                engine.host(),
                 guard.0,
                 &ops,
                 raw.as_ptr().cast(),
@@ -1143,7 +1371,13 @@ mod tests {
         assert_eq!(hirari_bounce_offline_thread(), 0);
         // The transport is handed back to whatever the engine had before.
         assert_eq!(LAST_TRANSPORT.load(Ordering::SeqCst), 3);
-        assert!(std::fs::metadata(&path).expect("rendered file").len() > 44);
+        // The published file is exactly the extent the Rust plan measured.
+        let payload = plan.total_samples * 4;
+        let written = std::fs::metadata(&path).expect("rendered file").len();
+        assert!(
+            written >= payload && written <= payload + 4_096,
+            "{written} bytes for {payload} samples of payload"
+        );
         let _ = std::fs::remove_dir_all(&directory);
     }
 }
