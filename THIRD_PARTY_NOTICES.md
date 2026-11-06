@@ -25,20 +25,22 @@ accept their licenses separately.
 
 ## Signalsmith Stretch and Signalsmith Linear
 
-Hirari vendors the headers used for spectral time stretching and formant
-processing from Signalsmith Stretch and its Signalsmith Linear dependency:
+The spectral time stretching and formant processing in
+`hirari-core-bridge/src/signalsmith_stretch.rs` is a native Rust translation of
+Signalsmith Stretch and its Signalsmith Linear dependency (the vendored C++
+headers were removed once the translation was validated against frozen
+reference fixtures captured from the last C++ build):
 
 - Signalsmith Stretch: <https://github.com/Signalsmith-Audio/signalsmith-stretch>
   revision `57b93f4e9206a089a45387eaa39bdc9f310d3308`
 - Signalsmith Linear: <https://github.com/Signalsmith-Audio/linear>
   revision `547f4a6c55b4243191a9180f39849d67cc66aa0d`
 
-Both are distributed under the MIT License. Their original license texts are
-retained in `src/external/signalsmith-stretch/LICENSE.txt` and
-`src/external/signalsmith-linear/LICENSE.txt`.
-Hirari's local change to Signalsmith Stretch snapshots transpose and formant
-controls for each spectrum, so split real-time computation cannot observe a
-mid-spectrum parameter change.
+Both are distributed under the MIT License; the original license texts are
+retained in `licenses/signalsmith-stretch-MIT.txt` and
+`licenses/signalsmith-linear-MIT.txt`. Hirari retains the upstream local
+change of snapshotting transpose and formant controls for each spectrum, so
+split real-time computation cannot observe a mid-spectrum parameter change.
 
 ## Symphonia
 

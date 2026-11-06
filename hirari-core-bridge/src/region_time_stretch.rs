@@ -1,38 +1,11 @@
 use std::ptr;
 
-unsafe extern "C" {
-    fn hirari_stretch_kernel_create() -> *mut std::ffi::c_void;
-    fn hirari_stretch_kernel_create_seeded(seed: std::ffi::c_long) -> *mut std::ffi::c_void;
-    fn hirari_stretch_kernel_destroy(handle: *mut std::ffi::c_void);
-    fn hirari_stretch_kernel_prepare(handle: *mut std::ffi::c_void, sample_rate: f32) -> bool;
-    fn hirari_stretch_kernel_reset(handle: *mut std::ffi::c_void);
-    fn hirari_stretch_kernel_seek_length(handle: *mut std::ffi::c_void, rate: f32) -> i32;
-    fn hirari_stretch_kernel_latency(handle: *mut std::ffi::c_void) -> i32;
-    fn hirari_stretch_kernel_set_controls(
-        handle: *mut std::ffi::c_void,
-        transpose: f32,
-        formant: f32,
-        formant_base: f32,
-    ) -> bool;
-    fn hirari_stretch_kernel_seek(
-        handle: *mut std::ffi::c_void,
-        left: *const f32,
-        right: *const f32,
-        samples: i32,
-    ) -> bool;
-    fn hirari_stretch_kernel_process(
-        handle: *mut std::ffi::c_void,
-        input_left: *const f32,
-        input_right: *const f32,
-        input_samples: i32,
-        output_left: *mut f32,
-        output_right: *mut f32,
-        output_samples: i32,
-    ) -> bool;
-}
+use crate::signalsmith_stretch::SignalsmithStretch;
 
+/// Native Rust port of the Signalsmith stretch engine (`signalsmith-stretch.h`).
+/// The former C++ `stretch_kernel.cpp` shim is replaced by this wrapper.
 struct StretchState {
-    kernel: *mut std::ffi::c_void,
+    kernel: SignalsmithStretch,
     input_left: Vec<f32>,
     input_right: Vec<f32>,
     output_left: Vec<f32>,
@@ -55,10 +28,10 @@ struct StretchState {
 
 impl StretchState {
     fn new() -> Self {
-        Self::with_kernel(unsafe { hirari_stretch_kernel_create() })
+        Self::with_kernel(SignalsmithStretch::new())
     }
 
-    fn with_kernel(kernel: *mut std::ffi::c_void) -> Self {
+    fn with_kernel(kernel: SignalsmithStretch) -> Self {
         Self {
             kernel,
             input_left: Vec::new(),
@@ -82,15 +55,13 @@ impl StretchState {
         }
     }
 
-    #[cfg(all(test, feature = "dsp-differential-reference"))]
+    #[cfg(test)]
     fn new_seeded(seed: std::ffi::c_long) -> Self {
-        Self::with_kernel(unsafe { hirari_stretch_kernel_create_seeded(seed) })
+        Self::with_kernel(SignalsmithStretch::with_seed(seed as u32))
     }
 
     fn reset(&mut self) {
-        if !self.kernel.is_null() {
-            unsafe { hirari_stretch_kernel_reset(self.kernel) };
-        }
+        self.kernel.reset();
         self.stream_valid = false;
         self.next_timeline_offset = 0;
         self.next_input_offset = 0;
@@ -111,11 +82,7 @@ impl StretchState {
         {
             return true;
         }
-        if self.kernel.is_null()
-            || !unsafe { hirari_stretch_kernel_prepare(self.kernel, sample_rate as f32) }
-        {
-            return false;
-        }
+        self.kernel.preset_default(2, sample_rate as f32, true);
         self.sample_rate = sample_rate;
         self.max_block_size = max_block_size as usize;
         self.input_capacity = self.max_block_size.saturating_mul(4).saturating_add(2);
@@ -126,10 +93,10 @@ impl StretchState {
         self.input_right.resize(self.input_capacity, 0.0);
         self.output_left.resize(self.max_block_size, 0.0);
         self.output_right.resize(self.max_block_size, 0.0);
-        let seek_len = unsafe {
-            hirari_stretch_kernel_seek_length(self.kernel, 4.0)
-                .max(hirari_stretch_kernel_seek_length(self.kernel, 0.25))
-        };
+        let seek_len = self
+            .kernel
+            .output_seek_length(4.0)
+            .max(self.kernel.output_seek_length(0.25));
         if seek_len <= 0 {
             return false;
         }
@@ -180,10 +147,10 @@ impl StretchState {
         } else {
             0.0
         };
-        if !unsafe {
-            hirari_stretch_kernel_set_controls(self.kernel, transpose, formant, formant_base)
-        } {
-            return false;
+        self.kernel.set_transpose_semitones(transpose, 0.0);
+        self.kernel.set_formant_semitones(formant, true);
+        if formant_base > 0.0 {
+            self.kernel.set_formant_base(formant_base);
         }
         let input_start_f = source_start.round();
         let input_end_f = source_end.round();
@@ -242,19 +209,14 @@ impl StretchState {
             );
         }
         let out_start = output_offset as usize;
-        if !unsafe {
-            hirari_stretch_kernel_process(
-                self.kernel,
-                self.input_left.as_ptr(),
-                self.input_right.as_ptr(),
-                input_count as i32,
-                self.output_left.as_mut_ptr().add(out_start),
-                self.output_right.as_mut_ptr().add(out_start),
-                frames as i32,
-            )
-        } {
-            return false;
-        }
+        let inputs: [&[f32]; 2] = [&self.input_left[..input_count], &self.input_right[..input_count]];
+        let (out_l, out_r) = (&mut self.output_left, &mut self.output_right);
+        let mut outputs: [&mut [f32]; 2] = [
+            &mut out_l[out_start..out_start + frames as usize],
+            &mut out_r[out_start..out_start + frames as usize],
+        ];
+        self.kernel
+            .process(&inputs, input_count, &mut outputs, frames as usize);
         self.next_timeline_offset = timeline_offset.saturating_add(frames as u64);
         self.next_input_offset = input_end;
         self.source_left = source_left;
@@ -277,8 +239,7 @@ impl StretchState {
         source_rate: f64,
         reverse: bool,
     ) -> bool {
-        let seek_samples =
-            unsafe { hirari_stretch_kernel_seek_length(self.kernel, source_rate as f32) };
+        let seek_samples = self.kernel.output_seek_length(source_rate as f32);
         if seek_samples <= 0 || seek_samples as usize > self.seek_left.len() {
             return false;
         }
@@ -307,28 +268,11 @@ impl StretchState {
                 );
             }
         }
-        if !unsafe {
-            hirari_stretch_kernel_seek(
-                self.kernel,
-                self.seek_left.as_ptr(),
-                self.seek_right.as_ptr(),
-                seek_samples,
-            )
-        } {
-            return false;
-        }
+        let seek_inputs: [&[f32]; 2] = [&self.seek_left[..seek_samples as usize], &self.seek_right[..seek_samples as usize]];
+        self.kernel.output_seek(&seek_inputs, seek_samples as usize);
         self.next_input_offset = input_position;
         self.stream_valid = true;
         true
-    }
-}
-
-impl Drop for StretchState {
-    fn drop(&mut self) {
-        if !self.kernel.is_null() {
-            unsafe { hirari_stretch_kernel_destroy(self.kernel) };
-            self.kernel = ptr::null_mut();
-        }
     }
 }
 
@@ -444,7 +388,7 @@ pub unsafe extern "C" fn hirari_region_stretch_lookahead(handle: *const std::ffi
     let Some(state) = (unsafe { handle.cast::<StretchState>().as_ref() }) else {
         return 0;
     };
-    unsafe { hirari_stretch_kernel_latency(state.kernel).max(0) as u32 }
+    state.kernel.output_latency().max(0) as u32
 }
 
 #[no_mangle]
@@ -502,78 +446,27 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "dsp-differential-reference"))]
+#[cfg(test)]
 mod differential_tests {
     use super::*;
 
-    unsafe extern "C" {
-        fn hirari_signalsmith_stft_analyse_reference(
-            input: *const f32,
-            block_size: usize,
-            interval: usize,
-            spectrum_real: *mut f32,
-            spectrum_imag: *mut f32,
-            spectrum_capacity: usize,
-            fft_size: *mut usize,
-        ) -> bool;
-        fn hirari_region_stretch_reference_create() -> *mut std::ffi::c_void;
-        fn hirari_region_stretch_reference_destroy(handle: *mut std::ffi::c_void);
-        fn hirari_region_stretch_reference_prepare(
-            handle: *mut std::ffi::c_void,
-            sample_rate: f64,
-            max_block_size: u32,
-        ) -> bool;
-        fn hirari_region_stretch_reference_render(
-            handle: *mut std::ffi::c_void,
-            source_left: *const f32,
-            source_right: *const f32,
-            source_samples: u64,
-            source_offset: u64,
-            source_span: u64,
-            timeline_offset: u64,
-            source_start: f64,
-            source_end: f64,
-            output_offset: u32,
-            frames: u32,
-            reverse: bool,
-            transpose: f32,
-            formant: f32,
-            formant_base_hz: f32,
-        ) -> bool;
-        fn hirari_region_stretch_reference_left(handle: *const std::ffi::c_void) -> *const f32;
-        fn hirari_region_stretch_reference_right(handle: *const std::ffi::c_void) -> *const f32;
-        fn hirari_region_stretch_reference_reset(handle: *mut std::ffi::c_void);
-    }
-
     #[test]
-    fn rust_half_bin_stft_analysis_matches_signalsmith_native_reference() {
+    fn rust_half_bin_stft_analysis_matches_frozen_cpp_reference() {
         let block = 5760;
-        let interval = 1440;
         let input = (0..block)
             .map(|index| {
                 let x = index as f32;
                 (x * 0.013).sin() * 0.6 + (x * 0.0017).cos() * 0.2
             })
             .collect::<Vec<_>>();
-        let mut rust_frame = crate::signalsmith_fft::SignalsmithStftFrame::new(block, interval)
+        let mut rust_frame = crate::signalsmith_fft::SignalsmithStftFrame::new(block, 1440)
             .expect("native Signalsmith frame size");
         let rust = rust_frame.analysis(&input);
-        let mut native_real = vec![0.0f32; rust.len()];
-        let mut native_imag = vec![0.0f32; rust.len()];
-        let mut native_fft_size = 0usize;
-        assert!(unsafe {
-            hirari_signalsmith_stft_analyse_reference(
-                input.as_ptr(),
-                block,
-                interval,
-                native_real.as_mut_ptr(),
-                native_imag.as_mut_ptr(),
-                native_real.len(),
-                &mut native_fft_size,
-            )
-        });
-        assert_eq!(native_fft_size, 6144);
-        assert_eq!(rust.len(), native_fft_size / 2);
+        let mut fixtures = crate::dsp_fixtures::FixtureReader::open();
+        fixtures.skip_kaiser_windows();
+        let (fft_size, native_real, native_imag) = fixtures.stft_spectrum();
+        assert_eq!(fft_size, 6144);
+        assert_eq!(rust.len(), fft_size / 2);
         let mut worst = 0.0f32;
         let mut worst_bin = 0;
         for bin in 0..rust.len() {
@@ -594,10 +487,7 @@ mod differential_tests {
     #[test]
     fn rust_region_stretch_matches_frozen_cpp_across_stream_and_seek_transitions() {
         let mut rust = StretchState::new_seeded(17);
-        let reference = unsafe { hirari_region_stretch_reference_create() };
-        assert!(!reference.is_null());
         assert!(rust.prepare(48_000.0, 512));
-        assert!(unsafe { hirari_region_stretch_reference_prepare(reference, 48_000.0, 512) });
         let left = (0..8192)
             .map(|i| (i as f32 * 0.013).sin() * 0.7 + (i as f32 * 0.037).cos() * 0.2)
             .collect::<Vec<_>>();
@@ -605,7 +495,7 @@ mod differential_tests {
             .map(|i| (i as f32 * 0.019).sin() * 0.6)
             .collect::<Vec<_>>();
         let cases = [
-            (0, 0.0, 256.0, 7, false),
+            (0u64, 0.0f64, 256.0f64, 7u32, false),
             (256, 256.0, 512.0, 13, false),
             // Exercise the full accepted source-rate range. Both reference
             // engines use the same seed for deterministic random-phase cases.
@@ -616,7 +506,12 @@ mod differential_tests {
             (1536, 3072.0, 3328.0, 3, false),
             (1792, 3328.0, 3584.0, 0, true),
         ];
-        for (timeline, start, end, output_offset, reverse) in cases {
+        let mut fixtures = crate::dsp_fixtures::FixtureReader::open();
+        fixtures.skip_kaiser_windows();
+        fixtures.skip_stft_spectrum();
+        let renders = fixtures.stretch_renders();
+        assert_eq!(renders.len(), cases.len());
+        for (case, (timeline, start, end, output_offset, reverse)) in cases.iter().enumerate() {
             let rust_ok = unsafe {
                 rust.render(
                     left.as_ptr(),
@@ -624,43 +519,22 @@ mod differential_tests {
                     left.len() as u64,
                     0,
                     left.len() as u64,
-                    timeline,
-                    start,
-                    end,
-                    output_offset,
+                    *timeline,
+                    *start,
+                    *end,
+                    *output_offset,
                     256,
-                    reverse,
+                    *reverse,
                     2.0,
                     -1.0,
                     1000.0,
                 )
             };
-            let reference_ok = unsafe {
-                hirari_region_stretch_reference_render(
-                    reference,
-                    left.as_ptr(),
-                    right.as_ptr(),
-                    left.len() as u64,
-                    0,
-                    left.len() as u64,
-                    timeline,
-                    start,
-                    end,
-                    output_offset,
-                    256,
-                    reverse,
-                    2.0,
-                    -1.0,
-                    1000.0,
-                )
-            };
-            assert_eq!(rust_ok, reference_ok);
             assert!(rust_ok);
-            let reference_left = unsafe { hirari_region_stretch_reference_left(reference) };
-            let reference_right = unsafe { hirari_region_stretch_reference_right(reference) };
+            let (reference_left, reference_right) = &renders[case];
             for i in 0..512 {
-                let left_delta = (rust.output_left[i] - unsafe { *reference_left.add(i) }).abs();
-                let right_delta = (rust.output_right[i] - unsafe { *reference_right.add(i) }).abs();
+                let left_delta = (rust.output_left[i] - reference_left[i]).abs();
+                let right_delta = (rust.output_right[i] - reference_right[i]).abs();
                 assert!(left_delta <= 1.0e-6, "left sample {i}: delta={left_delta}");
                 assert!(
                     right_delta <= 1.0e-6,
@@ -669,9 +543,5 @@ mod differential_tests {
             }
         }
         rust.reset();
-        unsafe {
-            hirari_region_stretch_reference_reset(reference);
-            hirari_region_stretch_reference_destroy(reference);
-        }
     }
 }

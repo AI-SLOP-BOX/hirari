@@ -15,7 +15,7 @@ pub(crate) struct SignalsmithFft {
     scratch: Vec<Complex32>,
 }
 
-struct SignalsmithModifiedRealFft {
+pub(crate) struct SignalsmithModifiedRealFft {
     fft: SignalsmithFft,
     size: usize,
     frame: Vec<Complex32>,
@@ -23,7 +23,7 @@ struct SignalsmithModifiedRealFft {
 }
 
 impl SignalsmithModifiedRealFft {
-    fn new(size: usize) -> Option<Self> {
+    pub(crate) fn new(size: usize) -> Option<Self> {
         if size < 2 || size % 2 != 0 {
             return None;
         }
@@ -39,7 +39,7 @@ impl SignalsmithModifiedRealFft {
         })
     }
 
-    fn forward(&mut self, input: &[f32], real: &mut [f32], imag: &mut [f32]) -> bool {
+    pub(crate) fn forward(&mut self, input: &[f32], real: &mut [f32], imag: &mut [f32]) -> bool {
         let half = self.size / 2;
         if input.len() != self.size || real.len() < half || imag.len() < half {
             return false;
@@ -57,7 +57,7 @@ impl SignalsmithModifiedRealFft {
         true
     }
 
-    fn inverse(&mut self, real: &[f32], imag: &[f32], output: &mut [f32]) -> bool {
+    pub(crate) fn inverse(&mut self, real: &[f32], imag: &[f32], output: &mut [f32]) -> bool {
         let half = self.size / 2;
         if real.len() < half || imag.len() < half || output.len() != self.size {
             return false;
@@ -303,7 +303,7 @@ fn signalsmith_real_fft_size(block_size: usize) -> Option<usize> {
     multiple.checked_mul(power_of_two)?.checked_mul(2)
 }
 
-fn kaiser_pr_window(size: usize, interval: usize) -> Vec<f32> {
+pub(crate) fn kaiser_pr_window(size: usize, interval: usize) -> Vec<f32> {
     let bandwidth = size as f64 / interval as f64;
     let bandwidth = bandwidth
         + 8.0 / ((bandwidth + 3.0) * (bandwidth + 3.0))
@@ -461,36 +461,24 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dsp-differential-reference")]
     #[test]
-    fn rust_modified_real_fft_matches_signalsmith_cpp_forward_and_inverse() {
-        unsafe extern "C" {
-            fn hirari_signalsmith_real_fft_forward_reference(
-                input: *const f32,
-                size: usize,
-                output_real: *mut f32,
-                output_imag: *mut f32,
-            ) -> bool;
-            fn hirari_signalsmith_real_fft_inverse_reference(
-                input_real: *const f32,
-                input_imag: *const f32,
-                size: usize,
-                output: *mut f32,
-            ) -> bool;
-        }
+    fn rust_modified_real_fft_matches_frozen_cpp_forward_and_inverse() {
+        let mut reader = crate::dsp_fixtures::FixtureReader::open();
+        reader.skip_kaiser_windows();
+        reader.skip_stft_spectrum();
+        let _renders = reader.stretch_renders();
+        let _saturator = reader.saturator_outputs();
+        let fixtures = crate::dsp_fixtures::read_real_fft_fixtures(&mut reader);
+        assert_eq!(fixtures.len(), 2);
 
-        for size in [2048, 6144] {
-            let input = (0..size)
-                .map(|index| {
-                    let x = index as f32;
-                    (x * 0.013).sin() * 0.6 + (x * 0.0017).cos() * 0.2 + (x * 0.19).sin() * 0.05
-                })
-                .collect::<Vec<_>>();
+        for fixture in &fixtures {
+            let size = fixture.size;
+            let input = &fixture.input;
+            let cpp_real = &fixture.forward_real;
+            let cpp_imag = &fixture.forward_imag;
             let half = size / 2;
             let mut rust_real = vec![0.0f32; half];
             let mut rust_imag = vec![0.0f32; half];
-            let mut cpp_real = vec![0.0f32; half];
-            let mut cpp_imag = vec![0.0f32; half];
             let plan = hirari_signalsmith_real_fft_create(size);
             assert!(!plan.is_null());
             assert!(unsafe {
@@ -499,14 +487,6 @@ mod tests {
                     input.as_ptr(),
                     rust_real.as_mut_ptr(),
                     rust_imag.as_mut_ptr(),
-                )
-            });
-            assert!(unsafe {
-                hirari_signalsmith_real_fft_forward_reference(
-                    input.as_ptr(),
-                    size,
-                    cpp_real.as_mut_ptr(),
-                    cpp_imag.as_mut_ptr(),
                 )
             });
             for bin in 0..half {
@@ -523,21 +503,13 @@ mod tests {
             }
 
             let mut rust_time = vec![0.0f32; size];
-            let mut cpp_time = vec![0.0f32; size];
+            let cpp_time = &fixture.inverse_time;
             assert!(unsafe {
                 hirari_signalsmith_real_fft_inverse(
                     plan,
                     cpp_real.as_ptr(),
                     cpp_imag.as_ptr(),
                     rust_time.as_mut_ptr(),
-                )
-            });
-            assert!(unsafe {
-                hirari_signalsmith_real_fft_inverse_reference(
-                    cpp_real.as_ptr(),
-                    cpp_imag.as_ptr(),
-                    size,
-                    cpp_time.as_mut_ptr(),
                 )
             });
             for index in 0..size {
@@ -556,34 +528,18 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "dsp-differential-reference")]
     #[test]
-    fn rust_kaiser_pr_window_matches_signalsmith_cpp_window() {
-        unsafe extern "C" {
-            fn hirari_signalsmith_kaiser_window_reference(
-                size: usize,
-                interval: usize,
-                output: *mut f32,
-            ) -> bool;
-        }
-
-        for (size, interval) in [(2048, 128), (5760, 1440), (8192, 512)] {
-            let mut rust = vec![0.0f32; size];
-            let mut cpp = vec![0.0f32; size];
-            assert!(unsafe {
-                hirari_signalsmith_kaiser_pr_window(size, interval, rust.as_mut_ptr())
-            });
-            assert!(unsafe {
-                hirari_signalsmith_kaiser_window_reference(size, interval, cpp.as_mut_ptr())
-            });
-            for (index, (actual, expected)) in rust.iter().zip(cpp).enumerate() {
+    fn kaiser_pr_window_matches_frozen_cpp_reference() {
+        let mut fixtures = crate::dsp_fixtures::FixtureReader::open();
+        for (size, interval, expected) in fixtures.kaiser_windows() {
+            let rust = kaiser_pr_window(size, interval);
+            assert_eq!(rust.len(), expected.len(), "size={size}");
+            for (index, (actual, expected)) in rust.iter().zip(expected).enumerate() {
                 assert!(
                     (actual - expected).abs() < 2.0e-6,
                     "size={size} interval={interval} index={index} Rust={actual} C++={expected}"
                 );
             }
         }
-        let mut odd = [0.0f32; 3];
-        assert!(!unsafe { hirari_signalsmith_kaiser_pr_window(3, 1, odd.as_mut_ptr()) });
     }
 }

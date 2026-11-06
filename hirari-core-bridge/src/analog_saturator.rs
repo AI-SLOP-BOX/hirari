@@ -274,6 +274,12 @@ mod tests {
     fn rust_saturator_matches_frozen_cpp_for_audio_fixtures_and_all_models() {
         let input_left = [0.0, 0.125, -0.75, 1.5, f32::NAN, 0.4, -0.2, f32::INFINITY];
         let input_right = [0.0, -0.25, 0.5, -1.25, f32::NEG_INFINITY, 0.3, -0.8, 0.05];
+        let mut fixtures = crate::dsp_fixtures::FixtureReader::open();
+        fixtures.skip_kaiser_windows();
+        fixtures.skip_stft_spectrum();
+        let _renders = fixtures.stretch_renders();
+        let frozen = fixtures.saturator_outputs();
+        assert_eq!(frozen.len(), 3);
         for (model_id, model) in [
             SaturationModel::Tube,
             SaturationModel::Tape,
@@ -282,21 +288,7 @@ mod tests {
         .into_iter()
         .enumerate()
         {
-            let mut expected_left = [0.0; 8];
-            let mut expected_right = [0.0; 8];
-            // SAFETY: All input/output arrays contain eight elements and are disjoint.
-            unsafe {
-                hirari_analog_saturator_frozen_reference(
-                    input_left.as_ptr(),
-                    input_right.as_ptr(),
-                    expected_left.as_mut_ptr(),
-                    expected_right.as_mut_ptr(),
-                    8,
-                    1.35,
-                    0.62,
-                    model_id as u32,
-                );
-            }
+            let (expected_left, expected_right) = &frozen[model_id];
             let mut actual_left = input_left;
             let mut actual_right = input_right;
             let mut engine = AnalogSaturatorEngine::new(48_000.0);

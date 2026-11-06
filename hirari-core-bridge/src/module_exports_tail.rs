@@ -80,3 +80,5 @@ include!("cli_render_tests.rs");
 pub mod dsp_reference;
 pub mod region_processing_ops;
 pub mod engine_native;
+pub mod signalsmith_stretch;
+pub(crate) mod dsp_fixtures;
