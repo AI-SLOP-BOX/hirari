@@ -162,17 +162,6 @@ pub mod ffi {
         fn new_project(self: Pin<&mut HirariUnifiedEngine>);
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
-        fn append_region_processing(
-            self: &AudioEngine,
-            tid: u32,
-            rid: u32,
-            step_id: u32,
-            operation: &str,
-            parameter: f32,
-            enabled: bool,
-        ) -> bool;
-        fn clear_region_processing(self: Pin<&mut HirariUnifiedEngine>, tid: u32, rid: u32)
-            -> bool;
 
         fn set_plugin_bypass(
             self: Pin<&mut HirariUnifiedEngine>,

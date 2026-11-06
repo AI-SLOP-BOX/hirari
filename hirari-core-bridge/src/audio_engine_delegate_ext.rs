@@ -938,8 +938,27 @@ impl ffi::AudioEngine {
     pub fn set_project_scale(&self, root: i32, scale_type: i32) -> bool {
         pinned(self).set_project_scale(root, scale_type)
     }
+    pub fn append_region_processing(
+        &self,
+        tid: u32,
+        rid: u32,
+        step_id: u32,
+        operation: &str,
+        parameter: f32,
+        enabled: bool,
+    ) -> bool {
+        crate::region_processing_ops::append_region_processing(
+            host(self),
+            tid,
+            rid,
+            step_id,
+            operation,
+            parameter,
+            enabled,
+        )
+    }
     pub fn clear_region_processing(&self, tid: u32, rid: u32) -> bool {
-        pinned(self).clear_region_processing(tid, rid)
+        crate::region_processing_ops::clear_region_processing(host(self), tid, rid)
     }
     pub fn set_automation_record_mode(&self, mode: u32) -> bool {
         let host = crate::engine_event_ops::host_from_core(self.get_core());

@@ -78,3 +78,4 @@ include!("cli_render_tests.rs");
 
 #[cfg(feature = "dsp-differential-reference")]
 pub mod dsp_reference;
+pub mod region_processing_ops;
