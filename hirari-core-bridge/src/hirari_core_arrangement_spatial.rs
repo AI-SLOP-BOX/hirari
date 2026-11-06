@@ -122,7 +122,8 @@ impl HirariCore {
 
     pub fn execute_vocal_remover(&self, tid: u32) {
         if let Some(e) = self.engine.as_ref() {
-            let _ = e.execute_vocal_remover(tid);
+            let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(e));
+            let _ = crate::engine_event_ops::execute_vocal_remover(host, tid);
         }
     }
 
@@ -140,7 +141,8 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        if engine.execute_vocal_remover(tid) {
+        let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(engine));
+        if crate::engine_event_ops::execute_vocal_remover(host, tid) {
             return format!(
                 "{{\"ok\":true,\"operation\":\"execute_vocal_remover\",\"track_id\":{tid}}}"
             );

@@ -33,5 +33,3 @@
     // Diagnostics & Health
 
     void shutdown();
-
-    bool pop_event(::Hirari::Core::EngineEvent& e) const;

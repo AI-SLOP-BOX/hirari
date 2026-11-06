@@ -16,20 +16,6 @@ namespace Hirari::Core::Bridge {
         return bridge.get_core();
     }
 
-    bool pop_event(const Engine::HirariUnifiedEngine& engine, BridgeEvent& ev) {
-        ::Hirari::Core::EngineEvent nativeEv;
-        if (engine.pop_event(nativeEv)) {
-            ev.timestamp = nativeEv.timestamp;
-            ev.event_type = nativeEv.type;
-            ev.track_id = nativeEv.trackId;
-            ev.value = nativeEv.value;
-            std::memcpy(ev.label.data(), nativeEv.label, sizeof(ev.label));
-            ev.label[sizeof(ev.label) - 1] = 0;
-            return true;
-        }
-        return false;
-    }
-
     bool push_command(const BridgeFFI::AudioEngine& engine, HirariCommand cmd, uint32_t tid,
                       float val, uint64_t ts, uint64_t expected_project_generation,
                       uint64_t expected_audio_generation) {

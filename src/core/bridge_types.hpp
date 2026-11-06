@@ -44,17 +44,4 @@ enum class CommandType : uint32_t {
     SetAutomationRecordMode = 12
 };
 
-struct EngineEvent {
-    uint64_t timestamp;
-    uint32_t type;
-    uint32_t trackId;
-    float value;
-    char label[128]; // Pre-allocated fixed buffer for RT-safety
-};
-
-// Re-export or forward declare BridgeFFI items if needed
-namespace BridgeFFI {
-    using ::Hirari::Core::EngineEvent;
-}
-
 } // namespace Hirari::Core

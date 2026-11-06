@@ -315,6 +315,16 @@ production support.
   Counted C++ 2989 -> 2875 (-114); repo-wide footprint 6598 -> 6512, leaving
   2833 in `src`, 42 in the bridge reference TU, 403 in the C++ contract tests
   and 3234 in the vendored signalsmith headers.
+- Slice 80 moves engine event polling, automation record mode, vocal remover, and track correlation to Rust.
+  `HirariUnifiedEngine::pop_event`, `set_automation_record_mode`, `execute_vocal_remover`, and `get_track_correlation`
+  were the last standalone track/store dispatch routines in `hirari_unified_engine_part_7.inc`. They now live in
+  `hirari-core-bridge/src/engine_event_ops.rs` and operate directly on the Rust-owned event rings (`H_ENGINE_RINGS`),
+  engine block store (`H_ENGINE_BLOCK`), and track work buffers via `TrackSession`. `hirari_unified_engine_part_7.inc`
+  is completely deleted, the declarations and `EngineEvent` C++ types leave the declaration partitions and bridge types,
+  and dead prototypes leave `rust_ffi.hpp`.
+  Counted C++ 2580 -> 2502 (-78); repo-wide footprint 6220 -> 6142, leaving 2502 in
+  `src`, 42 in the bridge reference TU, 364 in the C++ contract tests and 3234 in the
+  vendored signalsmith headers.
 - Slice 79 makes a project load one Rust transaction. `HirariUnifiedEngine::loadProject`
   was the last C++ routine that ordered work across the engine: stop and join the
   audio callbacks, take the tracks lock, provision each decoded track, hydrate its

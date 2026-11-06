@@ -42,6 +42,7 @@ pub mod audio_resampler;
 pub mod audio_test_tone;
 pub mod audio_engine_delegate_ext;
 pub mod engine_block_host;
+pub mod engine_event_ops;
 pub mod engine_analysis_reads;
 pub mod engine_config;
 pub mod engine_session;

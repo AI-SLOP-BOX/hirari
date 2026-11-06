@@ -62,9 +62,6 @@ extern "C" void hirari_engine_command_ring_clear(const void* rings);
 extern "C" bool hirari_engine_event_ring_push(const void* rings, uint64_t timestamp,
                                               uint32_t type, uint32_t track_id, float value,
                                               const uint8_t* label, size_t label_len);
-extern "C" bool hirari_engine_event_ring_pop(const void* rings, uint64_t* timestamp,
-                                             uint32_t* type, uint32_t* track_id, float* value,
-                                             uint8_t* label, size_t label_capacity);
 
 // Engine track table (engine_track_table.rs): the live document graph, its
 // deferred-destruction list and the double-buffered snapshot the realtime
@@ -755,14 +752,11 @@ extern "C" uint32_t hirari_track_maintain_sandboxes(void* track, bool autoRestar
 
 extern "C" void hirari_native_pdc_reset_for_project(const void* state);
 
-extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
-extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
 struct HirariTimedKeySwitchOutput {
     uint8_t channel;
     uint8_t pitch;
     uint32_t length_ticks;
 };
-extern "C" uint32_t hirari_automation_record_mode_apply(uint32_t mode);
 struct HirariTimedParameterEvent {
     uint32_t processor_index;
     uint32_t parameter_id;
@@ -858,7 +852,6 @@ extern "C" void hirari_engine_block_set_device_format(
 extern "C" void* hirari_engine_block_layout_revision(const void* state);
 extern "C" float hirari_engine_block_master_gain(const void* state);
 extern "C" void hirari_engine_block_set_master_gain(void* state, float gain);
-extern "C" void hirari_engine_block_set_auto_record_mode(void* state, uint32_t mode);
 extern "C" uint8_t hirari_engine_block_is_shutdown(const void* state);
 /// Sets the shutdown flag and reports whether it was already set.
 extern "C" uint8_t hirari_engine_block_take_shutdown(void* state);

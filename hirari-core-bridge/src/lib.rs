@@ -174,7 +174,6 @@ pub mod ffi {
         fn clear_region_processing(self: Pin<&mut HirariUnifiedEngine>, tid: u32, rid: u32)
             -> bool;
 
-        fn set_automation_record_mode(self: Pin<&mut HirariUnifiedEngine>, mode: u32) -> bool;
         fn set_plugin_bypass(
             self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
@@ -207,13 +206,11 @@ pub mod ffi {
             root: i32,
             scale_type: i32,
         ) -> bool;
-        fn execute_vocal_remover(self: Pin<&mut HirariUnifiedEngine>, tid: u32) -> bool;
         fn set_articulation_map(
             self: Pin<&mut HirariUnifiedEngine>,
             tid: u32,
             map_hash: u32,
         ) -> bool;
-        fn get_track_correlation(self: &HirariUnifiedEngine, tid: u32) -> f32;
         // Rust analysis reads (engine_analysis_reads.rs) sample telemetry and
         // meter straight from these Rust-owned stores.
         fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
@@ -239,7 +236,6 @@ pub mod ffi {
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
         fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
-        fn pop_event(engine: &HirariUnifiedEngine, event: &mut BridgeEvent) -> bool;
     }
 
     // ---------------------------------------------------------------------

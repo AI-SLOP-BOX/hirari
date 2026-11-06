@@ -24,3 +24,18 @@ include!("lib_tests_analysis_reads.rs");
 include!("lib_tests_offline_bounce.rs");
 include!("lib_tests_project_load.rs");
 }
+
+#[test]
+fn engine_event_ops_contract() {
+    let mut ev = crate::ffi::BridgeEvent {
+        timestamp: 0,
+        event_type: 0,
+        track_id: 0,
+        value: 0.0,
+        label: [0; 128],
+    };
+    assert!(!crate::engine_event_ops::pop_event(std::ptr::null_mut(), &mut ev));
+    assert!(!crate::engine_event_ops::set_automation_record_mode(std::ptr::null_mut(), 0));
+    assert!(!crate::engine_event_ops::execute_vocal_remover(std::ptr::null_mut(), 1));
+    assert_eq!(crate::engine_event_ops::get_track_correlation(std::ptr::null_mut(), 1), 1.0);
+}

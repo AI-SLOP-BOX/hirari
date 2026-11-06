@@ -861,7 +861,8 @@ impl ffi::AudioEngine {
         crate::video_system::video_service().frame_revision()
     }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
-        self.get_core().get_track_correlation(tid)
+        let host = crate::engine_event_ops::host_from_core(self.get_core());
+        crate::engine_event_ops::get_track_correlation(host, tid)
     }
     pub fn assign_track_to_vca(&self, track_id: u32, group_id: u32) -> bool {
         crate::engine_transport::assign_track_to_vca(self.get_core(), track_id, group_id)
@@ -908,7 +909,8 @@ impl ffi::AudioEngine {
         pinned(self).resume_bounce()
     }
     pub fn execute_vocal_remover(&self, tid: u32) -> bool {
-        pinned(self).execute_vocal_remover(tid)
+        let host = crate::engine_event_ops::host_from_core(self.get_core());
+        crate::engine_event_ops::execute_vocal_remover(host, tid)
     }
     pub fn set_articulation_map(&self, tid: u32, map_hash: u32) -> bool {
         pinned(self).set_articulation_map(tid, map_hash)
@@ -940,7 +942,8 @@ impl ffi::AudioEngine {
         pinned(self).clear_region_processing(tid, rid)
     }
     pub fn set_automation_record_mode(&self, mode: u32) -> bool {
-        pinned(self).set_automation_record_mode(mode)
+        let host = crate::engine_event_ops::host_from_core(self.get_core());
+        crate::engine_event_ops::set_automation_record_mode(host, mode)
     }
     pub fn request_video_frame(&self, seconds: f64) -> bool {
         crate::video_system::video_service().request_frame(seconds)

@@ -27,7 +27,4 @@ public:
     bool cancel_bounce() noexcept;
     bool pause_bounce() noexcept;
     bool resume_bounce() noexcept;
-    bool execute_vocal_remover(uint32_t tid);
-    bool set_automation_record_mode(uint32_t mode);
-    float get_track_correlation(uint32_t trackId) const;
     rust::Vec<float> get_region_waveform(uint32_t tid, uint32_t rid, uint32_t numPeaks);

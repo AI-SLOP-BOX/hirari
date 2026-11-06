@@ -220,7 +220,8 @@ impl HirariCore {
         let Some(engine) = self.engine.as_ref() else {
             return false;
         };
-        engine.set_automation_record_mode(mode)
+        let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(engine));
+        crate::engine_event_ops::set_automation_record_mode(host, mode)
     }
 
     pub fn undo_diagnostic_json(&self) -> String {

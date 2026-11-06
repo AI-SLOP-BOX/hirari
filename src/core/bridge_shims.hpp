@@ -18,8 +18,6 @@ namespace Hirari::Core::Bridge {
 
     const Engine::HirariUnifiedEngine& get_unified_engine(const BridgeFFI::AudioEngine& bridge);
 
-    bool pop_event(const Engine::HirariUnifiedEngine& engine, BridgeEvent& ev);
-
     bool push_command(const BridgeFFI::AudioEngine& engine, HirariCommand cmd, uint32_t tid,
                       float val, uint64_t ts, uint64_t expected_project_generation,
                       uint64_t expected_audio_generation);

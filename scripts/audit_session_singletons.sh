@@ -2,7 +2,7 @@
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-FILES="$ROOT/src/core/hirari_unified_engine_part_1.inc $ROOT/src/core/hirari_unified_engine_part_2.inc $ROOT/src/core/hirari_unified_engine_part_3.inc $ROOT/src/core/hirari_unified_engine_part_4.inc $ROOT/src/core/hirari_unified_engine_part_5.inc $ROOT/src/core/hirari_unified_engine_part_6.inc $ROOT/src/core/hirari_unified_engine_part_7.inc"
+FILES="$ROOT/src/core/hirari_unified_engine_part_1.inc $ROOT/src/core/hirari_unified_engine_part_2.inc $ROOT/src/core/hirari_unified_engine_part_3.inc $ROOT/src/core/hirari_unified_engine_part_4.inc $ROOT/src/core/hirari_unified_engine_part_5.inc $ROOT/src/core/hirari_unified_engine_part_6.inc"
 
 # These are deliberately process-wide, immutable/stateless or diagnostics-only.
 # Project/audio state must use the owning HirariUnifiedEngine member instead.

@@ -48,9 +48,10 @@ impl HirariCore {
             .is_some_and(|e| e.region_waveform_pending(request))
     }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
-        self.engine
-            .as_ref()
-            .map_or(0.0, |e| e.get_track_correlation(tid))
+        self.engine.as_ref().map_or(0.0, |e| {
+            let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(e));
+            crate::engine_event_ops::get_track_correlation(host, tid)
+        })
     }
     pub fn get_project_layout_json(&self) -> String {
         let Some(engine) = self.engine.as_ref() else {
