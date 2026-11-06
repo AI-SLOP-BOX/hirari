@@ -20,5 +20,4 @@
 // against the Rust manager in native_plugin_compile_contract_part_1.inc.
 
 #include "native_plugin_compile_contract_part_1.inc"
-#include "native_plugin_compile_contract_part_2.inc"
 #include "native_plugin_compile_contract_part_3.inc"

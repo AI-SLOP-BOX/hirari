@@ -18,6 +18,7 @@ use crate::engine_block_host::{
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::ptr;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Mutex, OnceLock};
 
 /// The largest block the device host may deliver, and the capacity the input
@@ -63,7 +64,12 @@ pub const H_LAYOUT_REVISION: u32 = 28;
 /// is a C++ member, so the bag never releases it. A bag built without an engine
 /// — a test fixture — carries null, which its sessions read as no lock to take.
 pub const H_TRACKS_MUTEX: u32 = 29;
-const HANDLE_COUNT: usize = 30;
+/// The one-load-at-a-time flag a project hydration takes on this engine.
+/// Hydration mutates tracks, routing and the project-scoped managers as one
+/// control-plane transaction, so a concurrent load is rejected rather than
+/// allowed to interleave partial state with the first.
+pub const H_HYDRATION_GUARD: u32 = 30;
+const HANDLE_COUNT: usize = 31;
 
 /// The bags built so far, keyed by the engine host that built them. Rust code
 /// driven from a `void* host` callback argument reads a store through this map;
@@ -185,6 +191,8 @@ impl EngineSession {
     fn new(tracks_mutex: *mut c_void) -> Self {
         let mut handles: [*mut c_void; HANDLE_COUNT] = [ptr::null_mut(); HANDLE_COUNT];
         handles[H_TRACKS_MUTEX as usize] = tracks_mutex;
+        handles[H_HYDRATION_GUARD as usize] =
+            Box::into_raw(Box::new(AtomicBool::new(false))).cast::<c_void>();
         handles[H_TRACK_TABLE as usize] = unsafe { hirari_engine_track_table_create() };
         handles[H_INPUT_BLOCKS as usize] = unsafe { hirari_input_blocks_create(MAX_BLOCK_FRAMES) };
         handles[H_METRONOME as usize] = unsafe { hirari_metronome_create(DEFAULT_SAMPLE_RATE) };
@@ -300,6 +308,10 @@ impl EngineSession {
             hirari_master_meter_destroy(take(self, H_METER));
             hirari_undo_manager_destroy(take(self, H_UNDO));
             hirari_layout_revision_release(take(self, H_LAYOUT_REVISION));
+            let hydration = take(self, H_HYDRATION_GUARD);
+            if !hydration.is_null() {
+                drop(Box::from_raw(hydration.cast::<AtomicBool>()));
+            }
         }
     }
 }

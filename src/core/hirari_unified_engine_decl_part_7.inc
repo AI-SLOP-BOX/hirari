@@ -1,8 +1,3 @@
-    // Project hydration mutates tracks, routing and several process-wide
-    // managers as one control-plane transaction.  Reject a concurrent load
-    // instead of allowing two documents to interleave partial state.
-    std::atomic<bool> m_projectHydrationActive{false};
-
     // The document graph lives in the Rust track table (engine_track_table.rs)
     // and its tracks are Rust objects (engine_track.rs). A track pointer is the
     // Arc's own address: it keys the region store and is what every

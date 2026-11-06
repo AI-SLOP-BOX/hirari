@@ -22,4 +22,5 @@ include!("lib_tests_routing.rs");
 include!("lib_tests_track_freeze.rs");
 include!("lib_tests_analysis_reads.rs");
 include!("lib_tests_offline_bounce.rs");
+include!("lib_tests_project_load.rs");
 }

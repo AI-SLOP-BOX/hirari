@@ -467,34 +467,6 @@ pub mod ffi {
     }
 
     extern "Rust" {
-        /// Decodes an `ARUA` container. An unreadable or malformed file yields
-        /// a default state with `valid == false`.
-        fn native_project_load(path: &str) -> NativeProjectState;
-        /// Encodes and atomically stores an `ARUA` container.
-        fn native_project_save(path: &str, state: &NativeProjectState) -> bool;
-        /// Encodes and atomically stores an `ARUA` container whose timeline
-        /// markers and arranger parts come from the Rust arrangement document.
-        fn native_project_save_with_arrangement(
-            path: &str,
-            state: &NativeProjectState,
-            arrangement_document: usize,
-        ) -> bool;
-        /// Installs every decoded project region into the provisional tracks the
-        /// engine is building. False means the hydration aborted and the caller
-        /// must keep the previous document published.
-        fn native_project_hydrate_regions(
-            state: &mut NativeProjectState,
-            tracks: &Vec<NativeTrackHandle>,
-            project_sample_rate: f64,
-        ) -> bool;
-        /// Rebuilds each provisional track's plugin chain, curves and per-insert
-        /// state from the decoded document. False means the engine could not
-        /// create one of the saved inserts and hydration must abort.
-        fn native_project_hydrate_plugins(
-            state: &NativeProjectState,
-            tracks: &Vec<NativeTrackStorages>,
-        ) -> bool;
-
         fn analysis_spectral_display(spectrum: &[f32], sample_rate: f64) -> Vec<f32>;
         fn analysis_phase_heatmap(spectrum: &[f32]) -> Vec<f32>;
         fn analysis_partials(spectrum: &[f32]) -> Vec<f32>;

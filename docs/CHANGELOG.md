@@ -315,6 +315,36 @@ production support.
   Counted C++ 2989 -> 2875 (-114); repo-wide footprint 6598 -> 6512, leaving
   2833 in `src`, 42 in the bridge reference TU, 403 in the C++ contract tests
   and 3234 in the vendored signalsmith headers.
+- Slice 79 makes a project load one Rust transaction. `HirariUnifiedEngine::loadProject`
+  was the last C++ routine that ordered work across the engine: stop and join the
+  audio callbacks, take the tracks lock, provision each decoded track, hydrate its
+  plug-in chain and regions, prepare every chain, reset the project-scoped managers,
+  publish the provisional owners, restore routes, buses, ids, tempo map, markers,
+  arranger parts and sidechain links, clear the undo history and re-prepare the
+  graph. That sequence now lives in `hirari-core-bridge/src/project_load_host.rs`
+  behind `hirari_project_load_from_host` and calls the Rust stores every earlier
+  slice had already taken over, so no new C++ entry point is needed; `AudioEngine`
+  only names the document path. The engine's `m_projectHydrationActive` member
+  became a per-session `AtomicBool` slot (`H_HYDRATION_GUARD`) claimed by CAS and
+  released on `Drop`, the provisional-owner cleanup that C++ got from destruction
+  order is an explicit guard that releases each owner under the graph lock before a
+  failed hydration returns, and `engine_transport::stop_at_host` serves the caller
+  that holds only the host pointer. `hirari_unified_engine_part_4b.inc` is deleted,
+  `part_4a.inc` drops from 107 lines to 19, the `saveProject`/`loadProject`
+  prototypes and the hydration member leave the declaration partitions, and the
+  `<filesystem>` include went with the dead `projectDir` helper. With no C++ caller
+  left, the five project functions were cut from the cxx bridge's `extern "Rust"`
+  block and `tests/native_plugin_compile_contract_part_2.inc` went with them: that
+  round trip existed to cover the marshalling a C++ caller performed, and the codec
+  is covered in Rust. A dead-declaration audit of `rust_ffi.hpp` then removed the 33
+  prototypes and the `HirariArrangementPartInput` mirror the deleted loader was the
+  last user of (1001 lines to 948). Three tests hold the loader's promises against a
+  real engine: a saved document takes over the graph and keeps its track ids, a
+  second hydration is refused rather than queued, and an unreadable document leaves
+  the published project untouched.
+  Counted C++ 2875 -> 2580 (-295); repo-wide footprint 6512 -> 6220, leaving 2580 in
+  `src`, 42 in the bridge reference TU, 364 in the C++ contract tests and 3234 in the
+  vendored signalsmith headers.
 - The bounce plan is now gathered and computed entirely in Rust.
   `bounce_driver.rs` takes the engine's tracks lock itself, walks the Rust
   region store for every track in the table, drains the MIDI snapshot for its

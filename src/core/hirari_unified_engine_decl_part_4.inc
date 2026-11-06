@@ -15,8 +15,6 @@ public:
     bool clear_region_processing(uint32_t tid, uint32_t rid);
 
     // Project
-    bool saveProject(std::string_view path);
-    bool loadProject(std::string_view path);
     bool bounce_project(std::string_view outputPath, uint32_t format);
     bool bounce_project_async(std::string_view outputPath, uint32_t format);
     // The graph operations the Rust bounce driver calls back into. Static

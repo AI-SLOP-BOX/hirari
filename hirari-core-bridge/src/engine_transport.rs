@@ -93,12 +93,16 @@ fn join_audio_callbacks(core: &HirariUnifiedEngine) {
 /// The stop-time trim: every live track's retired region generations are
 /// released on the control thread, once no callback can be holding them.
 fn trim_retired_regions(core: &HirariUnifiedEngine) {
-    let host = address(core);
+    trim_retired_regions_at_host(address(core));
+}
+
+fn trim_retired_regions_at_host(host: *mut c_void) {
     let _guard = match track_session::GraphLock::acquire(host) {
         Some(guard) => guard,
         None => return,
     };
-    let table = unsafe { hirari_engine_block_track_table(block(core) as *const c_void) };
+    let block = crate::engine_session::handle_of_host(host, crate::engine_session::H_ENGINE_BLOCK);
+    let table = unsafe { hirari_engine_block_track_table(block as *const c_void) };
     if table.is_null() {
         return;
     }
@@ -113,6 +117,21 @@ fn trim_retired_regions(core: &HirariUnifiedEngine) {
             unsafe { region_store::hirari_region_store_trim_retired(track) };
         }
     }
+}
+
+/// The transport stop for a caller that holds only the engine address: the
+/// project-load session runs on the control thread and has no cxx reference to
+/// the engine object, only the host pointer its entry point was given.
+pub fn stop_at_host(host: *mut c_void) {
+    let block = crate::engine_session::handle_of_host(host, crate::engine_session::H_ENGINE_BLOCK);
+    if block.is_null() {
+        return;
+    }
+    unsafe {
+        engine_block_host::hirari_engine_block_set_playing(block, 0);
+        engine_block_host::hirari_engine_block_join_callbacks(block as *const c_void);
+    }
+    trim_retired_regions_at_host(host);
 }
 
 /// Transport start/stop. Starting is gated on the driver actually running:

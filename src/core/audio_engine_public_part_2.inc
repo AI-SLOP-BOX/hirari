@@ -7,8 +7,16 @@
     // host answers the name from its own effect tables and HirariCore holds the
     // session registry, so this facade no longer forwards either.
 
-    bool save_project(rust::Str path) const { return m_engine && m_engine->saveProject(std::string_view(path.data(), path.size())); }
-    bool load_project(rust::Str path) const { return m_engine && m_engine->loadProject(std::string_view(path.data(), path.size())); }
+    // Project save and load are Rust transactions (layout_gather.rs,
+    // project_load_host.rs); this facade only names the document path.
+    bool save_project(rust::Str path) const {
+        return m_engine && hirari_project_save_from_host(
+            m_engine.get(), reinterpret_cast<const uint8_t*>(path.data()), path.size());
+    }
+    bool load_project(rust::Str path) const {
+        return m_engine && hirari_project_load_from_host(
+            m_engine.get(), reinterpret_cast<const uint8_t*>(path.data()), path.size());
+    }
     bool bounce_project(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project(std::string_view(path.data(), path.size()), format); }
     bool bounce_project_async(rust::Str path, uint32_t format) const { return m_engine && m_engine->bounce_project_async(std::string_view(path.data(), path.size()), format); }
 

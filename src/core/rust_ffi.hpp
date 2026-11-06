@@ -89,11 +89,6 @@ extern "C" void hirari_engine_track_snapshot(void* table, HirariTrackSnapshot* o
 // snapshot publication, then delay compensation. See engine_track_table.rs.
 extern "C" void hirari_engine_sync_structure(void* table, void* bus_system, void* routing,
                                              void* pdc, uint64_t generation);
-// The project-load commit point: the outgoing graph's sidechain entries, every
-// project-scoped manager and the graph itself, in the order Rust owns.
-extern "C" void hirari_engine_reset_project(void* table, void* rings, void* pdc,
-                                            void* sidechain, void* routing, void* bus_system,
-                                            void* control_room, void* sidechain_routes);
 
 // Live input staging (engine_input_block.rs): the driver callback copies the
 // monitored input pair and the Control Room talkback source into the planar
@@ -137,8 +132,6 @@ extern "C" uint64_t hirari_external_sync_last_tick(const void* state);
 extern "C" void hirari_master_limiter_prepare(void* state, double sample_rate);
 extern "C" void hirari_master_limiter_reset(void* state);
 extern "C" void hirari_control_room_reset(void* state);
-extern "C" void* hirari_bus_system_bus(const void* state, uint32_t bus_id);
-extern "C" bool hirari_bus_system_register(void* state, uint32_t bus_id);
 extern "C" void hirari_bus_system_reset(void* state);
 extern "C" void* hirari_audio_buffer_storage_create();
 extern "C" void hirari_audio_buffer_storage_destroy(void* storage);
@@ -157,23 +150,14 @@ extern "C" const float* hirari_audio_buffer_storage_read_pointer(
 extern "C" void hirari_audio_buffer_storage_clear(
     const void* storage, uint32_t offset, uint32_t samples);
 extern "C" uint32_t hirari_audio_buffer_storage_sanitize(const void* storage);
-extern "C" void hirari_audio_buffer_set_realtime_guard(bool is_realtime);
-extern "C" uint64_t hirari_audio_buffer_realtime_resize_attempts();
 
 extern "C" void* hirari_midi_buffer_create();
 extern "C" void hirari_midi_buffer_destroy(void* state);
 extern "C" void hirari_midi_buffer_add(
     void* state, uint64_t sample_offset, const uint8_t* data, uint32_t size,
     uint8_t articulation_id);
-// Channel validation and status-byte construction are Rust-owned.
-extern "C" void hirari_midi_buffer_add_note_on(void* state, uint8_t channel, uint8_t pitch, uint8_t velocity, uint64_t sampleOffset, uint8_t articulationId);
-extern "C" bool hirari_midi_buffer_copy(void* state, const void* event);
-extern "C" void* hirari_midi_buffer_event_data(const void* state);
 extern "C" size_t hirari_midi_buffer_event_count(const void* state);
 extern "C" bool hirari_midi_buffer_overflowed(const void* state);
-extern "C" bool hirari_midi_buffer_take_overflowed(const void* state);
-extern "C" uint64_t hirari_midi_buffer_take_dropped(const void* state);
-extern "C" uint64_t hirari_midi_buffer_dropped_count(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_oversize(const void* state);
 extern "C" uint64_t hirari_midi_buffer_take_extended(const void* state);
 
@@ -563,9 +547,6 @@ extern "C" bool hirari_region_store_clear_processing(void* track, uint32_t regio
 extern "C" void hirari_master_meter_prepare(void* state, double sample_rate);
 
 extern "C" void hirari_mpe_state_reset(void* state);
-extern "C" bool hirari_tempo_map_add_tempo(
-    void* state, uint64_t sample_pos, double bpm, double sample_rate, bool ramp);
-extern "C" bool hirari_tempo_map_clear(void* state, double sample_rate, double initial_bpm);
 extern "C" float hirari_tempo_map_get_current_bpm(const void* state);
 extern "C" void hirari_tempo_map_set_current_bpm(void* state, float bpm);
 // The engine's set_tempo entry point, implemented in Rust like every other
@@ -585,8 +566,6 @@ extern "C" bool hirari_sidechain_engine_has_link(
 extern "C" void hirari_sidechain_engine_reset(void* state);
 extern "C" void hirari_sidechain_routes_clear(const void* state);
 extern "C" void hirari_routing_engine_reset(void* state);
-extern "C" bool hirari_routing_engine_add_connection(
-    void* state, uint32_t source, uint32_t destination, float gain, bool send, bool pre_fader);
 
 // Routing edit host bridge.
 //
@@ -642,9 +621,6 @@ struct HirariRoutingHostOps {
 };
 
 extern "C" void hirari_routing_edit_host_install(const HirariRoutingHostOps* ops);
-extern "C" bool hirari_routing_edit_set_sidechain_link(
-    void* host, uint32_t sourceId, uint32_t destId, uint32_t pluginIndex, uint32_t tapPoint,
-    bool enabled);
 
 // Track lifecycle edit policy (create, duplicate, remove and their undo). The
 // graph walk, the captures and the replay are Rust's (track_edit_host.rs): it
@@ -677,11 +653,10 @@ struct HirariTrackEditHostOps {
 
 extern "C" void hirari_track_edit_host_install(const HirariTrackEditHostOps* ops);
 
-// Track and region id allocation lives in Rust (id_host.rs). An emptied
-// project restarts the counters; an installed document resumes them past the
-// highest ids it carries. Both are store-only and safe under the track lock.
+// Track and region id allocation lives in Rust (id_host.rs). An emptied project
+// restarts the counters; a loaded document seeds them from Rust. Store-only and
+// safe under the track lock.
 extern "C" void hirari_ids_reset_project(void* host);
-extern "C" void hirari_ids_seed_from_project(void* host);
 
 // Track freeze (track_freeze_host.rs). The Rust side walks the track's own
 // runtime block by block, writes and reads the Float32 artifact and publishes
@@ -766,27 +741,12 @@ extern "C" void hirari_track_owner_release(void* owner);
 extern "C" void* hirari_track_owner_object(void* owner);
 extern "C" uint32_t hirari_track_id(void* track);
 extern "C" uint32_t hirari_track_type(void* track);
-extern "C" void hirari_track_resolve_bus(void* track, void* bus_state, bool is_bus);
 extern "C" void* hirari_track_storage(void* track, uint32_t store);
-extern "C" void hirari_track_mark_layout(void* track);
-extern "C" uint8_t hirari_track_prepare(void* track, double sample_rate,
-                                        uint32_t block_frames);
-extern "C" bool hirari_track_can_process(void* track, uint32_t frames);
 extern "C" void hirari_track_reset_for_offline_render(void* track);
-extern "C" void hirari_track_set_delay_samples(void* track, uint32_t samples);
-extern "C" void hirari_track_set_volume(void* track, float value);
-extern "C" void hirari_track_set_pan(void* track, float value);
-extern "C" void hirari_track_set_solo(void* track, bool solo);
-extern "C" void hirari_track_set_muted(void* track, bool muted);
-extern "C" void hirari_track_set_phase_inverted(void* track, bool inverted);
-extern "C" bool hirari_track_set_record_armed(void* track, bool armed);
-extern "C" void hirari_track_set_spatial(void* track, float x, float y, float z);
-extern "C" uint32_t hirari_track_flush_recorded_automation(void* track);
 extern "C" bool hirari_track_pitch_begin(void* track);
 extern "C" void hirari_track_pitch_finish(void* track);
 extern "C" bool hirari_track_expression_map_set(void* track, uint8_t kind,
                                                 const uint8_t* data, size_t length);
-extern "C" void hirari_track_reclaim_chain(void* track);
 extern "C" bool hirari_track_visit_sandbox_statuses(void* track, void* context,
                                                     HirariPluginSandboxVisitorFn visit);
 extern "C" uint32_t hirari_track_maintain_sandboxes(void* track, bool autoRestart,
@@ -797,21 +757,6 @@ extern "C" void hirari_native_pdc_reset_for_project(const void* state);
 
 extern "C" bool hirari_vocal_remove_stereo(float* left, float* right, size_t frames);
 extern "C" float hirari_stereo_correlation(const float* left, const float* right, size_t frames);
-// Arrangement timeline document (markers and arranger parts) is a Rust-owned
-// store; the engine only keeps the handle and the save path lets Rust read
-// the document directly.
-struct HirariArrangementPartInput {
-    uint64_t start;
-    uint64_t length;
-    const uint8_t* name;
-    size_t name_len;
-    uint32_t repeats;
-};
-extern "C" void hirari_arrangement_document_reset_markers(void* state);
-extern "C" bool hirari_arrangement_document_upsert_marker(
-    void* state, uint64_t sample, const uint8_t* name, size_t name_len, uint32_t color);
-extern "C" bool hirari_arrangement_document_set_parts(
-    void* state, const HirariArrangementPartInput* parts, size_t count);
 struct HirariTimedKeySwitchOutput {
     uint8_t channel;
     uint8_t pitch;
@@ -994,6 +939,8 @@ extern "C" uint64_t hirari_waveform_snapshot_request(
 // contributes its address and the tracks lock the gather brackets with it, so
 // no per-field host table crosses here any more.
 extern "C" bool hirari_project_save_from_host(
+    void* host, const uint8_t* path, size_t path_length);
+extern "C" bool hirari_project_load_from_host(
     void* host, const uint8_t* path, size_t path_length);
 
 // Rust-owned harmonic context shared by structure analysis and auto-arrangement.
