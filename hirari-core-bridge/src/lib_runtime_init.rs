@@ -20,21 +20,14 @@ impl HirariCore {
 
     fn new_with_mode(isolated: bool) -> anyhow::Result<Self> {
         let engine = if isolated {
-            ffi::new_audio_engine_offline()
+            crate::new_audio_engine_offline()
         } else {
-            ffi::new_audio_engine()
+            crate::new_audio_engine()
         };
-        if engine.is_null() {
-            return Err(anyhow::anyhow!(
-                "HIRARI | FATAL: Failed to initialize AudioEngine (nullptr)"
-            ));
-        }
+        // A `Box` engine cannot be null; the allocation failure the C++
+        // constructor guarded is a panic at construction time now.
 
-        let Some(engine_ref) = engine.as_ref() else {
-            return Err(anyhow::anyhow!(
-                "HIRARI | FATAL: AudioEngine handle is invalid"
-            ));
-        };
+        let engine_ref = &*engine;
         if isolated {
             engine_ref.new_project();
             let _ = engine_ref.remove_track(1);
@@ -135,8 +128,7 @@ impl HirariCore {
     }
 
     pub fn audio_config_generation(&self) -> u64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.get_audio_config_generation())
     }
 
@@ -148,8 +140,7 @@ impl HirariCore {
         // underlying callback has already stopped. Diagnostics must describe
         // the observable device state, not only the control-side state flag.
         let callback_ready = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| engine.is_audio_device_ready());
         let status = if reported_status == "running" && !callback_ready {
             "stopped".to_owned()

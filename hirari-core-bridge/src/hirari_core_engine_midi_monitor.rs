@@ -149,7 +149,7 @@ impl HirariCore {
         if !self.set_control_room_dim_db(state.dim_db) {
             return false;
         }
-        if self.engine.as_ref().is_some() {
+        if self.engine_opt().is_some() {
             let handle = self.control_room_handle();
             for cue in &state.cues {
                 if !unsafe {
@@ -168,8 +168,7 @@ impl HirariCore {
                     // against the C++-owned track list.
                     let resolves = bus_track_id == 0
                         || self
-                            .engine
-                            .as_ref()
+                            .engine_opt()
                             .is_some_and(|engine| engine.bus_track_exists(bus_track_id));
                     if !resolves
                         || !unsafe {
@@ -208,7 +207,7 @@ impl HirariCore {
         if !self.select_control_room_cue(state.active_cue) {
             return false;
         }
-        if self.engine.as_ref().is_some() {
+        if self.engine_opt().is_some() {
             unsafe {
                 crate::control_room_runtime::hirari_control_room_set_dim(
                     self.control_room_handle(),
@@ -427,7 +426,7 @@ impl HirariCore {
         if data.is_empty() || data.len() > 4096 {
             return false;
         }
-        let sent = !self.engine.is_null() && midi_host_send_message(unique_id, data);
+        let sent = !self.engine_none() && midi_host_send_message(unique_id, data);
         if sent && data.len() >= 3 {
             let timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -439,45 +438,45 @@ impl HirariCore {
     }
 
     pub fn list_midi_devices_json(&self) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "[]".to_owned();
         }
         midi_host_list_devices_json()
     }
 
     pub fn start_midi_input(&self) -> bool {
-        !self.engine.is_null() && midi_host_start_input()
+        !self.engine_none() && midi_host_start_input()
     }
 
     pub fn stop_midi_input(&self) {
-        if !self.engine.is_null() {
+        if !self.engine_none() {
             midi_host_stop_input();
         }
     }
 
     pub fn poll_midi_input_json(&self) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "[]".to_owned();
         }
         midi_host_poll_input_json()
     }
 
     pub fn midi_host_time_now(&self) -> u64 {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return 0;
         }
         midi_host_time_now()
     }
 
     pub fn midi_dropped_input_events(&self) -> u64 {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return 0;
         }
         midi_host_dropped_input_events()
     }
 
     pub fn midi_host_time_delta_samples(&self, start: u64, event: u64, sample_rate: f64) -> u64 {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return 0;
         }
         midi_host_time_delta_samples(start, event, sample_rate)
@@ -613,8 +612,7 @@ impl HirariCore {
     /// The absent engine has no driver to report on, which is a different answer
     /// from the silent fallback an engine without a device gives.
     pub fn audio_driver_status(&self) -> String {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or_else(|| "unavailable".to_owned(), |engine| {
                 crate::audio_driver_view::status(
                     crate::audio_engine_delegate_ext::driver_host(engine),
@@ -632,7 +630,7 @@ impl HirariCore {
         if left.is_empty() || left.len() != right.len() || left.len() > MAX_SANDBOX_AUDIO_BLOCK {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             crate::plugin_sandbox_maintenance::process_sandbox_block(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -652,7 +650,7 @@ impl HirariCore {
         if left.is_empty() || left.len() != right.len() || left.len() > MAX_NATIVE_AUDIO_BLOCK {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         engine.process_audio_block(left, right);

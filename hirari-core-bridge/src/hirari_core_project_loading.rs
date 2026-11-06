@@ -131,8 +131,7 @@ impl HirariCore {
             }
         }
         let engine = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .ok_or_else(|| anyhow::anyhow!("AudioEngine is unavailable"))?;
 
         // The Rust ProjectDocument is JSON and is intentionally independent

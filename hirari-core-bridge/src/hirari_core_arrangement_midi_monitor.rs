@@ -143,7 +143,7 @@ impl HirariCore {
 
     fn region_diagnostic<F>(&self, op: &str, tid: u32, rid: u32, valid: bool, apply: F) -> String
     where
-        F: FnOnce(&crate::ffi::AudioEngine) -> bool,
+        F: FnOnce(&crate::AudioEngine) -> bool,
     {
         if tid == 0 || rid == 0 {
             let result = crate::bridge_error::BridgeError::new(
@@ -165,7 +165,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if apply(engine) {
@@ -315,7 +315,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.request_video_frame(seconds) {
@@ -351,7 +351,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         let result = if crate::video_system::video_service()
@@ -370,7 +370,7 @@ impl HirariCore {
 
     fn track_diagnostic<F>(&self, op: &str, tid: u32, valid: bool, apply: F) -> String
     where
-        F: FnOnce(&crate::ffi::AudioEngine) -> bool,
+        F: FnOnce(&crate::AudioEngine) -> bool,
     {
         if tid == 0 || !valid {
             let result = crate::bridge_error::BridgeError::new(
@@ -382,7 +382,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if apply(engine) {
@@ -449,7 +449,7 @@ impl HirariCore {
             )
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::to_string(
                 &crate::bridge_error::BridgeError::new(
                     "engine_unavailable",

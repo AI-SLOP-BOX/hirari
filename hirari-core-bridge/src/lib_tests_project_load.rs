@@ -7,15 +7,15 @@ static PROJECT_LOAD_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::
 
 struct ProjectLoadEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
-    engine: cxx::UniquePtr<crate::ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
     path: String,
 }
 
 impl ProjectLoadEngine {
     fn new(label: &str) -> Self {
         let _guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
+        let engine = crate::new_audio_engine();
+        assert!(!false);
         let unique =
             PROJECT_LOAD_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let path = std::env::temp_dir()
@@ -29,8 +29,8 @@ impl ProjectLoadEngine {
         Self { _guard, engine, path }
     }
 
-    fn core(&self) -> &crate::ffi::AudioEngine {
-        self.engine.as_ref().unwrap()
+    fn core(&self) -> &crate::AudioEngine {
+        &*self.engine
     }
 
     fn host(&self) -> *mut std::ffi::c_void {

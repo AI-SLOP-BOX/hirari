@@ -16,7 +16,7 @@ impl HirariCore {
         if frames == 0 || frames > (1 << 20) / channels {
             return serde_json::json!({"ok": false, "code": "ara2_read_limit_exceeded"}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"ok": false, "code": "engine_unavailable"}).to_string();
         };
         let source_channels = engine.get_region_channel_count(track_id, region_id);

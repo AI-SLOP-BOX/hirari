@@ -5,16 +5,16 @@
 // a fake host.
 struct AutomationEditEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
-    engine: cxx::UniquePtr<crate::ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
     audio_track: u32,
 }
 
 impl AutomationEditEngine {
     fn new() -> Self {
         let guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let reference = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let reference = &*engine;
         let audio_track = reference.add_track(0);
         assert_ne!(audio_track, 0);
         // Track creation is itself reversible, so the history is emptied after
@@ -24,8 +24,8 @@ impl AutomationEditEngine {
         Self { _guard: guard, engine, audio_track }
     }
 
-    fn engine(&self) -> &crate::ffi::AudioEngine {
-        self.engine.as_ref().unwrap()
+    fn engine(&self) -> &crate::AudioEngine {
+        &*self.engine
     }
 
     fn host(&self) -> *mut std::ffi::c_void {

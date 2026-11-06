@@ -96,8 +96,8 @@
     #[test]
     fn audio_config_generation_advances_on_each_reprepare() {
         let _guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        let engine_ref = engine.as_ref().expect("native engine handle");
+        let engine = crate::new_audio_engine();
+        let engine_ref = &*engine;
         let before = engine_ref.get_audio_config_generation();
         engine_ref.apply_config(120.0, 44_100, 256);
         let after_first = engine_ref.get_audio_config_generation();
@@ -117,9 +117,9 @@
     #[test]
     fn audio_edit_round_trip_flows_through_engine_and_persistence() {
         let _guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let engine_ref = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let engine_ref = &*engine;
         let unique = format!(
             "hirari-integration-{}-{}",
             std::process::id(),
@@ -172,9 +172,9 @@
     #[test]
     fn plugin_lifecycle_rejects_invalid_parameters_and_keeps_sandbox_status_queryable() {
         let _guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let engine_ref = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let engine_ref = &*engine;
         let track_id = engine_ref.add_track(0);
 
         assert!(engine_ref.add_plugin(track_id, 0));
@@ -423,9 +423,9 @@
     #[test]
     fn test_empty_and_invalid_paths_are_rejected() {
         let _guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let engine_ref = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let engine_ref = &*engine;
         let tid = engine_ref.add_track(0);
         let invalid_path = "/hirari-core-bridge/path-that-does-not-exist.wav";
 

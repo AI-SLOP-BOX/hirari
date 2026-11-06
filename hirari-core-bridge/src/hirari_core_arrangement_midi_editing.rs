@@ -7,7 +7,7 @@ impl HirariCore {
         start_sample: u64,
         length_samples: u64,
     ) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.set_midi_note(track_id, pitch, velocity, start_sample, length_samples);
         }
         if pitch <= 127
@@ -102,7 +102,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_midi_note(track_id, pitch, velocity, start_sample, length_samples);
@@ -182,7 +182,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if !self.set_midi_note_lyric(
@@ -234,7 +234,7 @@ impl HirariCore {
         {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let before_metadata = self
@@ -369,7 +369,7 @@ impl HirariCore {
             .map(|pending| pending.is_some())
             .unwrap_or(false);
         if !inside_midi_edit_transaction {
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 let depth = engine.get_undo_count();
                 if let Ok(mut history) = self.midi_lyric_history.lock() {
                     if let Some(entry) = history
@@ -391,8 +391,7 @@ impl HirariCore {
     /// metadata in the canonical project model; this bounded form is the
     /// allocation-safe playback snapshot.
     pub fn replace_midi_notes(&self, packed: Vec<u64>, record_undo: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.replace_midi_notes(packed, record_undo))
     }
 
@@ -422,7 +421,7 @@ impl HirariCore {
         if notes.iter().any(|note| note.validate().is_err()) {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let inside_midi_edit_transaction = self
@@ -503,8 +502,7 @@ impl HirariCore {
     /// Return the nine-word packed realtime note snapshot used by
     /// `replace_midi_notes`.
     pub fn midi_notes_snapshot(&self) -> Vec<u64> {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map(|engine| engine.midi_notes_snapshot())
             .unwrap_or_default()
     }

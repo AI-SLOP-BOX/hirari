@@ -40,54 +40,54 @@ const SCALAR_SYNC_GROUP: i32 = 6;
 const SCALAR_FADES: i32 = 7;
 const SCALAR_PITCH_PRESERVE_WARP: i32 = 9;
 
-fn core_mut(engine: &ffi::AudioEngine) -> *mut ffi::HirariUnifiedEngine {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
-    core as *mut ffi::HirariUnifiedEngine
+fn core_mut(engine: &crate::AudioEngine) -> *mut crate::HirariUnifiedEngine {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
+    core as *mut crate::HirariUnifiedEngine
 }
 
-fn pinned(engine: &ffi::AudioEngine) -> core::pin::Pin<&mut ffi::HirariUnifiedEngine> {
+fn pinned(engine: &crate::AudioEngine) -> core::pin::Pin<&mut crate::HirariUnifiedEngine> {
     unsafe { core::pin::Pin::new_unchecked(&mut *core_mut(engine)) }
 }
 
-pub(crate) fn host(engine: &ffi::AudioEngine) -> *mut c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+pub(crate) fn host(engine: &crate::AudioEngine) -> *mut c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     core as *mut c_void
 }
 
 /// Address of the Rust driver host the engine constructed, for the reads in
 /// `audio_driver_view`. Zero means no host -- off macOS there is never one, and
 /// on macOS it is the absent host the deleted C++ null guards named.
-pub(crate) fn driver_host(engine: &ffi::AudioEngine) -> usize {
+pub(crate) fn driver_host(engine: &crate::AudioEngine) -> usize {
     engine.audio_driver_host()
 }
 
-fn learn_state(engine: &ffi::AudioEngine) -> *const c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn learn_state(engine: &crate::AudioEngine) -> *const c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).midi_learn_state() as *const c_void }
 }
 
-fn preview_state(engine: &ffi::AudioEngine) -> *mut c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn preview_state(engine: &crate::AudioEngine) -> *mut c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).preview_synth_state() as *mut c_void }
 }
 
-fn pdc_state(engine: &ffi::AudioEngine) -> *const c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn pdc_state(engine: &crate::AudioEngine) -> *const c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).pdc_state() as *const c_void }
 }
 
-fn preview_sampler(engine: &ffi::AudioEngine) -> *const c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn preview_sampler(engine: &crate::AudioEngine) -> *const c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).preview_sampler() as *const c_void }
 }
 
-fn metronome(engine: &ffi::AudioEngine) -> *mut c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn metronome(engine: &crate::AudioEngine) -> *mut c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).metronome_state() as *mut c_void }
 }
 
-fn routing_engine(engine: &ffi::AudioEngine) -> *const c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn routing_engine(engine: &crate::AudioEngine) -> *const c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).routing_engine_state() as *const c_void }
 }
 
@@ -95,7 +95,7 @@ fn bytes(text: &str) -> *const u8 {
     text.as_ptr()
 }
 
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     pub fn add_track(&self, t_type: u32) -> u32 {
         unsafe { hirari_track_add(host(self), t_type) }
     }
@@ -555,7 +555,7 @@ fn take_float_buffer(buffer: *mut c_void) -> Vec<f32> {
     samples
 }
 
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     pub fn add_vca_group(&self, group_id: u32, gain: f32) -> bool {
         if !hirari_vca_add_group(group_id, gain) {
             return false;
@@ -721,7 +721,7 @@ impl ffi::AudioEngine {
 // Simple getters read the inner engine through `get_core`; the AudioEngine
 // forwarders for them are gone. Transport reads/writes go to
 // `engine_transport`, which drives the Rust-owned engine-block store directly.
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     pub fn is_loop_enabled(&self) -> bool {
         crate::engine_transport::loop_enabled(self.get_core())
     }
@@ -737,7 +737,7 @@ impl ffi::AudioEngine {
 
 // Read-only engine getters. The AudioEngine forwarders for these are gone:
 // Rust reaches the same inner engine through `get_core`.
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     pub fn cycle_start(&self) -> u64 {
         crate::engine_transport::cycle_start(self.get_core())
     }

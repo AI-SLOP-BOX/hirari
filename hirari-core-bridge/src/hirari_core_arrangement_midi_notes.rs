@@ -1,6 +1,6 @@
 impl HirariCore {
     pub fn clear_midi_notes(&self) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.clear_midi_notes();
         }
         if let Ok(mut notes) = self.scheduled_midi_notes.lock() {
@@ -9,7 +9,7 @@ impl HirariCore {
     }
 
     pub fn clear_midi_notes_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.clear_midi_notes();
@@ -25,7 +25,7 @@ impl HirariCore {
         start_sample: u64,
         end_sample: u64,
     ) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if start_sample >= end_sample {
@@ -64,7 +64,7 @@ impl HirariCore {
         end_sample: u64,
         semitones: i32,
     ) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if track_id == 0 || start_sample >= end_sample || !(-127..=127).contains(&semitones) {
@@ -131,7 +131,7 @@ impl HirariCore {
         end_sample: u64,
         delta_samples: i64,
     ) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if track_id == 0 || start_sample >= end_sample {

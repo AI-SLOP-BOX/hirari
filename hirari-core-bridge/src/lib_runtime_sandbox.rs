@@ -1,6 +1,6 @@
 impl HirariCore {
     pub fn sandbox_statuses(&self) -> Vec<SandboxStatus> {
-        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| {
             decode_sandbox_statuses(&engine.get_sandbox_statuses())
         })
     }
@@ -10,7 +10,7 @@ impl HirariCore {
     }
 
     pub fn last_sandbox_failure(&self, track_id: u32) -> u8 {
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             crate::plugin_sandbox_maintenance::last_sandbox_failure(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -49,7 +49,7 @@ impl HirariCore {
     }
 
     pub fn sandbox_plugin_paths(&self) -> Vec<String> {
-        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| {
             crate::plugin_sandbox_maintenance::sandbox_plugin_paths(
                 crate::audio_engine_delegate_ext::host(engine),
             )
@@ -63,7 +63,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return Vec::new();
         };
-        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| {
             crate::plugin_sandbox_maintenance::sandbox_plugin_state(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -81,7 +81,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -111,7 +111,7 @@ impl HirariCore {
                 message: "state-oversize".into(),
             };
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return SandboxStateDiagnostic {
                 ok: false,
                 code: 5,
@@ -138,8 +138,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.restart_sandboxed_plugin(track_id, sandbox_index))
     }
 
@@ -147,8 +146,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.retry_sandboxed_plugin(track_id, sandbox_index))
     }
 
@@ -185,12 +183,10 @@ impl HirariCore {
             .to_string();
         };
         let ok = if restart {
-            self.engine
-                .as_ref()
+            self.engine_opt()
                 .is_some_and(|engine| engine.restart_sandboxed_plugin(track_id, sandbox_index))
         } else if snapshot.can_retry {
-            self.engine
-                .as_ref()
+            self.engine_opt()
                 .is_some_and(|engine| engine.retry_sandboxed_plugin(track_id, sandbox_index))
         } else {
             false
@@ -242,7 +238,7 @@ impl HirariCore {
         frames: u32,
         midi_data: &[u8],
     ) -> Vec<u8> {
-        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| {
             crate::plugin_sandbox_maintenance::process_sandbox_midi_block(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -283,16 +279,14 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return 0;
         };
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.maintain_sandboxed_plugins(auto_restart))
     }
 
     /// Drains control-thread AU watchdog edges. The audio callback only sets
     /// an atomic edge; this poll is the sole place that consumes it.
     pub fn take_watchdog_trips(&self) -> u32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.take_watchdog_trips())
     }
 
@@ -306,12 +300,11 @@ impl HirariCore {
     /// The UI can poll this once per frame without touching engine internals.
     pub fn runtime_health_snapshot(&self) -> RuntimeHealthSnapshot {
         let raw: Vec<f32> = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .map(|engine| {
                 crate::engine_analysis_reads::runtime_telemetry(
                     engine,
-                    crate::ffi::get_unified_engine(engine),
+                    crate::get_unified_engine(engine),
                 )
             })
             .unwrap_or_default();
@@ -347,12 +340,10 @@ impl HirariCore {
             bounce_progress: bounce_progress.clamp(0.0, 1.0),
             sandbox_failures,
             audio_range_overflow: self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .is_some_and(|engine| engine.audio_range_overflowed()),
             non_finite_plugin_samples: self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .map_or(0, |engine| engine.non_finite_plugin_samples()),
         }
     }

@@ -309,8 +309,7 @@ impl HirariCore {
             .pad_audio(pad)
             .ok_or_else(|| anyhow::anyhow!("preview drum pad is not assigned or loaded"))?;
         let engine = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .ok_or_else(|| anyhow::anyhow!("AudioEngine is unavailable"))?;
         engine.set_preview_sample(&samples, source_rate);
         engine.trigger_preview_sample();
@@ -331,7 +330,7 @@ impl HirariCore {
                     .ok_or_else(|| "preview drum pad is not assigned or loaded".to_owned())
             }) {
             Ok((samples, source_rate)) => {
-                let Some(engine) = self.engine.as_ref() else {
+                let Some(engine) = self.engine_opt() else {
                     return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
                 };
                 engine.set_preview_sample(&samples, source_rate);
@@ -362,8 +361,7 @@ impl HirariCore {
                 .ok_or_else(|| anyhow::anyhow!("decoded preview audio is empty"))?
         };
         let engine = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .ok_or_else(|| anyhow::anyhow!("AudioEngine is unavailable"))?;
         engine.set_preview_sample(&samples, source_rate);
         engine.trigger_preview_sample();
@@ -386,8 +384,7 @@ impl HirariCore {
         };
         let (samples, source_rate) = result.map_err(anyhow::Error::msg)?;
         let engine = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .ok_or_else(|| anyhow::anyhow!("AudioEngine is unavailable"))?;
         engine.set_preview_sample(&samples, source_rate);
         engine.trigger_preview_sample();

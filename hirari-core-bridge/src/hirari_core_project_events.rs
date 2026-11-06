@@ -1,7 +1,7 @@
 impl HirariCore {
     pub fn poll_events_into(&self, out: &mut Vec<ffi::BridgeEvent>) {
-        if let Some(e) = self.engine.as_ref() {
-            let host = crate::engine_event_ops::host_from_core(ffi::get_unified_engine(e));
+        if let Some(e) = self.engine_opt() {
+            let host = crate::engine_event_ops::host_from_core(crate::get_unified_engine(e));
 
             // --- INDUSTRIAL: Zero-Allocation Collection ---
             // Reuses the passed vector to avoid reallocations.

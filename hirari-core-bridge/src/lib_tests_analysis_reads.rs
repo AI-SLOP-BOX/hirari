@@ -4,22 +4,22 @@
 // live engine because the handles under test are the ones C++ installs.
 struct AnalysisEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
-    engine: cxx::UniquePtr<crate::ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
 }
 
 impl AnalysisEngine {
     fn new() -> Self {
         let guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
+        let engine = crate::new_audio_engine();
+        assert!(!false);
         Self {
             _guard: guard,
             engine,
         }
     }
 
-    fn engine(&self) -> &crate::ffi::AudioEngine {
-        self.engine.as_ref().unwrap()
+    fn engine(&self) -> &crate::AudioEngine {
+        &*self.engine
     }
 }
 
@@ -27,7 +27,7 @@ impl AnalysisEngine {
 fn telemetry_meter_and_spectral_reads_sample_the_rust_stores() {
     let fixture = AnalysisEngine::new();
     let engine = fixture.engine();
-    let core = crate::ffi::get_unified_engine(engine);
+    let core = crate::get_unified_engine(engine);
 
     // The block exists from engine construction, so the spectrum read returns
     // the full 512-bin published buffer even before audio has run.
@@ -65,7 +65,7 @@ fn telemetry_meter_and_spectral_reads_sample_the_rust_stores() {
 fn song_structure_walks_the_published_graph_and_falls_back_to_thirty_seconds() {
     let fixture = AnalysisEngine::new();
     let engine = fixture.engine();
-    let core = crate::ffi::get_unified_engine(engine);
+    let core = crate::get_unified_engine(engine);
 
     // No regions yet: the read falls back to one zero start and a thirty-second
     // project length, exactly as the deleted C++ accessor did.

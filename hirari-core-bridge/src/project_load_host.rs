@@ -47,6 +47,8 @@ use crate::engine_track_table::{
 };
 use crate::engine_transport::stop_at_host;
 use crate::ffi::{NativeTrackHandle, NativeTrackStorages};
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 use crate::id_host::hirari_ids_seed_from_project;
 use crate::native_project::native_project_load;
 use crate::project_plugin_hydration::native_project_hydrate_plugins;
@@ -354,7 +356,7 @@ fn load(host: *mut c_void, path: &str) -> bool {
 /// allocation failures this raises are C++ exceptions, so the sequence stays
 /// with the engine object that catches them; everything else it calls is Rust.
 fn prepare_graph(host: *mut c_void, sample_rate: f64, block_frames: u32) {
-    let core = host.cast::<crate::ffi::HirariUnifiedEngine>();
+    let core = host.cast::<crate::HirariUnifiedEngine>();
     if core.is_null() {
         return;
     }

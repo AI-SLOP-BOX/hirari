@@ -309,9 +309,9 @@ fn wav_publication_validator_handles_unknown_odd_chunks_and_rejects_bad_rf64() {
 #[test]
 fn region_edit_boundaries_are_rejected_at_the_ffi_boundary() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    assert!(!engine.is_null());
-    let engine_ref = engine.as_ref().unwrap();
+    let engine = crate::new_audio_engine();
+    assert!(!false);
+    let engine_ref = &*engine;
 
     assert!(!engine_ref.set_region_gain(0, 0, f32::NAN));
     assert!(!engine_ref.set_region_gain(0, 0, 25.0));
@@ -330,8 +330,8 @@ fn region_edit_boundaries_are_rejected_at_the_ffi_boundary() {
 #[test]
 fn vca_assignment_and_gain_are_exposed_through_the_native_bridge() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("native engine handle");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let track_id = engine_ref.add_track(0);
     assert_ne!(track_id, 0);
     let group_id = 9001;
@@ -390,9 +390,9 @@ fn vca_groups_round_trip_through_project_v2() {
 #[test]
 fn malformed_project_is_rejected_without_replacing_current_tracks() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    assert!(!engine.is_null());
-    let engine_ref = engine.as_ref().unwrap();
+    let engine = crate::new_audio_engine();
+    assert!(!false);
+    let engine_ref = &*engine;
     let unique = format!(
         "hirari-load-check-{}-{}",
         std::process::id(),
@@ -538,9 +538,9 @@ fn ui_midi_sidecar_failure_rolls_back_the_project_save() {
 fn test_non_finite_tempo_input_is_ignored() {
     let _guard = tempo_test_guard();
     let _engine_guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    assert!(!engine.is_null());
-    let engine_ref = engine.as_ref().unwrap();
+    let engine = crate::new_audio_engine();
+    assert!(!false);
+    let engine_ref = &*engine;
     // The native engine is a process-wide singleton; establish a local
     // baseline so this test is independent of parallel test ordering.
     engine_ref.set_tempo(120.0);
@@ -558,9 +558,9 @@ fn test_non_finite_tempo_input_is_ignored() {
 fn test_out_of_range_tempo_is_bounded() {
     let _guard = tempo_test_guard();
     let _engine_guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    assert!(!engine.is_null());
-    let engine_ref = engine.as_ref().unwrap();
+    let engine = crate::new_audio_engine();
+    assert!(!false);
+    let engine_ref = &*engine;
 
     engine_ref.set_tempo(0.0);
     assert_eq!(engine_ref.get_tempo(), 20.0);
@@ -1288,8 +1288,8 @@ fn cli_render_stems_format_names_reach_the_engine_as_the_container_they_name() {
 #[test]
 fn queued_region_import_commits_and_undoes_as_one_step() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let e = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let e = &*engine;
     let wav_path = std::env::temp_dir().join(format!(
         "hirari-queued-import-{}.wav",
         std::process::id()
@@ -1340,8 +1340,8 @@ fn queued_region_import_commits_and_undoes_as_one_step() {
 #[test]
 fn queued_pitch_analysis_finishes_and_finalizes() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let e = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let e = &*engine;
     let wav_path = std::env::temp_dir().join(format!(
         "hirari-queued-analysis-{}.wav",
         std::process::id()

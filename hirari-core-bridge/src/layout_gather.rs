@@ -1095,7 +1095,7 @@ pub unsafe extern "C" fn hirari_layout_snapshot_owner_release_host(host: *mut c_
 
 /// The live project layout as JSON. The gather is Rust and reads the engine's
 /// own stores through its session bag; the host contributes only its address.
-pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> String {
+pub fn project_layout_json(core: *const crate::HirariUnifiedEngine) -> String {
     if core.is_null() {
         return String::new();
     }
@@ -1119,7 +1119,7 @@ pub fn project_layout_json(core: *const crate::ffi::HirariUnifiedEngine) -> Stri
 }
 
 /// Starts the background save's layout snapshot and returns its request id.
-pub fn request_layout_snapshot(engine: *mut crate::ffi::HirariUnifiedEngine) -> u64 {
+pub fn request_layout_snapshot(engine: *mut crate::HirariUnifiedEngine) -> u64 {
     let owner = owner_for(engine as usize);
     let session = Box::into_raw(Box::new(LayoutSession {
         engine: engine.cast(),
@@ -1143,7 +1143,7 @@ pub fn request_layout_snapshot(engine: *mut crate::ffi::HirariUnifiedEngine) -> 
 /// Empty while the snapshot is still being prepared, otherwise
 /// `READY <revision>\n<layout-json>` or a failure marker.
 pub fn poll_layout_snapshot(
-    engine: *const crate::ffi::HirariUnifiedEngine,
+    engine: *const crate::HirariUnifiedEngine,
     request_id: u64,
 ) -> String {
     if request_id == 0 {
@@ -1167,7 +1167,7 @@ pub fn poll_layout_snapshot(
 }
 
 pub fn cancel_layout_snapshot(
-    engine: *const crate::ffi::HirariUnifiedEngine,
+    engine: *const crate::HirariUnifiedEngine,
     request_id: u64,
 ) -> bool {
     if request_id == 0 {

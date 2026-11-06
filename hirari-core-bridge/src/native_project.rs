@@ -6,10 +6,9 @@
 //! the native engine, while `project inspect` must not reject a real `.hirari`
 //! file with a JSON parser error.
 
-use crate::ffi::{
-    NativeArrangerPartState, NativeMarkerState, NativeProjectState, NativeRouteState,
-    NativeSidechainState, NativeTrackState,
-};
+use crate::ffi::{NativeArrangerPartState, NativeMarkerState, NativeProjectState, NativeRouteState, NativeSidechainState, NativeTrackState, };
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -762,6 +761,8 @@ mod tests {
     #[test]
     fn rejects_duplicate_tracks_orphan_regions_corruption_and_oversize() {
         use crate::ffi::{NativeRegionState, NativeTrackState};
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 
         let track = NativeTrackState {
             id: 7,
@@ -836,9 +837,9 @@ mod tests {
     }
 
     fn v42_document() -> NativeProjectState {
-        use crate::ffi::{
-            NativeRegionState, NativeRouteState, NativeSidechainState, NativeTrackState,
-        };
+        use crate::ffi::{NativeRegionState, NativeRouteState, NativeSidechainState, NativeTrackState, };
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
         let audio = |id: u32| NativeTrackState {
             id,
             trackType: 0,

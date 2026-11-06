@@ -236,9 +236,9 @@ fn test_tempo_orchestrator() {
 #[test]
 fn test_wav_decoder_integration() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    assert!(!engine.is_null());
-    let engine_ref = engine.as_ref().unwrap();
+    let engine = crate::new_audio_engine();
+    assert!(!false);
+    let engine_ref = &*engine;
 
     // 1. Add track
     let tid = engine_ref.add_track(0);

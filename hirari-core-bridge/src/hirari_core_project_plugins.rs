@@ -9,31 +9,30 @@ impl HirariCore {
     }
 
     pub fn set_offline_render_target(&self, track_id: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_offline_render_target(track_id))
     }
 
     pub fn clear_offline_render_target(&self) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.clear_offline_render_target();
         }
     }
 
     pub fn set_offline_render_tail_seconds(&self, seconds: f32) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.set_offline_render_tail_seconds(Self::bounded_render_tail_seconds(seconds));
         }
     }
 
     pub fn set_offline_render_options(&self, pre_fader: bool, include_inserts: bool) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.set_offline_render_options(pre_fader, include_inserts);
         }
     }
 
     pub fn plugin_latency_snapshot_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned();
         };
         let tracks: serde_json::Value = serde_json::from_str(&engine.project_layout_json())
@@ -103,7 +102,7 @@ impl HirariCore {
         }
         let mut time_signatures = Vec::new();
         let mut tempo_events = Vec::new();
-        if !self.engine.is_null() {
+        if !self.engine_none() {
             let packed = self.tempo_read_signatures();
             if packed.len() % 3 != 0 {
                 return Err(anyhow::anyhow!("project time-signature map is invalid"));
@@ -233,8 +232,7 @@ impl HirariCore {
 
     /// Read-only canonical native route snapshot for CLI, UI, and automation.
     pub fn audio_routes_json(&self) -> String {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map(|engine| engine.get_routing_snapshot_json())
             .unwrap_or_else(|| "[]".to_owned())
     }
@@ -244,7 +242,7 @@ impl HirariCore {
     /// reasons across the CXX boundary. The supported-format gate is owned
     /// here so the C++ loader only ever sees formats it can parse.
     pub fn read_wav_diagnostic_json(&self, path: &str, format: u32) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\"}".to_owned();
         };
         if format > 1 {
@@ -315,8 +313,7 @@ impl HirariCore {
             return false;
         }
         let completed = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|e| e.bounce_project(path, format));
         if !completed {
             return false;
@@ -338,7 +335,7 @@ impl HirariCore {
         if let Some(rejection) = bounce_diagnostic_rejection(path, format) {
             return rejection.to_owned();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.bounce_project(path, format) {
@@ -352,7 +349,7 @@ impl HirariCore {
     /// and automation clients. This is deliberately derived from the native
     /// layout snapshot so an agent cannot render a stale or invented track.
     pub fn render_target_catalog_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let layout: serde_json::Value =
@@ -451,7 +448,7 @@ impl HirariCore {
         let Ok(_transaction) = self.project_transaction.lock() else {
             return "{\"code\":\"project_transaction_busy\",\"retryable\":true}".to_owned();
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let layout: serde_json::Value =
@@ -577,15 +574,14 @@ impl HirariCore {
             }
         };
         if !self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| engine.set_offline_render_target(track_id))
         {
             // Reported exactly as the blocking driver reported it when arming
             // was folded into the render call, so no document changed shape.
             batch.rollback();
             *parked = None;
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 engine.clear_offline_render_target();
             }
             return serde_json::json!({
@@ -638,7 +634,7 @@ impl HirariCore {
         if let Some(message) = failure {
             batch.rollback();
             *parked = None;
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 engine.clear_offline_render_target();
             }
             return serde_json::json!({
@@ -652,7 +648,7 @@ impl HirariCore {
 
         // Drop the render-only target after every stem, so a batch that stops
         // here and one that continues leave the engine in the same state.
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.clear_offline_render_target();
         }
         if batch.is_complete() {
@@ -679,7 +675,7 @@ impl HirariCore {
                 Some(batch) => {
                     batch.rollback();
                     *parked = None;
-                    if let Some(engine) = self.engine.as_ref() {
+                    if let Some(engine) = self.engine_opt() {
                         engine.clear_offline_render_target();
                     }
                     serde_json::json!({"ok": true, "state": "aborted"}).to_string()
@@ -762,8 +758,7 @@ impl HirariCore {
                         }
                     };
                     let rendered = self
-                        .engine
-                        .as_ref()
+                        .engine_opt()
                         .is_some_and(|engine| engine.bounce_project(output.as_str(), format));
                     let settled = self.stem_batch_settle(rendered);
                     if !stem_batch_succeeded(&settled) {

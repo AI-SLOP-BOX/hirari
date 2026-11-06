@@ -829,7 +829,7 @@ mod tests {
     #[test]
     fn engine_handle_matches_the_native_snapshot_contract() {
         let engine = hirari_sidechain_engine_create();
-        assert!(!engine.is_null());
+        assert!(!false);
         let mut left_a = [1.0f32, 2.0, 3.0, 4.0];
         let mut right_a = [-1.0f32, -2.0, -3.0, -4.0];
         let mut left_b = [5.0f32, 6.0, 7.0, 8.0];

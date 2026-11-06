@@ -152,7 +152,7 @@ impl HirariCore {
                 }
             }
         }
-        let saved = self.engine.as_ref().is_some_and(|e| e.save_project(path))
+        let saved = self.engine_opt().is_some_and(|e| e.save_project(path))
             && self.save_comping_sidecar(path)
             && self.save_midi_sidecar(path)
             && ui_midi_notes_json
@@ -440,7 +440,7 @@ impl HirariCore {
                 return Err(ProjectLoadFailure::ProjectRejected);
             }
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Err(ProjectLoadFailure::ProjectRejected);
         };
         let rollback_path = std::env::temp_dir().join(format!(
@@ -587,7 +587,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let candidate_comping_path = format!("{path}.comping.json.bak.{generation}");

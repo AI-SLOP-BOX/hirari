@@ -35,8 +35,8 @@ fn note_segments_of(layout: &Value, region_id: u32) -> &Vec<Value> {
 #[test]
 fn note_edit_round_trip_flows_through_the_rust_store() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let unique = unique_tag();
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
@@ -154,8 +154,8 @@ fn note_edit_round_trip_flows_through_the_rust_store() {
 #[test]
 fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let unique = unique_tag();
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let source = source_path.to_str().unwrap();
@@ -175,7 +175,7 @@ fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
         .and_then(Value::as_u64)
         .expect("added region must have a stable id") as u32;
 
-    let region = |engine: &crate::ffi::AudioEngine| -> Value {
+    let region = |engine: &crate::AudioEngine| -> Value {
         let layout: Value =
             serde_json::from_str(&engine.project_layout_json()).unwrap();
         layout
@@ -228,8 +228,8 @@ fn scalar_region_edits_round_trip_through_the_shared_policy_path() {
 #[test]
 fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let unique = unique_tag();
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let source = source_path.to_str().unwrap();
@@ -296,8 +296,8 @@ fn comp_range_edits_are_adjudicated_by_the_rust_policy() {
 #[test]
 fn processing_history_policy_is_enforced_end_to_end() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let unique = unique_tag();
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
@@ -363,8 +363,8 @@ fn processing_history_policy_is_enforced_end_to_end() {
 #[test]
 fn processing_history_survives_a_save_and_load_round_trip() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let engine_ref = engine.as_ref().expect("engine must initialize");
+    let engine = crate::new_audio_engine();
+    let engine_ref = &*engine;
     let unique = unique_tag();
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));

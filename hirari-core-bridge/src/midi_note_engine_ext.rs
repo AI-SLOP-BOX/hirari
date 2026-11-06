@@ -12,8 +12,8 @@ use crate::midi_note_edit::{
     hirari_midi_notes_unpack, hirari_midi_notes_upsert, ScheduledMidiNoteFfi,
 };
 
-fn store(engine: &ffi::AudioEngine) -> *mut c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn store(engine: &crate::AudioEngine) -> *mut c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     unsafe { (*core).midi_snapshot_store() as *mut c_void }
 }
 
@@ -46,7 +46,7 @@ pub trait MidiNoteEngineExt {
     );
 }
 
-impl MidiNoteEngineExt for ffi::AudioEngine {
+impl MidiNoteEngineExt for crate::AudioEngine {
     fn clear_midi_notes(&self) {
         self.replace_midi_notes(Vec::new(), true);
     }
@@ -140,7 +140,7 @@ impl MidiNoteEngineExt for ffi::AudioEngine {
     }
 }
 
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     fn edit_midi_notes_range(
         &self,
         track_id: u32,

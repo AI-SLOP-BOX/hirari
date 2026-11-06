@@ -45,6 +45,8 @@ use engine_edit_ext::TrackEditExt;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 include!("module_exports_tail.rs");
+pub use engine_native::{get_unified_engine, new_audio_engine, new_audio_engine_offline, push_command};
+pub use engine_native::{AudioEngine, HirariUnifiedEngine};
 use crate::summing::{SummingConfig, SummingOrchestrator};
 use persistence::*;
 use project::ProjectDocument;
@@ -106,16 +108,13 @@ pub mod ffi {
         SetAutomationRecordMode = 12,
     }
 
-    unsafe extern "C++" {
-        include!("core/audio_engine.hpp");
-        include!("core/hirari_unified_engine.hpp");
-        include!("core/bridge_shims.hpp");
-        include!("core/bridge_types.hpp");
+    extern "Rust" {
 
-        #[namespace = "Hirari::Core::BridgeFFI"]
+
+
+
         type AudioEngine;
 
-        #[namespace = "Hirari::Core::Engine"]
         type HirariUnifiedEngine;
 
         // The inner engine is a per-session object that never changes identity.
@@ -124,16 +123,16 @@ pub mod ffi {
         fn get_core(self: &AudioEngine) -> &HirariUnifiedEngine;
 
         // --- LIFECYCLE: No more global singletons ---
-        fn new_audio_engine() -> UniquePtr<AudioEngine>;
-        fn new_audio_engine_offline() -> UniquePtr<AudioEngine>;
+        fn new_audio_engine() -> Box<AudioEngine>;
+        fn new_audio_engine_offline() -> Box<AudioEngine>;
 
         fn join_audio_callbacks(self: &HirariUnifiedEngine);
         // Rebuilding the graph for a new device format stays in C++; Rust's
         // config transaction calls it once its own gates pass.
         #[cxx_name = "prepareToPlay"]
-        fn prepare_to_play(self: Pin<&mut HirariUnifiedEngine>, sample_rate: f64, block_size: u32);
+        fn prepare_to_play(self: &HirariUnifiedEngine, sample_rate: f64, block_size: u32);
         fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
-        fn set_master_gain(self: Pin<&mut HirariUnifiedEngine>, value: f32) -> bool;
+        fn set_master_gain(self: &HirariUnifiedEngine, value: f32) -> bool;
         fn control_room_state(self: &AudioEngine) -> usize;
         fn tempo_state(self: &AudioEngine) -> usize;
         fn undo_state(self: &AudioEngine) -> usize;
@@ -143,7 +142,7 @@ pub mod ffi {
         fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
         fn midi_learn_state(self: &HirariUnifiedEngine) -> usize;
         fn preview_synth_state(self: &HirariUnifiedEngine) -> usize;
-        fn mark_project_state_changed(self: Pin<&mut HirariUnifiedEngine>);
+        fn mark_project_state_changed(self: &HirariUnifiedEngine);
         fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
         fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
         fn bounce_session_state(self: &HirariUnifiedEngine) -> usize;
@@ -154,17 +153,15 @@ pub mod ffi {
         // The device-config transaction itself, including device selection, is
         // Rust-owned (`engine_config.rs`); only the session mutex it shares with
         // the destructor, shutdown and reconnect paths is handed across here.
-        fn lock_config(self: &AudioEngine);
-        fn unlock_config(self: &AudioEngine);
         fn get_audio_config_generation(self: &AudioEngine) -> u64;
         fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
         fn shutdown(self: &AudioEngine);
-        fn new_project(self: Pin<&mut HirariUnifiedEngine>);
+        fn new_project(self: &HirariUnifiedEngine);
 
         fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
 
         fn set_plugin_bypass(
-            self: Pin<&mut HirariUnifiedEngine>,
+            self: &HirariUnifiedEngine,
             tid: u32,
             plugin_index: u32,
             bypassed: bool,
@@ -181,22 +178,22 @@ pub mod ffi {
         fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
         fn get_bounce_progress(self: &HirariUnifiedEngine) -> f32;
         fn get_bounce_state(self: &HirariUnifiedEngine) -> u32;
-        fn cancel_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
-        fn pause_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
-        fn resume_bounce(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn cancel_bounce(self: &HirariUnifiedEngine) -> bool;
+        fn pause_bounce(self: &HirariUnifiedEngine) -> bool;
+        fn resume_bounce(self: &HirariUnifiedEngine) -> bool;
         fn midi_clock_tick(self: &HirariUnifiedEngine, timestamp: u64);
         fn midi_clock_ticks(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
         fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
         fn set_midi_clock_rate(self: &HirariUnifiedEngine, bpm: f64);
-        fn execute_auto_arrangement(self: Pin<&mut HirariUnifiedEngine>) -> bool;
+        fn execute_auto_arrangement(self: &HirariUnifiedEngine) -> bool;
         fn set_project_scale(
-            self: Pin<&mut HirariUnifiedEngine>,
+            self: &HirariUnifiedEngine,
             root: i32,
             scale_type: i32,
         ) -> bool;
         fn set_articulation_map(
-            self: Pin<&mut HirariUnifiedEngine>,
+            self: &HirariUnifiedEngine,
             tid: u32,
             map_hash: u32,
         ) -> bool;
@@ -224,7 +221,6 @@ pub mod ffi {
 
         fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
         // --- OWNERSHIP: Tied lifetime to the bridge host ---
-        fn get_unified_engine(bridge: &AudioEngine) -> &HirariUnifiedEngine;
     }
 
     // ---------------------------------------------------------------------

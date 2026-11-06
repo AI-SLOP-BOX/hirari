@@ -8,6 +8,8 @@
 
 use crate::audio_note_curve::HirariAudioNoteAnchor;
 use crate::ffi::{NativeNoteSegment, NativeProjectState, NativeRegionState, NativeTrackHandle};
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 use crate::region_edit_host::HirariRegionState;
 use crate::region_warp::HirariWarpMarker;
 use crate::vari_audio::{

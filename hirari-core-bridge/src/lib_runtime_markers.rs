@@ -133,7 +133,7 @@ impl HirariCore {
         let Ok(mut bases) = self.track_stack_base_volumes.lock() else {
             return false;
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let mut multipliers = bases
@@ -189,8 +189,7 @@ impl HirariCore {
             .unwrap_or((false, 1.0));
         if !has_stack {
             return self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .is_some_and(|engine| engine.set_track_volume(track_id, value));
         }
         let Ok(mut bases) = self.track_stack_base_volumes.lock() else {
@@ -209,8 +208,7 @@ impl HirariCore {
         let base = base.clamp(0.0, 2.0);
         bases.insert(track_id, base);
         let applied = (base * multiplier).clamp(0.0, 2.0);
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_track_volume(track_id, applied))
     }
 
@@ -264,7 +262,7 @@ impl HirariCore {
         }
         drop(stacks);
         if let (Ok(mut bases), Some(engine)) =
-            (self.track_stack_base_volumes.lock(), self.engine.as_ref())
+            (self.track_stack_base_volumes.lock(), self.engine_opt())
         {
             for track_id in member_track_ids {
                 bases
@@ -353,7 +351,7 @@ impl HirariCore {
         stack.member_track_ids.sort_unstable();
         drop(stacks);
         if let (Ok(mut bases), Some(engine)) =
-            (self.track_stack_base_volumes.lock(), self.engine.as_ref())
+            (self.track_stack_base_volumes.lock(), self.engine_opt())
         {
             bases
                 .entry(track_id)

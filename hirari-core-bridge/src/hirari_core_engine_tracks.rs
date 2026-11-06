@@ -6,7 +6,7 @@ impl HirariCore {
         if t_type > 4 {
             return 0;
         }
-        let id = self.engine.as_ref().map_or(0, |e| e.add_track(t_type));
+        let id = self.engine_opt().map_or(0, |e| e.add_track(t_type));
         if id != 0 {
             self.publish_production_event(crate::production_events::ProductionEvent::TrackAdded {
                 track_id: id,
@@ -17,7 +17,7 @@ impl HirariCore {
         // sent to the first available Bus. Bus/Vocal tracks remain un-routed
         // so the operation cannot create a cycle or a self-route.
         if id != 0 && matches!(t_type, 0..=2) {
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 if let Ok(layout) =
                     serde_json::from_str::<serde_json::Value>(&engine.project_layout_json())
                 {
@@ -62,7 +62,7 @@ impl HirariCore {
         if id != 0 {
             if let Ok(mut aux_ids) = self.aux_track_ids.lock() {
                 if aux_ids.insert(id) {
-                    if let Some(engine) = self.engine.as_ref() {
+                    if let Some(engine) = self.engine_opt() {
                         engine.mark_project_layout_changed();
                     }
                 }
@@ -102,7 +102,7 @@ impl HirariCore {
         let next = ids.into_iter().collect::<HashSet<_>>();
         if *current != next {
             *current = next;
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 engine.mark_project_layout_changed();
             }
         }
@@ -110,38 +110,33 @@ impl HirariCore {
     }
 
     pub fn add_vca_group(&self, group_id: u32, gain: f32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.add_vca_group(group_id, gain))
     }
 
     pub fn assign_track_to_vca(&self, track_id: u32, group_id: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.assign_track_to_vca(track_id, group_id))
     }
 
     pub fn set_vca_group_gain(&self, group_id: u32, gain: f32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_vca_group_gain(group_id, gain))
     }
 
     pub fn get_vca_track_gain(&self, track_id: u32) -> f32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(1.0, |engine| engine.get_vca_track_gain(track_id))
     }
 
     pub fn get_vca_snapshot_json(&self) -> String {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map(|engine| engine.get_vca_snapshot_json().to_string())
             .unwrap_or_else(|| "[]".to_owned())
     }
 
     pub fn clear_vca_groups(&self) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.clear_vca_groups();
         }
     }
@@ -150,7 +145,7 @@ impl HirariCore {
     /// real graph operation, not merely a project flag: the native engine
     /// renders and owns the frozen audio before returning success.
     pub fn freeze_track_diagnostic_json(&self, track_id: u32, total_samples: u64) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({
                 "ok": false,
                 "code": "engine_unavailable",
@@ -189,7 +184,7 @@ impl HirariCore {
     }
 
     pub fn freeze_track_to_project_end_diagnostic_json(&self, track_id: u32) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"ok":false,"code":"engine_unavailable","retryable":true})
                 .to_string();
         };
@@ -201,15 +196,14 @@ impl HirariCore {
     }
 
     pub fn freeze_track_to_project_end(&self, track_id: u32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             let sample_rate = engine.get_sample_rate().round() as u32;
             sample_rate != 0 && engine.freeze_track_to_project_end(track_id, sample_rate)
         })
     }
 
     pub fn unfreeze_track(&self, track_id: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.unfreeze_track(track_id))
     }
 
@@ -219,7 +213,7 @@ impl HirariCore {
         path: &str,
         total_samples: u64,
     ) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"ok": false, "code": "engine_unavailable", "retryable": true}).to_string();
         };
         let sample_rate = engine.get_sample_rate().round() as u32;
@@ -243,7 +237,7 @@ impl HirariCore {
     }
 
     pub fn unfreeze_track_diagnostic_json(&self, track_id: u32) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({
                 "ok": false,
                 "code": "engine_unavailable",
@@ -270,7 +264,7 @@ impl HirariCore {
     }
 
     pub fn track_freeze_status_diagnostic_json(&self, track_id: u32) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"ok": false, "code": "engine_unavailable"}).to_string();
         };
         serde_json::json!({
@@ -292,7 +286,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return serde_json::to_string(
                 &crate::bridge_error::BridgeError::new(
                     "engine_unavailable",
@@ -316,7 +310,7 @@ impl HirariCore {
         .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn remove_track(&self, id: u32) -> bool {
-        let removed = self.engine.as_ref().is_some_and(|e| e.remove_track(id));
+        let removed = self.engine_opt().is_some_and(|e| e.remove_track(id));
         if !removed {
             return false;
         }
@@ -337,7 +331,7 @@ impl HirariCore {
                 restore_main_monitor = true;
             }
         }
-        if self.engine.as_ref().is_some() {
+        if self.engine_opt().is_some() {
             let handle = self.control_room_handle();
             for cue_id in detached_cues {
                 // Clearing the bus target needs no track-list lookup: the
@@ -354,7 +348,7 @@ impl HirariCore {
         }
         if let Ok(mut aux_ids) = self.aux_track_ids.lock() {
             if aux_ids.remove(&id) {
-                if let Some(engine) = self.engine.as_ref() {
+                if let Some(engine) = self.engine_opt() {
                     engine.mark_project_layout_changed();
                 }
             }
@@ -372,7 +366,7 @@ impl HirariCore {
         true
     }
     pub fn remove_track_diagnostic_json(&self, id: u32) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return serde_json::to_string(
                 &crate::bridge_error::BridgeError::new(
                     "engine_unavailable",
@@ -396,8 +390,7 @@ impl HirariCore {
         .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn set_track_name(&self, id: u32, name: &str) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_track_name(id, name))
     }
 
@@ -412,7 +405,7 @@ impl HirariCore {
             return serde_json::to_string(&error)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.set_track_name(id, name) {
@@ -433,7 +426,7 @@ impl HirariCore {
             .project_transaction
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.new_project();
         }
         // The native `new_project()` used to reset its own `TonalSync` member
@@ -451,7 +444,7 @@ impl HirariCore {
         if let Ok(mut ids) = self.aux_track_ids.lock() {
             if !ids.is_empty() {
                 ids.clear();
-                if let Some(engine) = self.engine.as_ref() {
+                if let Some(engine) = self.engine_opt() {
                     engine.mark_project_layout_changed();
                 }
             }
@@ -529,7 +522,7 @@ impl HirariCore {
         self.reset_markers();
     }
     pub fn duplicate_track(&self, id: u32) -> u32 {
-        self.engine.as_ref().map_or(0, |e| e.duplicate_track(id))
+        self.engine_opt().map_or(0, |e| e.duplicate_track(id))
     }
 
     pub fn duplicate_track_diagnostic_json(&self, id: u32) -> String {
@@ -543,7 +536,7 @@ impl HirariCore {
             )
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let new_id = engine.duplicate_track(id);
@@ -561,8 +554,7 @@ impl HirariCore {
         .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn add_region(&self, tid: u32, path: &str, start: f64) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.add_region(tid, path, start))
     }
 
@@ -587,7 +579,7 @@ impl HirariCore {
             return serde_json::to_string(&error)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.add_region(tid, path, start) {
@@ -610,19 +602,17 @@ impl HirariCore {
         if tid == 0 || path.is_empty() || path.contains('\0') || !beat.is_finite() || beat < 0.0 {
             return 0;
         }
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             engine.queue_region_import(tid, path, self.beats_to_samples(beat))
         })
     }
     /// Poll and commit a queued import. 0=pending, 1=committed, 2=failed/stale, 3=unknown ticket.
     pub fn complete_region_import(&self, ticket: u64) -> u8 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(3, |engine| engine.complete_region_import(ticket))
     }
     pub fn replace_region_audio(&self, tid: u32, rid: u32, path: &str) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.replace_region_audio(tid, rid, path))
     }
 
@@ -647,7 +637,7 @@ impl HirariCore {
             return serde_json::to_string(&error)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.replace_region_audio(tid, rid, path) {

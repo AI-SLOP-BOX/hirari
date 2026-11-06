@@ -25,39 +25,30 @@ use crate::engine_block_host::{
 use crate::ffi;
 use crate::tempo::hirari_tempo_map_set_current_bpm;
 
-/// Holds the C++ session lock for one configuration transaction. Two UI or CLI
+/// Holds the session lock for one configuration transaction. Two UI or CLI
 /// callers must never interleave a device reconfigure with a second prepare, or
 /// the published generation describes neither request.
-struct ConfigLock<'a> {
-    engine: &'a ffi::AudioEngine,
-}
+struct ConfigLock<'a>(parking_lot::MutexGuard<'a, ()>);
 
-impl ConfigLock<'_> {
-    fn new(engine: &ffi::AudioEngine) -> ConfigLock<'_> {
-        engine.lock_config();
-        ConfigLock { engine }
+impl<'a> ConfigLock<'a> {
+    fn new(engine: &'a crate::AudioEngine) -> ConfigLock<'a> {
+        ConfigLock(engine.config_guard())
     }
 }
 
-impl Drop for ConfigLock<'_> {
-    fn drop(&mut self) {
-        self.engine.unlock_config();
-    }
-}
-
-fn driver_host(engine: &ffi::AudioEngine) -> *mut c_void {
+fn driver_host(engine: &crate::AudioEngine) -> *mut c_void {
     engine.audio_driver_host() as *mut c_void
 }
 
 /// The engine-block handle is zero exactly when this session owns no graph, which
 /// is the guard the deleted C++ `!m_engine` checks made.
-fn block_state(engine: &ffi::AudioEngine) -> *const c_void {
+fn block_state(engine: &crate::AudioEngine) -> *const c_void {
     engine.engine_block_state() as *const c_void
 }
 
 /// The device block length the graph is prepared for, read from the store the
 /// engine itself prepares: the deleted C++ accessor only relayed this value.
-pub fn block_frames(engine: &ffi::AudioEngine) -> u32 {
+pub fn block_frames(engine: &crate::AudioEngine) -> u32 {
     let block = block_state(engine);
     if block.is_null() {
         return 0;
@@ -65,7 +56,7 @@ pub fn block_frames(engine: &ffi::AudioEngine) -> u32 {
     unsafe { hirari_engine_block_device_block_frames(block) }
 }
 
-fn generation(engine: &ffi::AudioEngine) -> u64 {
+fn generation(engine: &crate::AudioEngine) -> u64 {
     let block = block_state(engine);
     if block.is_null() {
         return 0;
@@ -73,19 +64,19 @@ fn generation(engine: &ffi::AudioEngine) -> u64 {
     unsafe { hirari_engine_block_generation(block) }
 }
 
-fn tempo_state(engine: &ffi::AudioEngine) -> *mut c_void {
+fn tempo_state(engine: &crate::AudioEngine) -> *mut c_void {
     engine.tempo_state() as *mut c_void
 }
 
 /// Mutable pinned view of the session engine. The wrapper owns exactly one engine
 /// object for its whole lifetime and never moves it, so pinning is stable.
 fn pinned_core(
-    engine: &ffi::AudioEngine,
-) -> core::pin::Pin<&mut ffi::HirariUnifiedEngine> {
+    engine: &crate::AudioEngine,
+) -> core::pin::Pin<&mut crate::HirariUnifiedEngine> {
     unsafe {
         core::pin::Pin::new_unchecked(&mut *(crate::audio_engine_delegate_ext::host(
             engine,
-        ) as *mut ffi::HirariUnifiedEngine))
+        ) as *mut crate::HirariUnifiedEngine))
     }
 }
 
@@ -93,7 +84,7 @@ fn pinned_core(
 /// run the same quiesce/prepare sequence as any other reconfiguration, so the
 /// sequence lives here once instead of in a per-driver-branch copy. The tempo map
 /// keeps its current tempo; only the format changes.
-fn apply_negotiated_driver_config(engine: &ffi::AudioEngine) {
+fn apply_negotiated_driver_config(engine: &crate::AudioEngine) {
     let host = driver_host(engine);
     if host.is_null() || block_state(engine).is_null() {
         return;
@@ -111,7 +102,7 @@ fn apply_negotiated_driver_config(engine: &ffi::AudioEngine) {
 /// keep the previous format, and an engine that owns no running device (CLI renders,
 /// automation, isolated tests, a platform with no backend) has nothing to
 /// reconfigure, so its detached graph is prepared directly.
-fn apply_config_locked(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool {
+fn apply_config_locked(engine: &crate::AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool {
     let block = block_state(engine);
     if block.is_null() || !apply_config_valid(tempo, f64::from(sr), bs) {
         return false;
@@ -136,7 +127,7 @@ fn apply_config_locked(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32) 
 
 /// The void entry point every caller that does not need the outcome uses. Invalid
 /// requests quiesce nothing and advance no generation.
-pub fn apply_config(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32) {
+pub fn apply_config(engine: &crate::AudioEngine, tempo: f32, sr: u32, bs: u32) {
     let _lock = ConfigLock::new(engine);
     let _ = apply_config_locked(engine, tempo, sr, bs);
 }
@@ -144,7 +135,7 @@ pub fn apply_config(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32) {
 /// The reporting entry point: the transaction must both land and be observable as a
 /// new generation at the requested format. There is no separate device-reconciliation
 /// step, because `apply_config_locked` already rebuilds a running host with the graph.
-pub fn try_apply_config(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool {
+pub fn try_apply_config(engine: &crate::AudioEngine, tempo: f32, sr: u32, bs: u32) -> bool {
     let core = engine.get_core();
     if block_state(engine).is_null() || !apply_config_valid(tempo, f64::from(sr), bs) {
         return false;
@@ -162,7 +153,7 @@ pub fn try_apply_config(engine: &ffi::AudioEngine, tempo: f32, sr: u32, bs: u32)
 /// Selects a device and applies the format it negotiated as one answer, then checks
 /// that the graph really ended up at that format.
 pub fn select_audio_device(
-    engine: &ffi::AudioEngine,
+    engine: &crate::AudioEngine,
     device_id: u32,
     sample_rate: f64,
     buffer_size: u32,
@@ -182,7 +173,7 @@ pub fn select_audio_device(
         && block_frames(engine) == hirari_audio_driver_host_buffer_size(host)
 }
 
-impl ffi::AudioEngine {
+impl crate::AudioEngine {
     pub fn apply_config(&self, tempo: f32, sr: u32, bs: u32) {
         apply_config(self, tempo, sr, bs);
     }
@@ -202,7 +193,7 @@ mod tests {
 
     #[test]
     fn a_detached_engine_applies_a_valid_format_and_rejects_an_invalid_one() {
-        let engine = ffi::new_audio_engine_offline();
+        let engine = crate::new_audio_engine_offline();
         let before = generation(&engine);
         assert!(before > 0, "an offline session still owns its graph");
         // A rejected format answers false without quiescing anything or moving

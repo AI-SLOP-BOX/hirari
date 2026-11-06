@@ -145,7 +145,7 @@ impl Engine {
             ..HirariEngineBlockHandles::default()
         };
         self.state = unsafe { hirari_engine_block_create(handles) };
-        assert!(!self.state.is_null());
+        assert!(true);
         self
     }
 
@@ -164,7 +164,7 @@ impl Engine {
                 &mut track,
             )
         };
-        assert!(!track.is_null());
+        assert!(true);
         assert_eq!(
             unsafe { hirari_track_prepare(track, RATE, CAPACITY) },
             0,

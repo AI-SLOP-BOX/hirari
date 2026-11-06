@@ -12,16 +12,16 @@ const ERROR_STALE_PROJECT: u8 = 2;
 const ERROR_STALE_AUDIO: u8 = 3;
 const ERROR_QUEUE_FULL: u8 = 4;
 
-fn last_command_error(engine: &ffi::AudioEngine) -> u8 {
+fn last_command_error(engine: &hirari_core_bridge::AudioEngine) -> u8 {
     hirari_core_bridge::engine_last_command_error(engine.get_core()
-        as *const ffi::HirariUnifiedEngine
+        as *const hirari_core_bridge::HirariUnifiedEngine
         as usize)
 }
 
 /// The layout fingerprint the Rust admission stamps a command with: the gather
 /// runs on the engine's own address, the key its session bag is filed under.
-fn project_generation(engine: &ffi::AudioEngine) -> u64 {
-    let host = engine.get_core() as *const ffi::HirariUnifiedEngine as *mut std::ffi::c_void;
+fn project_generation(engine: &hirari_core_bridge::AudioEngine) -> u64 {
+    let host = engine.get_core() as *const hirari_core_bridge::HirariUnifiedEngine as *mut std::ffi::c_void;
     // SAFETY: the engine outlives the call and only its own bag is read.
     unsafe { hirari_core_bridge::layout_gather::hirari_project_generation(host) }
 }
@@ -29,14 +29,14 @@ fn project_generation(engine: &ffi::AudioEngine) -> u64 {
 #[test]
 fn command_admission_reports_target_and_generation_failures_in_order() {
     let _guard = native_engine_test_guard();
-    let engine = ffi::new_audio_engine_offline();
-    let engine = engine.as_ref().expect("offline engine must be created");
+    let engine = hirari_core_bridge::new_audio_engine_offline();
+    let engine = &*engine;
     let track = engine.add_track(0);
     assert_ne!(track, 0);
     let project = project_generation(engine);
     let audio = engine.get_audio_config_generation();
 
-    assert!(ffi::push_command(
+    assert!(hirari_core_bridge::push_command(
         engine,
         ffi::HirariCommand::SetVolume,
         track,
@@ -47,7 +47,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
     ));
     assert_eq!(last_command_error(engine), ERROR_NONE);
 
-    assert!(!ffi::push_command(
+    assert!(!hirari_core_bridge::push_command(
         engine,
         ffi::HirariCommand::SetVolume,
         900,
@@ -58,7 +58,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
     ));
     assert_eq!(last_command_error(engine), ERROR_INVALID_TARGET);
 
-    assert!(!ffi::push_command(
+    assert!(!hirari_core_bridge::push_command(
         engine,
         ffi::HirariCommand::SetVolume,
         track,
@@ -69,7 +69,7 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
     ));
     assert_eq!(last_command_error(engine), ERROR_STALE_PROJECT);
 
-    assert!(!ffi::push_command(
+    assert!(!hirari_core_bridge::push_command(
         engine,
         ffi::HirariCommand::SetVolume,
         track,
@@ -84,15 +84,15 @@ fn command_admission_reports_target_and_generation_failures_in_order() {
 #[test]
 fn a_full_command_queue_is_reported_as_a_failure() {
     let _guard = native_engine_test_guard();
-    let engine = ffi::new_audio_engine_offline();
-    let engine = engine.as_ref().expect("offline engine must be created");
+    let engine = hirari_core_bridge::new_audio_engine_offline();
+    let engine = &*engine;
     let track = engine.add_track(0);
     let project = project_generation(engine);
     let audio = engine.get_audio_config_generation();
 
     let mut accepted = 0u32;
     for _ in 0..4_096 {
-        if ffi::push_command(
+        if hirari_core_bridge::push_command(
             engine,
             ffi::HirariCommand::SetPan,
             track,
@@ -113,8 +113,8 @@ fn a_full_command_queue_is_reported_as_a_failure() {
 #[test]
 fn spatial_and_hrtf_validation_runs_before_the_track_lookup() {
     let _guard = native_engine_test_guard();
-    let engine = ffi::new_audio_engine_offline();
-    let engine = engine.as_ref().expect("offline engine must be created");
+    let engine = hirari_core_bridge::new_audio_engine_offline();
+    let engine = &*engine;
     let track = engine.add_track(0);
 
     assert!(!engine.set_spatial_position(track, f32::NAN, 0.0, 0.0));

@@ -102,10 +102,25 @@ pub fn report_hirari_log(level: u32, msg: &str) {
     }
 }
 
+impl HirariCore {
+    /// The session engine behind this handle. A `Box` engine is always
+    /// present; the option keeps the null-engine branch shape the callers
+    /// were written against.
+    pub(crate) fn engine_opt(&self) -> Option<&crate::AudioEngine> {
+        Some(&self.engine)
+    }
+
+    /// A `Box` engine is never absent; the explicit predicate keeps the
+    /// null-engine branches the callers were written against.
+    pub(crate) fn engine_none(&self) -> bool {
+        false
+    }
+}
+
 pub struct HirariCore {
     // --- INDUSTRIAL: Explicit Lifetime Binding ---
     // engine is the root of sovereignty.
-    engine: cxx::UniquePtr<ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
     /// Address of the Control Room runtime the native audio callback renders
     /// with. The object itself is Rust-owned (`control_room_runtime.rs`) and is
     /// created by the engine's `ControlRoom` member, so it lives exactly as
@@ -586,7 +601,7 @@ impl Drop for HirariCore {
         // native singleton remains alive for other bridge handles, while this
         // handle's driver and render requests are stopped deterministically.
         self.cancel_render();
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.shutdown();
         }
     }

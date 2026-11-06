@@ -61,8 +61,7 @@ impl HirariCore {
         tid != 0
             && rid != 0
             && self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .is_some_and(|engine| engine.move_region(tid, rid, start_sample as f64))
     }
 
@@ -75,7 +74,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return 0;
         }
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             engine.split_region_with_right_id(tid, rid, split_sample as f64)
         })
     }
@@ -84,7 +83,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 || !start.is_finite() || start < 0.0 {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let Some(states) = arrangement_region_states(self) else {
@@ -137,7 +136,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 || !start.is_finite() || start < 0.0 {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let Some(states) = arrangement_region_states(self) else {
@@ -199,7 +198,7 @@ impl HirariCore {
             return false;
         }
         let split_sample = self.beats_to_samples(beat.max(0.0));
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let owns_transaction = !engine.is_undo_transaction_active();
@@ -248,7 +247,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 || !start.is_finite() || start < 0.0 {
             return 0;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return 0;
         };
         let Some(states) = arrangement_region_states(self) else {
@@ -325,7 +324,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let mut notes = match self.scheduled_midi_notes.lock() {
@@ -357,8 +356,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_region_muted(tid, rid, muted))
     }
     pub fn set_region_comp_ranges(
@@ -379,7 +377,7 @@ impl HirariCore {
         for (start, end, fade_in, fade_out) in ranges {
             packed.extend_from_slice(&[*start, *end, *fade_in, *fade_out]);
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_region_comp_ranges(tid, rid, packed.as_slice(), managed)
         })
     }
@@ -398,8 +396,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 || step_id == 0 || operation.is_empty() {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| {
                 engine.append_region_processing(tid, rid, step_id, operation, parameter, enabled)
             })
@@ -408,16 +405,14 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.clear_region_processing(tid, rid))
     }
     pub fn set_region_gain(&self, tid: u32, rid: u32, gain: f32) -> bool {
         if !gain.is_finite() || !(-24.0..=24.0).contains(&gain) {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_gain(tid, rid, gain))
     }
     pub fn set_region_range_edit(
@@ -434,7 +429,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|e| {
+        self.engine_opt().is_some_and(|e| {
             e.set_region_range_edit(tid, rid, start, end, gain, fade_in as u64, fade_out as u64)
         })
     }
@@ -442,8 +437,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.clear_region_range_edits(tid, rid))
     }
     pub fn set_region_fades(&self, tid: u32, rid: u32, fade_in: f32, fade_out: f32) -> bool {
@@ -454,13 +448,11 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_fades(tid, rid, fade_in, fade_out))
     }
     pub fn set_region_reverse(&self, tid: u32, rid: u32, reverse: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_reverse(tid, rid, reverse))
     }
 
@@ -468,8 +460,7 @@ impl HirariCore {
         if tid == 0 || rid == 0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_sync_group(tid, rid, group))
     }
 
@@ -511,14 +502,13 @@ impl HirariCore {
         let Some(grid_beats) = GRID_BEATS.get(grid_index as usize).copied() else {
             return false;
         };
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.quantize_region_sync_group(tid, rid, strength, grid_beats, swing)
         })
     }
 
     pub fn region_quantize_status(&self, tid: u32, rid: u32) -> u8 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.region_quantize_status(tid, rid))
     }
 
@@ -526,8 +516,7 @@ impl HirariCore {
         tid != 0
             && rid != 0
             && self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .is_some_and(|engine| engine.finalize_region_quantize(tid, rid))
     }
 
@@ -560,7 +549,7 @@ impl HirariCore {
         if sorted.len() != targets.len() {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.align_regions_to_reference(
                 reference_track,
                 reference_region,
@@ -574,7 +563,7 @@ impl HirariCore {
         if reference_track == 0 || reference_region == 0 {
             return 0;
         }
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             engine.region_alignment_status(reference_track, reference_region)
         })
     }
@@ -582,7 +571,7 @@ impl HirariCore {
     pub fn finalize_region_alignment(&self, reference_track: u32, reference_region: u32) -> bool {
         reference_track != 0
             && reference_region != 0
-            && self.engine.as_ref().is_some_and(|engine| {
+            && self.engine_opt().is_some_and(|engine| {
                 engine.finalize_region_alignment(reference_track, reference_region)
             })
     }
@@ -596,8 +585,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_trim(tid, rid, start_norm, end_norm))
     }
 
@@ -605,16 +593,14 @@ impl HirariCore {
         if !ratio.is_finite() || !(0.5..=2.0).contains(&ratio) {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_warp_ratio(tid, rid, ratio))
     }
     pub fn set_region_pitch_preserve_warp(&self, tid: u32, rid: u32, enabled: bool) -> bool {
         if tid == 0 || rid == 0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_region_pitch_preserve_warp(tid, rid, enabled))
     }
 
@@ -622,8 +608,7 @@ impl HirariCore {
         if !semitones.is_finite() || !(-48.0..=48.0).contains(&semitones) {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_pitch_semitones(tid, rid, semitones))
     }
 
@@ -650,7 +635,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_region_audio_note_segment(
                 tid,
                 rid,
@@ -719,7 +704,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_region_audio_note_anchor(
                 tid,
                 rid,
@@ -771,7 +756,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_region_audio_note_formant_anchor(
                 tid, rid, segment_start_seconds, position_seconds, formant_cents)
         })
@@ -791,7 +776,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_region_audio_note_pitch_anchor(
                 tid, rid, segment_start_seconds, position_seconds, pitch_cents)
         })
@@ -819,7 +804,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.move_region_audio_note_anchor(
                 tid, rid, segment_start_seconds, old_position_seconds,
                 new_position_seconds, value_cents, edit_formant)
@@ -827,8 +812,7 @@ impl HirariCore {
     }
 
     pub fn clear_region_audio_note_segments(&self, tid: u32, rid: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.clear_region_audio_note_segments(tid, rid))
     }
 
@@ -850,7 +834,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.warp_region_audio_note_segment(tid, rid, segment_start, new_start, new_end)
         })
     }
@@ -859,8 +843,7 @@ impl HirariCore {
         if !segment_start.is_finite() || segment_start < 0.0 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.remove_region_audio_note_segment(tid, rid, segment_start))
     }
 
@@ -929,20 +912,18 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.start_region_audio_note_analysis(tid, rid, sample_rate))
     }
 
     pub fn region_audio_note_analysis_status(&self, tid: u32, rid: u32) -> u8 {
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             engine.region_audio_note_analysis_status(tid, rid)
         })
     }
 
     pub fn finalize_region_audio_note_analysis(&self, tid: u32, rid: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.finalize_region_audio_note_analysis(tid, rid))
     }
 
@@ -966,8 +947,7 @@ impl HirariCore {
         if !(1..=1024).contains(&count) {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_region_loop_count(tid, rid, count))
     }
 }

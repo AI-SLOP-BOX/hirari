@@ -15,7 +15,9 @@ use crate::automation_capture_runtime::hirari_automation_record_mode_apply;
 use crate::engine_block_host::hirari_engine_block_set_auto_record_mode;
 use crate::engine_rings::hirari_engine_event_ring_pop;
 use crate::engine_session::{handle_of_host, H_ENGINE_BLOCK, H_ENGINE_RINGS};
-use crate::ffi::{BridgeEvent, HirariUnifiedEngine};
+use crate::ffi::{BridgeEvent};
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 use crate::stereo_dsp::{hirari_stereo_correlation, hirari_vocal_remove_stereo};
 use crate::track_session::TrackSession;
 

@@ -4,9 +4,9 @@
 #[test]
 fn offline_target_and_volume_read_the_rust_stores_directly() {
     let _guard = native_engine_test_guard();
-    let engine = crate::ffi::new_audio_engine();
-    let e = engine.as_ref().expect("engine must initialize");
-    let core = crate::ffi::get_unified_engine(e);
+    let engine = crate::new_audio_engine();
+    let e = &*engine;
+    let core = crate::get_unified_engine(e);
 
     // A stale target id cannot activate; zero is the master and always valid.
     assert!(!crate::engine_analysis_reads::set_offline_target(core, 9_999));

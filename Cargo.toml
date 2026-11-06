@@ -34,6 +34,7 @@ incremental = false
 panic = "abort"
 
 [workspace.dependencies]
+parking_lot = "0.12"
 # --- Engine Core (Shared) ---
 anyhow = "1.0.104"
 log = "0.4"

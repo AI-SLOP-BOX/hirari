@@ -447,7 +447,7 @@ impl HirariCore {
     /// an empty vector for the snapshot getters, no work for the clears.
     #[inline]
     fn tempo_edit(&self) -> Option<EditHandles> {
-        if self.engine.is_null() || self.tempo_state == 0 {
+        if self.engine_none() || self.tempo_state == 0 {
             return None;
         }
         Some(EditHandles {
@@ -455,8 +455,7 @@ impl HirariCore {
             undo: self.undo_state as *mut _,
             log: self.log_state as *const _,
             sample_rate: self
-                .engine
-                .as_ref()
+                .engine_opt()
                 .map_or(0.0, |engine| engine.get_sample_rate()),
         })
     }
@@ -468,7 +467,7 @@ impl HirariCore {
     /// and the shim marked the project anyway.
     #[inline]
     fn mark_project_changed(&self) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.mark_project_state_changed();
         }
     }
@@ -512,7 +511,7 @@ impl HirariCore {
     pub(crate) fn tempo_read(&self) -> f32 {
         match self.tempo_edit() {
             Some(h) => unsafe { hirari_tempo_map_get_current_bpm(h.tempo) },
-            None if !self.engine.is_null() => 120.0,
+            None if !self.engine_none() => 120.0,
             None => 0.0,
         }
     }
@@ -781,7 +780,7 @@ impl HirariCore {
         let Some(h) = self.tempo_edit() else {
             return false;
         };
-        let playhead = self.engine.as_ref().map_or(0, |engine| engine.get_playhead());
+        let playhead = self.engine_opt().map_or(0, |engine| engine.get_playhead());
         if set_tempo_at(h, playhead, bpm) {
             self.mark_project_changed();
             true

@@ -727,8 +727,8 @@ mod tests {
 
     #[test]
     fn cxx_engine_transactions_invoke_rust_managed_callback_ids() {
-        let engine = crate::ffi::new_audio_engine_offline();
-        let engine = engine.as_ref().expect("offline engine should be created");
+        let engine = crate::new_audio_engine_offline();
+        let engine = &*engine;
         let initial_tempo = engine.get_tempo();
         let initial_undo_count = engine.get_undo_count();
 

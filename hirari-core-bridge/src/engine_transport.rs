@@ -7,7 +7,8 @@
 use crate::audio_driver_host;
 use crate::engine_block_host::{self, hirari_engine_block_track_table};
 use crate::engine_track_table;
-use crate::ffi::{AudioEngine, HirariUnifiedEngine};
+use crate::AudioEngine;
+use crate::HirariUnifiedEngine;
 use crate::realtime_vca_manager::hirari_vca_assign_track;
 use crate::region_store;
 use crate::track_session::{self, TrackSession};

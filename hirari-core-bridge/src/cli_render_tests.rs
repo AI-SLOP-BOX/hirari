@@ -76,7 +76,7 @@ mod cli_render_probe_tests {
         // property that matters: reconfiguring an offline engine to a project
         // rate moves the engine to that rate.
         let core = crate::HirariCore::new_offline().expect("offline core initializes");
-        let engine = core.engine.as_ref().expect("offline core owns an engine");
+        let engine = &core.engine;
 
         assert!(
             !engine.is_playing(),

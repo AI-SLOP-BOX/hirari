@@ -10,7 +10,7 @@ impl HirariCore {
             )
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.set_project_scale(root, scale_type) {
@@ -28,60 +28,57 @@ impl HirariCore {
 
     // Telemetry
     pub fn get_all_peaks_l(&self, out: &mut Vec<f32>) {
-        if let Some(e) = self.engine.as_ref() {
-            let pks = crate::engine_analysis_reads::track_peaks_l(ffi::get_unified_engine(e));
+        if let Some(e) = self.engine_opt() {
+            let pks = crate::engine_analysis_reads::track_peaks_l(crate::get_unified_engine(e));
             out.clear();
             out.extend(pks);
         }
     }
 
     pub fn get_all_peaks_r(&self, out: &mut Vec<f32>) {
-        if let Some(e) = self.engine.as_ref() {
-            let pks = crate::engine_analysis_reads::track_peaks_r(ffi::get_unified_engine(e));
+        if let Some(e) = self.engine_opt() {
+            let pks = crate::engine_analysis_reads::track_peaks_r(crate::get_unified_engine(e));
             out.clear();
             out.extend(pks);
         }
     }
 
     pub fn get_cpu_total(&self) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| {
-            crate::engine_analysis_reads::runtime_telemetry(e, ffi::get_unified_engine(e))[0] * 100.0
+        self.engine_opt().map_or(0.0, |e| {
+            crate::engine_analysis_reads::runtime_telemetry(e, crate::get_unified_engine(e))[0] * 100.0
         })
     }
     pub fn get_buffer_size(&self) -> u32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |e| crate::engine_config::block_frames(e))
     }
     pub fn get_latency_ms(&self) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| {
-            crate::engine_analysis_reads::latency_ms(ffi::get_unified_engine(e))
+        self.engine_opt().map_or(0.0, |e| {
+            crate::engine_analysis_reads::latency_ms(crate::get_unified_engine(e))
         })
     }
     pub fn get_track_latency_ms(&self, track_id: u32) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| {
-            crate::engine_analysis_reads::track_latency_ms(ffi::get_unified_engine(e), track_id)
+        self.engine_opt().map_or(0.0, |e| {
+            crate::engine_analysis_reads::track_latency_ms(crate::get_unified_engine(e), track_id)
         })
     }
 
     pub fn get_track_pdc_compensation_ms(&self, track_id: u32) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| {
+        self.engine_opt().map_or(0.0, |e| {
             crate::engine_analysis_reads::track_pdc_compensation_ms(
-                ffi::get_unified_engine(e),
+                crate::get_unified_engine(e),
                 track_id,
             )
         })
     }
 
     pub fn set_low_latency_mode(&self, active: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_low_latency_mode(active))
     }
 
     pub fn low_latency_mode(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.low_latency_mode())
     }
 
@@ -195,7 +192,7 @@ impl HirariCore {
             return 0;
         }
         let generated = self.generate_arpeggio(pitches, velocities, pattern, octaves, steps);
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return 0;
         };
         let mut notes = self
@@ -279,7 +276,7 @@ impl HirariCore {
         if pitches.is_empty() {
             return 0;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return 0;
         };
         let mut notes = self
@@ -351,24 +348,24 @@ impl HirariCore {
         self.get_spectral_data_v()
     }
     pub fn get_synesthesia_colors(&self) -> Vec<f32> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Vec::new();
         };
-        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        let spectrum = crate::engine_analysis_reads::spectrum(crate::get_unified_engine(engine));
         crate::analysis_synesthesia_colors(&spectrum).into_iter().collect()
     }
     pub fn get_motion_energy(&self) -> f32 {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return 0.0;
         };
-        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        let spectrum = crate::engine_analysis_reads::spectrum(crate::get_unified_engine(engine));
         crate::analysis_motion_energy(&spectrum)
     }
     pub fn get_spectral_partials_v(&self) -> Vec<f32> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Vec::new();
         };
-        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        let spectrum = crate::engine_analysis_reads::spectrum(crate::get_unified_engine(engine));
         crate::analysis_partials(&spectrum).into_iter().collect()
     }
     pub fn get_video_frame(&self) -> Vec<u8> {
@@ -388,18 +385,18 @@ impl HirariCore {
     }
 
     pub fn get_song_structure_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return String::new();
         };
-        crate::engine_analysis_reads::song_structure_json(engine, ffi::get_unified_engine(engine))
+        crate::engine_analysis_reads::song_structure_json(engine, crate::get_unified_engine(engine))
     }
 
     pub fn get_ai_advice(&self) -> Vec<String> {
         let mut results = Vec::new();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return results;
         };
-        let meter = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
+        let meter = crate::engine_analysis_reads::master_meter_data(crate::get_unified_engine(engine));
         results.push(crate::analysis_creative_advice(
             meter.true_peak_l,
             meter.true_peak_r,
@@ -411,10 +408,10 @@ impl HirariCore {
 
     // --- COMPATIBILITY PASS-THROUGHS FOR UI ---
     pub fn get_mixer_levels_v(&self) -> Vec<f32> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Vec::new();
         };
-        let core = ffi::get_unified_engine(engine);
+        let core = crate::get_unified_engine(engine);
         let l = crate::engine_analysis_reads::track_peaks_l(core);
         let r = crate::engine_analysis_reads::track_peaks_r(core);
         let count = l.len().min(r.len());
@@ -426,19 +423,19 @@ impl HirariCore {
         result
     }
     pub fn get_spectral_data_v(&self) -> Vec<f32> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Vec::new();
         };
-        let spectrum = crate::engine_analysis_reads::spectrum(ffi::get_unified_engine(engine));
+        let spectrum = crate::engine_analysis_reads::spectrum(crate::get_unified_engine(engine));
         crate::analysis_spectral_display(&spectrum, engine.get_sample_rate())
             .into_iter()
             .collect()
     }
     pub fn get_master_loudness(&self) -> LoudnessData {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return LoudnessData::default();
         };
-        let v = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
+        let v = crate::engine_analysis_reads::master_meter_data(crate::get_unified_engine(engine));
         LoudnessData {
             integrated: v.integrated,
             short_term: v.short_term,
@@ -448,16 +445,16 @@ impl HirariCore {
         }
     }
     pub fn get_intelligence_dashboard_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return String::new();
         };
-        crate::engine_analysis_reads::intelligence_dashboard_json(ffi::get_unified_engine(engine))
+        crate::engine_analysis_reads::intelligence_dashboard_json(crate::get_unified_engine(engine))
     }
     pub fn get_clashing_frequencies(&self) -> Vec<ClashData> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Vec::new();
         };
-        let meter = crate::engine_analysis_reads::master_meter_data(ffi::get_unified_engine(engine));
+        let meter = crate::engine_analysis_reads::master_meter_data(crate::get_unified_engine(engine));
         let encoded = crate::analysis_spectral_clashes(
             meter.true_peak_l,
             meter.true_peak_r,

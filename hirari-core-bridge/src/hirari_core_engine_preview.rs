@@ -1,6 +1,6 @@
 impl HirariCore {
     pub fn set_preview_synth_engine(&self, engine: u32) {
-        if let Some(audio) = self.engine.as_ref() {
+        if let Some(audio) = self.engine_opt() {
             audio.set_preview_synth_engine(engine.min(2));
         }
     }
@@ -14,7 +14,7 @@ impl HirariCore {
             return serde_json::to_string(&error)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(audio) = self.engine.as_ref() else {
+        let Some(audio) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         audio.set_preview_synth_engine(engine);
@@ -25,8 +25,7 @@ impl HirariCore {
         if source_id == dest_id {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_route(source_id, dest_id, enabled))
     }
 
@@ -38,8 +37,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_route_gain(source_id, dest_id, gain, enabled))
     }
 
@@ -58,7 +56,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_send_route(source_id, dest_id, gain, pre_fader, enabled)
         })
     }
@@ -76,7 +74,7 @@ impl HirariCore {
         if !gain.is_finite() || !(0.0..=2.0).contains(&gain) || (enabled && gain <= 0.0) {
             return "{\"code\":\"invalid_route_gain\",\"retryable\":false}".to_owned();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_route_gain(source_id, dest_id, gain, enabled) {
@@ -99,7 +97,7 @@ impl HirariCore {
         if source_id == dest_id {
             return "{\"code\":\"route_self_loop\",\"retryable\":false}".to_owned();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_route(source_id, dest_id, enabled) {
@@ -126,7 +124,7 @@ impl HirariCore {
         if source_id == dest_id || !gain.is_finite() {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_feedback_route(source_id, dest_id, gain.clamp(0.0, 2.0), enabled)
         })
     }
@@ -144,7 +142,7 @@ impl HirariCore {
         if !gain.is_finite() || !(0.0..=2.0).contains(&gain) {
             return "{\"code\":\"invalid_route_gain\",\"retryable\":false}".to_owned();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_feedback_route(source_id, dest_id, gain, enabled) {
@@ -172,8 +170,7 @@ impl HirariCore {
         if source_id == dest_id || tap_point > 2 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map(|engine| {
                 engine.set_sidechain_link(source_id, dest_id, plugin_index, tap_point, enabled)
             })
@@ -211,8 +208,7 @@ impl HirariCore {
     }
 
     pub fn has_sidechain_link(&self, source_id: u32, dest_id: u32, plugin_index: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.has_sidechain_link(source_id, dest_id, plugin_index))
     }
     /// Address of the Rust driver host the engine owns, or zero when there is no
@@ -221,13 +217,11 @@ impl HirariCore {
     /// them one C++ layer at a time are gone, and a zero handle answers exactly
     /// as their absent-`m_driver` branches did.
     pub(crate) fn driver_handle(&self) -> usize {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, crate::audio_engine_delegate_ext::driver_host)
     }
     pub fn is_audio_device_ready(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.is_audio_device_ready())
     }
     pub fn get_audio_output_peak(&self) -> f32 {
@@ -249,19 +243,19 @@ impl HirariCore {
         )
     }
     pub fn try_reconnect_audio_device(&self) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.try_reconnect_audio_device();
         }
     }
     pub fn try_reconnect_audio_device_diagnostic_json(&self) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         self.try_reconnect_audio_device();
         self.audio_driver_diagnostic_json()
     }
     pub fn get_sample_rate(&self) -> f64 {
-        self.engine.as_ref().map_or(0.0, |e| e.get_sample_rate())
+        self.engine_opt().map_or(0.0, |e| e.get_sample_rate())
     }
     pub fn get_audio_input_channel_count(&self) -> u16 {
         crate::audio_driver_view::input_channel_count(self.driver_handle())
@@ -329,7 +323,7 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.select_audio_device(device_id, sample_rate as f64, buffer_size)
         })
     }
@@ -344,7 +338,7 @@ impl HirariCore {
         if self.recording_preview_active() {
             return false;
         }
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             if engine.is_playing() {
                 crate::engine_transport::set_playing(engine, engine.get_core(), false);
             }
@@ -361,7 +355,7 @@ impl HirariCore {
         if self.recording_preview_active() {
             return "{\"code\":\"recording_active\",\"retryable\":false}".to_owned();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.apply_audio_config(sample_rate, buffer_size) {

@@ -131,7 +131,7 @@ impl HirariCore {
         // forwarding; the list is C++-owned, so it now answers through the one
         // accessor added for it while the write goes straight to the runtime.
         let native = (bus == 0
-            || self.engine.as_ref().is_some_and(|engine| engine.bus_track_exists(bus)))
+            || self.engine_opt().is_some_and(|engine| engine.bus_track_exists(bus)))
             && unsafe {
                 crate::control_room_runtime::hirari_control_room_set_cue_bus(
                     self.control_room_handle(),
@@ -193,7 +193,7 @@ impl HirariCore {
                 )
             };
             if bus_track_id == 0
-                || !self.engine.as_ref().is_some_and(|engine| engine.bus_track_exists(bus_track_id))
+                || !self.engine_opt().is_some_and(|engine| engine.bus_track_exists(bus_track_id))
             {
                 return false;
             }
@@ -292,8 +292,7 @@ impl HirariCore {
         packed_points: Vec<f64>,
     ) -> bool {
         let changed = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| engine.set_automation_data(track_id, param_id, packed_points));
         if changed {
             self.publish_production_event(
@@ -337,7 +336,7 @@ impl HirariCore {
             }
             previous_time = triple[0];
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_automation_data(track_id, param_id, packed_points) {
@@ -380,7 +379,7 @@ impl HirariCore {
             }
             previous_time = triple[0];
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.set_track_delay_automation(track_id, packed_points) {
@@ -407,7 +406,7 @@ impl HirariCore {
             return false;
         }
         let normalized = value.clamp(0.0, 1.0);
-        let applied = self.engine.as_ref().is_some_and(|engine| {
+        let applied = self.engine_opt().is_some_and(|engine| {
             engine.set_plugin_parameter(track_id, plugin_index, parameter_id, normalized)
         });
         if applied {
@@ -433,7 +432,7 @@ impl HirariCore {
         parameter_id: u32,
         packed_points: Vec<f64>,
     ) -> bool {
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_plugin_automation(track_id, plugin_index, parameter_id, packed_points)
         })
     }
@@ -448,7 +447,7 @@ impl HirariCore {
         if !value.is_finite() {
             return "{\"code\":\"non_finite_parameter\",\"retryable\":false}".to_owned();
         }
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         let normalized = value.clamp(0.0, 1.0);
@@ -488,7 +487,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let params = crate::dynamics::DynamicsOrchestrator.suggest_parameters(&samples);
@@ -538,12 +537,12 @@ impl HirariCore {
     }
 
     pub fn get_plugin_parameter(&self, track_id: u32, plugin_index: u32, parameter_id: u32) -> f32 {
-        self.engine.as_ref().map_or(0.0, |engine| {
+        self.engine_opt().map_or(0.0, |engine| {
             engine.get_plugin_parameter(track_id, plugin_index, parameter_id)
         })
     }
     pub fn get_plugin_parameter_count(&self, track_id: u32, plugin_index: u32) -> u32 {
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             engine.get_plugin_parameter_count(track_id, plugin_index)
         })
     }
@@ -553,14 +552,13 @@ impl HirariCore {
         plugin_index: u32,
         parameter_id: u32,
     ) -> String {
-        self.engine.as_ref().map_or_else(String::new, |engine| {
+        self.engine_opt().map_or_else(String::new, |engine| {
             engine.get_plugin_parameter_name(track_id, plugin_index, parameter_id)
         })
     }
 
     pub fn save_plugin_preset(&self, track_id: u32, plugin_index: u32, path: &str) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.save_plugin_preset(track_id, plugin_index, path))
     }
 
@@ -574,7 +572,7 @@ impl HirariCore {
             return serde_json::json!({"code":"invalid_plugin_preset_target","retryable":false})
                 .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.save_plugin_preset(track_id, plugin_index, path) {
@@ -584,8 +582,7 @@ impl HirariCore {
     }
 
     pub fn load_plugin_preset(&self, track_id: u32, plugin_index: u32, path: &str) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.load_plugin_preset(track_id, plugin_index, path))
     }
 
@@ -602,7 +599,7 @@ impl HirariCore {
         if !std::path::Path::new(path).is_file() {
             return serde_json::json!({"code":"plugin_preset_not_found","retryable":false,"path":path}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.load_plugin_preset(track_id, plugin_index, path) {

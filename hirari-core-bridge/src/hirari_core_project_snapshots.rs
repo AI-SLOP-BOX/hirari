@@ -88,7 +88,7 @@ impl HirariCore {
                 snapshot.routing_state.clone(),
             )
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\"}".into();
         };
         let mut applied = 0usize;

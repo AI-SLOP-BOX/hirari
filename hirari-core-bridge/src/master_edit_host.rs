@@ -19,7 +19,7 @@ pub fn admit_master_gain(value: f32) -> bool {
 /// and log addresses are the ones the core was handed at construction, so the
 /// undo pair lands in the same history the engine's own edits use.
 pub(crate) fn set_master_gain(
-    engine: &crate::ffi::AudioEngine,
+    engine: &crate::AudioEngine,
     undo_state: usize,
     log_state: usize,
     value: f32,
@@ -33,7 +33,7 @@ pub(crate) fn set_master_gain(
         return false;
     }
     if record_undo && before != value {
-        let engine_ptr: *const crate::ffi::AudioEngine = engine;
+        let engine_ptr: *const crate::AudioEngine = engine;
         // Undo replays the stored value through the same façade setter. The
         // callbacks are owned by the engine's history, which is destroyed with
         // the engine, so the pointer stays valid for as long as they exist.

@@ -42,7 +42,6 @@ check_file hirari-core-bridge/src/lib.rs
 check_file hirari-core-bridge/src/bin/hirari.rs
 check_file hirari-ui/Cargo.toml
 check_file hirari-ui/src/main.rs
-check_file src/core/audio_engine.hpp
 check_source_directory_tracked hirari-core-bridge
 check_source_directory_tracked hirari-ui
 check_file scripts/build_app.sh

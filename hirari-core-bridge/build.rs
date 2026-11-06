@@ -3,7 +3,12 @@ use glob::glob;
 fn main() {
     let mut build = cxx_build::bridge("src/lib.rs");
 
+    // The frozen differential reference is the only first-party C++ left: the
+    // engine facade under `../src` became the Rust module `engine_native.rs`.
     build.file("src/hirari_core_ref.cpp");
+    // The Signalsmith stretch kernel wrapper: the vendored C++ DSP library is
+    // still the production time-stretch engine.
+    build.file("src/stretch_kernel.cpp");
     if std::env::var_os("CARGO_FEATURE_DSP_DIFFERENTIAL_REFERENCE").is_some() {
         build.file("../tests/dsp_reference/region_time_stretch_reference.cpp");
         println!("cargo:rerun-if-changed=../tests/dsp_reference/region_time_stretch_reference.cpp");
@@ -21,25 +26,11 @@ fn main() {
     // behind for months (the original invalidation bug). Registering the
     // directory makes any mtime change inside the tree re-run the build
     // script, which re-globs and re-archives the full source set.
-    let search_patterns = ["../src/core/*.cpp"];
-
-    for pattern in &search_patterns {
-        for path in glob(pattern)
-            .expect("Failed to read glob pattern")
-            .flatten()
-        {
-            build.file(&path);
-        }
-        println!("cargo:rerun-if-changed={}", pattern.replace("*.cpp", ""));
-    }
-
     // cxx_build does not reliably discover headers included through nested
     // implementation fragments. Register them explicitly so changes to
     // routing, PDC, undo, engine contracts, and vendored DSP headers always
     // rebuild the bridge.
     for pattern in [
-        "../src/core/**/*.hpp",
-        "../src/core/**/*.inc",
         "../external/**/*.h",
         "../external/**/*.hpp",
     ] {
@@ -52,8 +43,6 @@ fn main() {
     }
 
     build
-        .include("../src")
-        .include("../src/core")
         .include("../external")
         .flag_if_supported("-std=c++20")
         .flag_if_supported("-fobjc-arc")

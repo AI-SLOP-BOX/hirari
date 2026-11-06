@@ -7,6 +7,8 @@ authors = ["Hirari DAW Project <bridge@hirari-daw.io>"]
 description = "Rust DAW runtime and native audio integration boundary for Hirari."
 
 [dependencies]
+parking_lot = { workspace = true }
+
 # 🔵 FFI LAYER
 # Using CXX for safer C++/Rust interoperability.
 cxx = "1.0.199"

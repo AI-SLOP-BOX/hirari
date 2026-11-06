@@ -1,7 +1,6 @@
 impl HirariCore {
     pub fn set_spatial_position(&self, tid: u32, x: f32, y: f32, z: f32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_spatial_position(tid, x, y, z))
     }
 
@@ -15,14 +14,12 @@ impl HirariCore {
         {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_hrtf_kernel(tid, left, right))
     }
 
     pub fn clear_hrtf_kernel(&self, tid: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.clear_hrtf_kernel(tid))
     }
 
@@ -53,26 +50,24 @@ impl HirariCore {
         }
     }
     pub fn set_track_armed(&self, tid: u32, armed: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_track_armed(tid, armed))
     }
 
     pub fn set_track_input_monitor(&self, tid: u32, enabled: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.set_track_input_monitor(tid, enabled))
     }
 
     pub fn set_track_input_monitor_channels(
         &self, tid: u32, enabled: bool, left: u32, right: u32,
     ) -> bool {
-        left < 32 && right < 32 && self.engine.as_ref()
+        left < 32 && right < 32 && self.engine_opt()
             .is_some_and(|e| e.set_track_input_monitor_channels(tid, enabled, left, right))
     }
 
     pub fn set_mute(&self, tid: u32, m: bool) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             let _ = engine.set_track_mute(tid, m);
         }
     }
@@ -82,7 +77,7 @@ impl HirariCore {
         })
     }
     pub fn set_solo(&self, tid: u32, s: bool) {
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             let _ = engine.set_track_solo(tid, s);
         }
     }
@@ -94,9 +89,9 @@ impl HirariCore {
 
     fn set_track_toggle_diagnostic_json<F>(&self, field: &str, tid: u32, apply: F) -> String
     where
-        F: FnOnce(&crate::ffi::AudioEngine, u32) -> bool,
+        F: FnOnce(&crate::AudioEngine, u32) -> bool,
     {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if apply(engine, tid) {
@@ -115,14 +110,13 @@ impl HirariCore {
     }
 
     pub fn set_phase_invert(&self, tid: u32, inverted: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_phase_invert(tid, inverted))
     }
 
     pub fn execute_vocal_remover(&self, tid: u32) {
-        if let Some(e) = self.engine.as_ref() {
-            let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(e));
+        if let Some(e) = self.engine_opt() {
+            let host = crate::engine_event_ops::host_from_core(crate::get_unified_engine(e));
             let _ = crate::engine_event_ops::execute_vocal_remover(host, tid);
         }
     }
@@ -138,10 +132,10 @@ impl HirariCore {
             )
             .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
-        let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(engine));
+        let host = crate::engine_event_ops::host_from_core(crate::get_unified_engine(engine));
         if crate::engine_event_ops::execute_vocal_remover(host, tid) {
             return format!(
                 "{{\"ok\":true,\"operation\":\"execute_vocal_remover\",\"track_id\":{tid}}}"
@@ -164,7 +158,7 @@ impl HirariCore {
         for byte in map.as_bytes() {
             hash = (hash ^ u32::from(*byte)).wrapping_mul(16777619);
         }
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             let _ = e.set_articulation_map(tid, hash);
         }
     }
@@ -241,7 +235,7 @@ impl HirariCore {
             json_entries.push(entry.clone());
         }
         let Ok(json) = serde_json::to_string(&json_entries) else { return false };
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             engine.set_expression_map(tid, packed, json, u32::from(edited_articulation_id))
         })
     }
@@ -260,7 +254,7 @@ impl HirariCore {
         }
         let Ok(entries) = map.to_midi_expression_entries() else { return false };
         let Ok(json) = map.to_json() else { return false };
-        let Some(engine) = self.engine.as_ref() else { return false };
+        let Some(engine) = self.engine_opt() else { return false };
         self.begin_undo_transaction("Import MIDI Expression Map");
         if !self.set_midi_expression_map(tid, entries, 0) ||
             !engine.set_expression_map_pro(tid, json) {
@@ -285,7 +279,7 @@ impl HirariCore {
         for byte in map.as_bytes() {
             hash = (hash ^ u32::from(*byte)).wrapping_mul(16777619);
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.set_articulation_map(tid, hash) {
@@ -319,7 +313,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(_engine) = self.engine.as_ref() else {
+        let Some(_engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if self.apply_auto_mixing() {
@@ -342,7 +336,7 @@ impl HirariCore {
     }
 
     pub fn set_track_eq(&self, tid: u32, lb: f32, lc: f32, hb: f32, hc: f32) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.set_track_eq(tid, lb, lc, hb, hc);
         }
     }

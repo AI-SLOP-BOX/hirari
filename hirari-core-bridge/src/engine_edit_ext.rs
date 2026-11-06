@@ -13,8 +13,8 @@ use crate::{
     track_control_host, track_freeze_host, undo_edit_host,
 };
 
-fn host(engine: &ffi::AudioEngine) -> *mut c_void {
-    let core: *const ffi::HirariUnifiedEngine = ffi::get_unified_engine(engine);
+fn host(engine: &crate::AudioEngine) -> *mut c_void {
+    let core: *const crate::HirariUnifiedEngine = crate::get_unified_engine(engine);
     core as *mut c_void
 }
 
@@ -87,7 +87,7 @@ pub trait TrackEditExt {
     fn get_redo_count(&self) -> u32;
 }
 
-impl TrackEditExt for ffi::AudioEngine {
+impl TrackEditExt for crate::AudioEngine {
     fn set_track_volume(&self, tid: u32, value: f32) -> bool {
         unsafe { routing_edit_host::hirari_routing_edit_set_track_volume(host(self), tid, value) }
     }

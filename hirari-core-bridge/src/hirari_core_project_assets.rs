@@ -3,23 +3,21 @@ impl HirariCore {
     /// background thread. The CXX AudioEngine handle never leaves its owner
     /// thread; only the native engine's shared lifetime handle is captured.
     pub fn request_project_layout_snapshot(&self) -> u64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.request_project_layout_snapshot())
     }
 
     /// Returns an empty string while the layout snapshot is being prepared,
     /// otherwise `READY <revision>\n<layout-json>` or a failure marker.
     pub fn poll_project_layout_snapshot(&self, request_id: u64) -> String {
-        self.engine.as_ref().map_or_else(
+        self.engine_opt().map_or_else(
             String::new,
             |engine| engine.poll_project_layout_snapshot(request_id),
         )
     }
 
     pub fn cancel_project_layout_snapshot(&self, request_id: u64) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.cancel_project_layout_snapshot(request_id))
     }
 
@@ -28,33 +26,31 @@ impl HirariCore {
     }
 
     pub fn get_region_waveform(&self, tid: u32, rid: u32) -> Vec<f32> {
-        self.engine.as_ref().map_or_else(Vec::new, |e| {
+        self.engine_opt().map_or_else(Vec::new, |e| {
             e.get_region_waveform(tid, rid).into_iter().collect()
         })
     }
     pub fn queue_region_waveform(&self, tid: u32, rid: u32) -> u64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |e| e.queue_region_waveform(tid, rid))
     }
     pub fn poll_region_waveform(&self, request: u64) -> Vec<f32> {
-        self.engine.as_ref().map_or_else(Vec::new, |e| {
+        self.engine_opt().map_or_else(Vec::new, |e| {
             e.poll_region_waveform(request).into_iter().collect()
         })
     }
     pub fn region_waveform_pending(&self, request: u64) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|e| e.region_waveform_pending(request))
     }
     pub fn get_track_correlation(&self, tid: u32) -> f32 {
-        self.engine.as_ref().map_or(0.0, |e| {
-            let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(e));
+        self.engine_opt().map_or(0.0, |e| {
+            let host = crate::engine_event_ops::host_from_core(crate::get_unified_engine(e));
             crate::engine_event_ops::get_track_correlation(host, tid)
         })
     }
     pub fn get_project_layout_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return String::new();
         };
         let raw = engine.project_layout_json();
@@ -65,7 +61,7 @@ impl HirariCore {
     /// fingerprint and Rust-owned Aux identity used to reject stale snapshots.
     pub fn project_layout_snapshot_for_save(&self) -> (String, u64, String) {
         let aux_track_ids = self.aux_track_ids_json();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return (String::new(), 0, aux_track_ids);
         };
         let raw = engine.project_layout_json();
@@ -135,7 +131,7 @@ impl HirariCore {
     /// Rust-owned Aux and other control-plane data must still be fingerprinted
     /// separately.
     pub fn native_project_layout_fingerprint(&self) -> u64 {
-        self.engine.as_ref().map_or(0, |engine| {
+        self.engine_opt().map_or(0, |engine| {
             let host = std::ptr::from_ref(engine.get_core())
                 .cast_mut()
                 .cast::<std::ffi::c_void>();
@@ -149,16 +145,14 @@ impl HirariCore {
     /// layout mutators or Rust-owned Aux identity change; it is not a content
     /// hash and must not replace exact command-generation validation.
     pub fn project_layout_revision(&self) -> u64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.get_project_layout_revision())
     }
 
     /// Cheap project dirty token for UI autosave polling. Includes native
     /// layout and scheduled MIDI-note revisions without serializing the layout.
     pub fn project_state_revision(&self) -> u64 {
-        let native = self.engine
-            .as_ref()
+        let native = self.engine_opt()
             .map_or(0, |engine| engine.get_project_state_revision());
         let revisions = [
             native,

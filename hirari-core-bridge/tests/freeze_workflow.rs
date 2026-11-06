@@ -9,8 +9,8 @@ use support::*;
 #[test]
 fn offline_engine_freezes_restores_and_unfreezes_through_the_rust_host() {
     let _guard = native_engine_test_guard();
-    let engine = ffi::new_audio_engine_offline();
-    let engine = engine.as_ref().expect("offline engine must be created");
+    let engine = hirari_core_bridge::new_audio_engine_offline();
+    let engine = &*engine;
     let track = engine.add_track(0);
     assert_ne!(track, 0);
 

@@ -4,8 +4,7 @@ impl HirariCore {
         published: &[(u32, PathBuf)],
     ) -> anyhow::Result<Vec<comping::TakeRegion>> {
         let layout = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .ok_or_else(|| anyhow::anyhow!("audio engine is unavailable"))?
             .project_layout_json();
         let tracks: Vec<NativeLayoutTrack> = serde_json::from_str(&layout)
@@ -27,7 +26,7 @@ impl HirariCore {
     }
 
     fn record_comping_history(&self, before: crate::comping::CompingOrchestrator) {
-        let depth = self.engine.as_ref().map(|engine| engine.get_undo_count());
+        let depth = self.engine_opt().map(|engine| engine.get_undo_count());
         self.record_comping_history_with_undo_depth(before, depth);
     }
 
@@ -393,7 +392,7 @@ impl HirariCore {
         self.begin_undo_transaction("Record Audio Tracks");
         let mut imported = true;
         for (track_id, path) in &published {
-            if !self.engine.as_ref().is_some_and(|engine| {
+            if !self.engine_opt().is_some_and(|engine| {
                 engine.add_region(
                     *track_id,
                     path.to_string_lossy().as_ref(),
@@ -579,7 +578,7 @@ impl HirariCore {
             }
             return Err(anyhow::anyhow!("multi-track recording undo transaction failed"));
         }
-        let undo_depth = self.engine.as_ref().map(|engine| engine.get_undo_count());
+        let undo_depth = self.engine_opt().map(|engine| engine.get_undo_count());
         self.record_comping_history_with_undo_depth(comping_before, undo_depth);
         if let Ok(mut slot) = self.recording_session.lock() {
             if let Some(session) = slot.as_mut() {
@@ -827,8 +826,7 @@ impl HirariCore {
 
         let start_sample = region.start_sample as f64;
         let imported = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .map(|engine| {
                 engine.add_region(track_id, path.to_string_lossy().as_ref(), start_sample)
             })
@@ -920,7 +918,7 @@ impl HirariCore {
                 .as_nanos()
         ));
         std::fs::copy(&source, &recovered)?;
-        let imported = self.engine.as_ref().is_some_and(|engine| {
+        let imported = self.engine_opt().is_some_and(|engine| {
             engine.add_region(track_id, recovered.to_string_lossy().as_ref(), 0.0)
         });
         if !imported {

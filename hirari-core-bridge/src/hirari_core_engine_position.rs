@@ -1,6 +1,6 @@
 impl HirariCore {
     pub fn set_playhead(&self, pos: u64) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.set_playhead(pos);
             let sample_rate = self.get_sample_rate().round().max(1.0) as u64;
             let clock = crate::production_timeline::MasterClock {
@@ -14,7 +14,7 @@ impl HirariCore {
     }
 
     pub fn set_playhead_diagnostic_json(&self, pos: u64) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_playhead(pos);
@@ -26,13 +26,13 @@ impl HirariCore {
         .to_string()
     }
     pub fn set_test_tone(&self, enabled: bool) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.set_test_tone(enabled);
         }
     }
 
     pub fn set_test_tone_diagnostic_json(&self, enabled: bool) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_test_tone(enabled);
@@ -89,8 +89,7 @@ impl HirariCore {
                 .to_owned();
         }
         let ok = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| engine.set_track_eq(tid, low_band, low_cut, high_band, high_cut));
         if ok {
             serde_json::json!({"ok":true,"operation":"set_eq","track_id":tid,"low_band":low_band,"low_cut":low_cut,"high_band":high_band,"high_cut":high_cut}).to_string()
@@ -105,7 +104,7 @@ impl HirariCore {
         if !gain_db.is_finite() || !(-24.0..=24.0).contains(&gain_db) {
             return serde_json::json!({"code":"invalid_parameter","message":"gain staging correction must be within -24..=24 dB","track_id":tid}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\"}".to_owned();
         };
         let before = engine.get_track_volume(tid);
@@ -116,20 +115,18 @@ impl HirariCore {
         serde_json::json!({"ok":true,"operation":"apply_gain_staging","track_id":tid,"gain_db":gain_db,"before":before,"after":after}).to_string()
     }
     pub fn set_track_delay_samples(&self, tid: u32, samples: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_track_delay_samples(tid, samples))
     }
     pub fn track_delay_samples(&self, tid: u32) -> Option<u32> {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map(|engine| engine.get_track_delay_samples(tid))
     }
     pub fn set_track_delay_samples_diagnostic_json(&self, tid: u32, samples: u32) -> String {
         if samples > 8192 {
             return serde_json::json!({"code":"invalid_parameter","message":"track delay must be within 0..=8192 samples","track_id":tid}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"code":"engine_unavailable","retryable":true}).to_string();
         };
         if engine.set_track_delay_samples(tid, samples) {
@@ -139,14 +136,13 @@ impl HirariCore {
         }
     }
     pub fn track_volume(&self, tid: u32) -> Option<f32> {
-        self.engine.as_ref().and_then(|engine| {
+        self.engine_opt().and_then(|engine| {
             let value = engine.get_track_volume(tid);
             value.is_finite().then_some(value)
         })
     }
     pub fn set_pan(&self, tid: u32, val: f32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_track_pan(tid, val))
     }
 
@@ -164,7 +160,7 @@ impl HirariCore {
         apply: F,
     ) -> String
     where
-        F: FnOnce(&crate::ffi::AudioEngine, u32, f32) -> bool,
+        F: FnOnce(&crate::AudioEngine, u32, f32) -> bool,
     {
         if !val.is_finite() {
             let error = crate::bridge_error::BridgeError::new(
@@ -176,7 +172,7 @@ impl HirariCore {
                 "{\"code\":\"diagnostic_serialization_failed\",\"retryable\":false}".to_owned()
             });
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if apply(engine, tid, val) {

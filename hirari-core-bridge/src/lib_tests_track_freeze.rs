@@ -7,7 +7,7 @@ static FREEZE_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::Atomic
 
 struct TrackFreezeEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
-    engine: cxx::UniquePtr<crate::ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
     track: u32,
     dir: std::path::PathBuf,
 }
@@ -15,9 +15,9 @@ struct TrackFreezeEngine {
 impl TrackFreezeEngine {
     fn new() -> Self {
         let guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let reference = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let reference = &*engine;
         let track = reference.add_track(0);
         assert_ne!(track, 0);
         reference.clear_undo_history();
@@ -35,8 +35,8 @@ impl TrackFreezeEngine {
         }
     }
 
-    fn engine(&self) -> &crate::ffi::AudioEngine {
-        self.engine.as_ref().unwrap()
+    fn engine(&self) -> &crate::AudioEngine {
+        &*self.engine
     }
 
     fn host(&self) -> *mut std::ffi::c_void {

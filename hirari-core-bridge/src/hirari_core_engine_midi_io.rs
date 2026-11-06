@@ -110,7 +110,7 @@ impl HirariCore {
                 ]
             })
             .collect();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         if !engine.replace_midi_notes(packed, true) {
@@ -197,7 +197,7 @@ impl HirariCore {
                 ]
             })
             .collect();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         if !engine.replace_midi_notes(packed, true) {
@@ -320,7 +320,7 @@ impl HirariCore {
                 ]
             })
             .collect();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         if !engine.replace_midi_notes(packed, true) {

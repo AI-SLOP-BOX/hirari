@@ -1,11 +1,10 @@
 impl HirariCore {
     pub fn add_plugin(&self, track_id: u32, plugin_type: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.add_plugin(track_id, plugin_type))
     }
     pub fn add_plugin_diagnostic_json(&self, track_id: u32, plugin_type: u32) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.add_plugin(track_id, plugin_type) {
@@ -28,7 +27,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return Vec::new();
         };
-        self.engine.as_ref().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| {
             engine
                 .get_plugin_state(track_id, plugin_index)
                 .into_iter()
@@ -46,7 +45,7 @@ impl HirariCore {
             })
             .to_string();
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return serde_json::json!({"ok": false, "code": "engine_unavailable"}).to_string();
         };
         let state = engine.get_plugin_state(track_id, plugin_index);
@@ -75,8 +74,7 @@ impl HirariCore {
         if state.len() > 4 * 1024 * 1024 {
             return false;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_plugin_state(track_id, plugin_index, state))
     }
 
@@ -103,7 +101,7 @@ impl HirariCore {
                 message: "plugin state exceeds the 4 MiB limit".into(),
             };
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return crate::PluginStateDiagnostic {
                 ok: false,
                 code: "engine_unavailable",
@@ -128,18 +126,16 @@ impl HirariCore {
     }
 
     pub fn remove_plugin(&self, track_id: u32, plugin_index: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.remove_plugin(track_id, plugin_index))
     }
 
     pub fn move_plugin(&self, track_id: u32, from_index: u32, to_index: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.move_plugin(track_id, from_index, to_index))
     }
     pub fn remove_plugin_diagnostic_json(&self, track_id: u32, plugin_index: u32) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.remove_plugin(track_id, plugin_index) {
@@ -182,8 +178,7 @@ impl HirariCore {
                 return false;
             }
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.add_sandboxed_plugin(track_id, path))
     }
 
@@ -191,7 +186,7 @@ impl HirariCore {
     /// bool API for UI bindings, but do not make CLI/LLM callers infer a
     /// missing plugin, unsupported format, and engine failure from `false`.
     pub fn add_sandboxed_plugin_diagnostic_json(&self, track_id: u32, path: &str) -> String {
-        let result = if self.engine.is_null() {
+        let result = if self.engine_none() {
             crate::bridge_error::BridgeError::new(
                 "engine_unavailable",
                 "audio engine is not available",
@@ -268,7 +263,7 @@ impl HirariCore {
     }
 
     pub fn last_sandbox_failure_text(&self, track_id: u32) -> String {
-        self.engine.as_ref().map_or_else(
+        self.engine_opt().map_or_else(
             || "engine-unavailable".to_owned(),
             // The native engine answers only for a track it resolved; naming an
             // unresolved id is this layer's decision.
@@ -287,8 +282,7 @@ impl HirariCore {
     }
 
     pub fn set_plugin_bypass(&self, track_id: u32, plugin_index: u32, bypassed: bool) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.set_plugin_bypass(track_id, plugin_index, bypassed))
     }
     pub fn set_plugin_bypass_diagnostic_json(
@@ -297,7 +291,7 @@ impl HirariCore {
         plugin_index: u32,
         bypassed: bool,
     ) -> String {
-        if self.engine.is_null() {
+        if self.engine_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.set_plugin_bypass(track_id, plugin_index, bypassed) {
@@ -316,14 +310,13 @@ impl HirariCore {
         .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
     pub fn get_plugin_bypass(&self, track_id: u32, plugin_index: u32) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.get_plugin_bypass(track_id, plugin_index))
     }
 
     pub fn set_macro_value(&self, macro_index: u32, value: f32) {
         if value.is_finite() {
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 engine.set_macro_value(macro_index, value.clamp(0.0, 1.0));
             }
             let mappings = self
@@ -353,7 +346,7 @@ impl HirariCore {
                     (normalized + mapping.curve * normalized * (1.0 - normalized)).clamp(0.0, 1.0)
                 };
                 let mapped = mapping.min + curved * (mapping.max - mapping.min);
-                let _ = self.engine.as_ref().is_some_and(|engine| {
+                let _ = self.engine_opt().is_some_and(|engine| {
                     engine.set_plugin_parameter_without_undo(
                         track_id,
                         plugin_index,

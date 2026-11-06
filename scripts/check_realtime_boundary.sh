@@ -3,19 +3,16 @@ set -euo pipefail
 
 # Static guard for the native audio callback boundary. This is deliberately
 # conservative: a new allocation, lock, filesystem call, or blocking wait in
-# processBlock must be reviewed explicitly instead of silently entering the RT
-# path through a refactor.
+# the engine's block walk must be reviewed explicitly instead of silently
+# entering the RT path through a refactor.
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 chain_host_file="$root_dir/hirari-core-bridge/src/effect_chain_host.rs"
 
-# The unified engine is split across *.inc parts, so search every part rather
-# than a single hardcoded file name. A guard that points at a stale path
-# silently stops guarding anything.
-shopt -s nullglob
-engine_parts=("$root_dir"/src/core/hirari_unified_engine_part_*.inc)
-shopt -u nullglob
+# The engine facade is one Rust module now (`engine_native.rs`); the old
+# *.inc C++ parts are gone.
+engine_parts=("$root_dir/hirari-core-bridge/src/engine_native.rs")
 
-if [ "${#engine_parts[@]}" -eq 0 ]; then
+if [ ! -f "${engine_parts[0]}" ]; then
     echo "realtime boundary check error: no unified engine sources found" >&2
     exit 2
 fi
@@ -78,12 +75,14 @@ assert_clean_body() {
 
 forbidden='lock_guard|unique_lock|std::mutex|std::string|std::vector|make_shared|make_unique|new |delete |ifstream|ofstream|filesystem|sleep_for|condition_variable'
 
-callback_body="$(extract_function 'HirariUnifiedEngine::processBlock(' "${engine_parts[@]}")"
-assert_clean_body "$callback_body" "HirariUnifiedEngine::processBlock" "$forbidden"
+# The engine facade is Rust, so the forbidden set is the Rust one: no
+# allocation, locking, formatting or blocking inside the block walk.
+callback_body="$(extract_function 'unsafe fn process_block(' "${engine_parts[0]}")"
+assert_clean_body "$callback_body" "engine_native process_block" "$rust_forbidden"
 
-direct_callback_body="$(extract_function 'HirariUnifiedEngine::processBlockDirect(' "${engine_parts[@]}")"
-if ! printf '%s\n' "$direct_callback_body" | search_quiet 'validInput' ||
-   ! printf '%s\n' "$direct_callback_body" | search_quiet 'kMaxAudioBlockSize'; then
+direct_callback_body="$(extract_function 'unsafe fn process_block_direct(' "${engine_parts[0]}")"
+if ! printf '%s\n' "$direct_callback_body" | search_quiet 'valid_input' ||
+   ! printf '%s\n' "$direct_callback_body" | search_quiet 'MAX_AUDIO_BLOCK_SIZE'; then
     echo "realtime boundary violation: direct callback input guard is missing" >&2
     exit 1
 fi
@@ -107,9 +106,9 @@ fi
 chain_process_body="$(extract_function 'fn hirari_effect_chain_process(' "$chain_host_file")"
 assert_clean_body "$chain_process_body" "hirari_effect_chain_process (Rust)" "$rust_forbidden"
 
-# The CoreAudio device callback is owned by Rust now, so the C++ guard above
-# cannot see it. Printing, formatting, allocating, or locking there blocks the
-# audio thread exactly like the C++ violations this script exists to catch.
+# The CoreAudio device callback is owned by Rust. Printing, formatting,
+# allocating, or locking there blocks the audio thread exactly like the
+# violations this script exists to catch.
 rust_driver="$root_dir/hirari-core-bridge/src/mac_audio_driver.rs"
 rust_callback_body="$(extract_function 'fn audio_unit_render_callback(' "$rust_driver")"
 assert_clean_body "$rust_callback_body" "audio_unit_render_callback (Rust)" "$rust_forbidden"

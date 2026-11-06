@@ -1,14 +1,13 @@
 impl HirariCore {
     pub fn set_playing(&self, p: bool) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             let _ = crate::engine_transport::try_set_playing(e, e.get_core(), p);
         }
     }
 
     pub fn try_set_playing(&self, p: bool) -> bool {
         let changed = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| crate::engine_transport::try_set_playing(engine, engine.get_core(), p));
         if changed {
             self.publish_production_event(if p {
@@ -21,7 +20,7 @@ impl HirariCore {
     }
 
     pub fn set_playing_diagnostic_json(&self, playing: bool) -> String {
-        if self.engine.as_ref().is_none() {
+        if self.engine_opt().is_none() {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         }
         if self.try_set_playing(playing) {
@@ -41,29 +40,27 @@ impl HirariCore {
         .to_string()
     }
     pub fn set_loop(&self, enabled: bool) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             e.set_loop(enabled);
         }
     }
 
     pub fn is_loop_enabled(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.is_loop_enabled())
     }
 
     pub fn cycle_start_sample(&self) -> u64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.cycle_start())
     }
 
     pub fn cycle_end_sample(&self) -> u64 {
-        self.engine.as_ref().map_or(0, |engine| engine.cycle_end())
+        self.engine_opt().map_or(0, |engine| engine.cycle_end())
     }
 
     pub fn set_loop_diagnostic_json(&self, enabled: bool) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_loop(enabled);
@@ -71,7 +68,7 @@ impl HirariCore {
     }
 
     pub fn set_metronome_diagnostic_json(&self, enabled: bool) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         engine.set_metronome_enabled(enabled);
@@ -89,7 +86,7 @@ impl HirariCore {
         end_sample: u64,
         enabled: bool,
     ) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if start_sample >= end_sample || !engine.set_cycle_range(start_sample, end_sample, enabled)
@@ -113,22 +110,20 @@ impl HirariCore {
         .to_string()
     }
     pub fn is_playing(&self) -> bool {
-        self.engine.as_ref().is_some_and(|e| e.is_playing())
+        self.engine_opt().is_some_and(|e| e.is_playing())
     }
     pub fn get_playhead(&self) -> u64 {
-        self.engine.as_ref().map_or(0, |e| e.get_playhead())
+        self.engine_opt().map_or(0, |e| e.get_playhead())
     }
     pub fn samples_to_beats(&self, samples: u64) -> f64 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0.0, |e| e.samples_to_beats(samples))
     }
     pub fn beats_to_samples(&self, beats: f64) -> u64 {
         if !beats.is_finite() || beats <= 0.0 {
             return 0;
         }
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |e| e.beats_to_samples(beats))
     }
     pub fn get_tempo_events(&self) -> Vec<f64> {
@@ -296,13 +291,12 @@ impl HirariCore {
     }
 
     pub fn master_gain(&self) -> f32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(1.0, |engine| engine.get_master_gain())
     }
 
     pub fn set_master_gain(&self, value: f32) -> bool {
-        self.engine.as_ref().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| {
             crate::master_edit_host::set_master_gain(
                 engine,
                 self.undo_state,

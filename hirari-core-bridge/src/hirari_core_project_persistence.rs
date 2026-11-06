@@ -86,7 +86,7 @@ impl HirariCore {
             .project_transaction
             .lock()
             .map_err(|_| anyhow::anyhow!("project transaction lock poisoned"))?;
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Err(anyhow::anyhow!("AudioEngine is unavailable"));
         };
         if engine.get_project_state_revision() != native_revision
@@ -171,7 +171,7 @@ impl HirariCore {
         bpm: f32,
         async_layout: Option<(String, u64, u64, String, Option<ProjectDocument>)>,
     ) -> anyhow::Result<ProjectDocument> {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Err(anyhow::anyhow!("AudioEngine is unavailable"));
         };
         // Use one canonical layout snapshot for document construction and

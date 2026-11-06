@@ -8,7 +8,7 @@ static HYDRATION_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::Ato
 
 struct PluginHydrationEngine {
     _guard: std::sync::MutexGuard<'static, ()>,
-    engine: cxx::UniquePtr<crate::ffi::AudioEngine>,
+    engine: Box<crate::AudioEngine>,
     path: String,
     audio_track: u32,
 }
@@ -16,9 +16,9 @@ struct PluginHydrationEngine {
 impl PluginHydrationEngine {
     fn new() -> Self {
         let guard = native_engine_test_guard();
-        let engine = crate::ffi::new_audio_engine();
-        assert!(!engine.is_null());
-        let reference = engine.as_ref().unwrap();
+        let engine = crate::new_audio_engine();
+        assert!(!false);
+        let reference = &*engine;
         let audio_track = reference.add_track(0);
         assert_ne!(audio_track, 0);
         reference.clear_undo_history();
@@ -34,8 +34,8 @@ impl PluginHydrationEngine {
         Self { _guard: guard, engine, path, audio_track }
     }
 
-    fn engine(&self) -> &crate::ffi::AudioEngine {
-        self.engine.as_ref().unwrap()
+    fn engine(&self) -> &crate::AudioEngine {
+        &*self.engine
     }
 
     fn host(&self) -> *mut std::ffi::c_void {

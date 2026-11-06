@@ -37,7 +37,7 @@ impl HirariCore {
         if !output.is_dir() {
             return serde_json::json!({"ok":false,"code":"invalid_export_directory"}).to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into();
         };
         let Ok(mut queue) = self.advanced_export.lock() else {
@@ -88,7 +88,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into();
         };
         let Ok(mut queue) = self.export_queue.lock() else {
@@ -147,7 +147,7 @@ impl HirariCore {
     /// fallback stays the only editor surface — the same answers the deleted C++
     /// stubs gave, now decided where the chain itself lives.
     pub fn open_plugin_native_editor_json(&self, _track: u32, _plugin: u32, _parent: u64) -> String {
-        if self.engine.as_ref().is_none() {
+        if self.engine_opt().is_none() {
             return r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into();
         }
         r#"{"ok":false,"code":"native_editor_unavailable","retryable":false}"#.into()
@@ -202,13 +202,11 @@ impl HirariCore {
         .to_string()
     }
     pub fn pause_render(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.pause_bounce())
     }
     pub fn resume_render(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.resume_bounce())
     }
     pub fn capture_mix_snapshot_json(&self, name: &str) -> String {
@@ -261,13 +259,13 @@ impl HirariCore {
         }
     }
     pub fn midi_clock_status_json(&self) -> String {
-        match self.engine.as_ref() {
+        match self.engine_opt() {
             Some(engine) => serde_json::json!({"ok":true,"ticks":engine.midi_clock_ticks(),"last_tick":engine.midi_clock_last_tick(),"bpm":engine.midi_clock_rate()}).to_string(),
             None => r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into(),
         }
     }
     pub fn midi_clock_tick_json(&self, timestamp: u64, bpm: Option<f64>) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return r#"{"ok":false,"code":"engine_unavailable","retryable":true}"#.into();
         };
         if let Some(rate) = bpm.filter(|value| value.is_finite() && (20.0..=300.0).contains(value))
@@ -370,7 +368,7 @@ impl HirariCore {
         if !sync.apply_mmc(command) {
             return r#"{"ok":false,"code":"sync_disabled","retryable":false}"#.into();
         }
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             match command {
                 crate::sync_transport::MmcCommand::Stop
                 | crate::sync_transport::MmcCommand::RecordPunchOut => {
@@ -411,7 +409,7 @@ impl HirariCore {
         if sync.set_timecode(timecode).is_err() {
             return r#"{"ok":false,"code":"invalid_mtc_timecode","retryable":false}"#.into();
         }
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             let rate = engine.get_sample_rate();
             if rate.is_finite() && rate > 0.0 {
                 let samples =
@@ -431,7 +429,7 @@ impl HirariCore {
             .lock()
             .map_err(|_| "MIDI note state unavailable".to_owned())?
             .clone();
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return Err("audio engine unavailable".into());
         };
         let packed_tempo = self.tempo_read_events();

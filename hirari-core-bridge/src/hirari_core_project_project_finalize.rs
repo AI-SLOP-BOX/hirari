@@ -2,7 +2,7 @@ impl HirariCore {
     fn finalize_loaded_project<F>(
         &self,
         document: &ProjectDocument,
-        engine: &crate::ffi::AudioEngine,
+        engine: &crate::AudioEngine,
         native_track_ids: &std::collections::HashMap<u32, u32>,
         rollback_path: &std::path::Path,
         persisted_control_room: Option<crate::control_room::ControlRoomState>,

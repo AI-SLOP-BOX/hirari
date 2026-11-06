@@ -112,8 +112,7 @@ impl HirariCore {
 
     fn control_snapshot_value(&self) -> serde_json::Value {
         let (cycle_start, cycle_end, cycle_enabled, metronome_enabled) = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .map(|engine| {
                 (
                     engine.cycle_start(),
@@ -258,7 +257,7 @@ impl HirariCore {
             return serde_json::to_string(&error)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(audio) = self.engine.as_ref() else {
+        let Some(audio) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         audio.set_macro_value(macro_index, value);
@@ -294,7 +293,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if !engine.bind_midi_cc_to_macro(
@@ -353,7 +352,7 @@ impl HirariCore {
             })
             .to_string();
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"ok\":false,\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if !engine.bind_midi_cc14_to_macro(
@@ -403,7 +402,7 @@ impl HirariCore {
         value: u8,
     ) {
         if channel <= 15 && controller <= 127 && value <= 127 {
-            if let Some(engine) = self.engine.as_ref() {
+            if let Some(engine) = self.engine_opt() {
                 engine.handle_midi_cc(channel, controller, value);
             }
             self.apply_persisted_midi_mapping(
@@ -428,7 +427,7 @@ impl HirariCore {
         if channel > 15 || controller > 16_383 || value > 16_383 {
             return;
         }
-        if let Some(engine) = self.engine.as_ref() {
+        if let Some(engine) = self.engine_opt() {
             engine.handle_midi_cc14(channel, controller, value);
         }
         self.apply_persisted_midi_mapping(
@@ -482,7 +481,7 @@ impl HirariCore {
                 };
                 let mapped =
                     mapping.min + shaped.clamp(0.0, 1.0) * (mapping.max - mapping.min);
-                if let Some(engine) = self.engine.as_ref() {
+                if let Some(engine) = self.engine_opt() {
                     engine.set_macro_value(macro_index, mapped);
                 }
                 continue;
@@ -500,7 +499,7 @@ impl HirariCore {
                     .as_ref()
                     .is_some_and(|acquired| !acquired.contains(&mapping.mapping_id))
             {
-                let Some(engine) = self.engine.as_ref() else {
+                let Some(engine) = self.engine_opt() else {
                     continue;
                 };
                 let current = engine.get_plugin_parameter(track_id, plugin_index, parameter_id);
@@ -521,7 +520,7 @@ impl HirariCore {
                 1.0 - (1.0 - normalized).powf(1.0 - mapping.curve * 3.0)
             };
             let mapped = mapping.min + shaped.clamp(0.0, 1.0) * (mapping.max - mapping.min);
-            let _ = self.engine.as_ref().is_some_and(|engine| {
+            let _ = self.engine_opt().is_some_and(|engine| {
                 engine.set_plugin_parameter_without_undo(
                     track_id,
                     plugin_index,

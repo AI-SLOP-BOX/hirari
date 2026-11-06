@@ -56,7 +56,7 @@ impl HirariCore {
     }
 
     pub fn undo(&self) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             if e.get_undo_count() == 0 {
                 if let Ok(mut history) = self.chord_history.lock() {
                     if let Some(entry) = history.pop() {
@@ -115,7 +115,7 @@ impl HirariCore {
     }
 
     pub fn begin_undo_transaction(&self, name: &str) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             if matches!(
                 name,
                 "Edit MIDI Notes"
@@ -154,7 +154,7 @@ impl HirariCore {
     }
 
     pub fn end_undo_transaction(&self) -> bool {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let ended = engine.end_undo_transaction();
@@ -200,8 +200,7 @@ impl HirariCore {
             .ok()
             .and_then(|mut pending| pending.take());
         let aborted = self
-            .engine
-            .as_ref()
+            .engine_opt()
             .is_some_and(|engine| engine.abort_undo_transaction());
         if aborted {
             if let Some((_, before, before_vibrato_rates)) = pending {
@@ -217,15 +216,15 @@ impl HirariCore {
     }
 
     pub fn set_automation_record_mode(&self, mode: u32) -> bool {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
-        let host = crate::engine_event_ops::host_from_core(crate::ffi::get_unified_engine(engine));
+        let host = crate::engine_event_ops::host_from_core(crate::get_unified_engine(engine));
         crate::engine_event_ops::set_automation_record_mode(host, mode)
     }
 
     pub fn undo_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let before = engine.get_undo_count();
@@ -304,7 +303,7 @@ impl HirariCore {
     }
 
     pub fn redo(&self) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             if e.get_redo_count() == 0 {
                 if let Ok(mut redo) = self.chord_redo_history.lock() {
                     if let Some(entry) = redo.pop() {
@@ -363,7 +362,7 @@ impl HirariCore {
     }
 
     pub fn redo_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let before = engine.get_redo_count();
@@ -451,14 +450,12 @@ impl HirariCore {
     }
 
     pub fn undo_depth(&self) -> u32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.get_undo_count())
     }
 
     pub fn redo_depth(&self) -> u32 {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .map_or(0, |engine| engine.get_redo_count())
     }
 
@@ -468,7 +465,7 @@ impl HirariCore {
             report_hirari_log(0, "Render failed: output path is not valid UTF-8");
             return;
         };
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return;
         };
         if engine.bounce_project(path_str, 0) {
@@ -494,7 +491,7 @@ impl HirariCore {
         if !is_wav_output_path(path) {
             return false;
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         engine.bounce_project_async(path, format)
@@ -509,7 +506,7 @@ impl HirariCore {
             return serde_json::to_string(&result)
                 .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned());
         }
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.bounce_project_async(path, 0) {
@@ -539,7 +536,7 @@ impl HirariCore {
     /// produce a finite value. This keeps an indeterminate render distinct
     /// from a disconnected engine.
     pub fn bounce_snapshot(&self) -> Option<BounceSnapshot> {
-        let engine = self.engine.as_ref()?;
+        let engine = self.engine_opt()?;
         let (progress, progress_available) =
             normalize_bounce_progress(engine.get_bounce_progress());
         Some(BounceSnapshot {
@@ -550,13 +547,12 @@ impl HirariCore {
     }
 
     pub fn cancel_render(&self) -> bool {
-        self.engine
-            .as_ref()
+        self.engine_opt()
             .is_some_and(|engine| engine.cancel_bounce())
     }
 
     pub fn cancel_render_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         let result = if engine.cancel_bounce() {
@@ -575,7 +571,7 @@ impl HirariCore {
     /// current track count, every non-bus fader moves 20% of the way toward
     /// it, and the result stays inside the unity fader range.
     pub fn apply_auto_mixing(&self) -> bool {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return false;
         };
         let Ok(tracks) = serde_json::from_str::<serde_json::Value>(&self.get_project_layout_json())
@@ -609,13 +605,13 @@ impl HirariCore {
         self.apply_auto_mixing();
     }
     pub fn execute_auto_arrangement(&self) {
-        if let Some(e) = self.engine.as_ref() {
+        if let Some(e) = self.engine_opt() {
             let _ = e.execute_auto_arrangement();
         }
     }
 
     pub fn execute_auto_mixing_diagnostic_json(&self) -> String {
-        let Some(_engine) = self.engine.as_ref() else {
+        let Some(_engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if self.apply_auto_mixing() {
@@ -632,7 +628,7 @@ impl HirariCore {
     }
 
     pub fn execute_auto_arrangement_diagnostic_json(&self) -> String {
-        let Some(engine) = self.engine.as_ref() else {
+        let Some(engine) = self.engine_opt() else {
             return "{\"code\":\"engine_unavailable\",\"retryable\":true}".to_owned();
         };
         if engine.execute_auto_arrangement() {
