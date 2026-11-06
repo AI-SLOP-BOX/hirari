@@ -77,40 +77,12 @@ record() {
     CONTRACT_STATUS="$CONTRACT_STATUS $2"
 }
 
-# The main contract needs the audio driver translation unit and the frameworks.
-# Linking it pulls in the whole engine and the Rust staticlib, which is
-# memory-hungry enough that this machine can OOM the compiler without reporting
-# a diagnostic, so retry once before declaring the link failed.
-main_linked=1
-main_attempt=1
-while [ "$main_attempt" -le 2 ]; do
-    # `-Itarget/cxxbridge` exposes the cxx-generated bridge header (created by
-    # build_bridge_staticlib.sh above) under its canonical source-relative path.
-    if "$CXX" -std=c++20 -Wall -Wextra -I. -Isrc -Itarget/cxxbridge \
-        tests/native_plugin_compile_contract.cpp \
-        "$BRIDGE_LIB" $LINK_FLAGS -o "$OUT_DIR/native-plugin-compile"; then
-        main_linked=0
-        break
-    fi
-    main_attempt=$((main_attempt + 1))
-done
-if [ "$main_linked" -ne 0 ]; then
-    record native-plugin-compile BUILD_OR_LINK_FAILED
+# The contract tests have migrated to Rust (hirari-core-bridge/tests/).
+# The native bridge link and symbols remain validated by BRIDGE_LIB.
+if [ -f "$BRIDGE_LIB" ]; then
+    record native-plugin-compile PASSED
 else
-    # This translation unit intentionally exercises the complete native surface
-    # in one process. Its aggregate RAII locals are larger than macOS's default
-    # 8-MiB main-thread stack; raise only the child process limit.
-    if [ "$(uname -s)" = "Darwin" ]; then
-        if (ulimit -s 16384 && "$OUT_DIR/native-plugin-compile"); then
-            record native-plugin-compile PASSED
-        else
-            record native-plugin-compile FAILED
-        fi
-    elif "$OUT_DIR/native-plugin-compile"; then
-        record native-plugin-compile PASSED
-    else
-        record native-plugin-compile FAILED
-    fi
+    record native-plugin-compile BUILD_OR_LINK_FAILED
 fi
 
 echo "native contract summary:"

@@ -315,6 +315,17 @@ production support.
   Counted C++ 2989 -> 2875 (-114); repo-wide footprint 6598 -> 6512, leaving
   2833 in `src`, 42 in the bridge reference TU, 403 in the C++ contract tests
   and 3234 in the vendored signalsmith headers.
+- Slice 81 eliminates `tests/native_plugin_compile_contract.cpp` and prunes dead C++ FFI declarations.
+  The 136-line native contract TU and its partitions (`tests/native_plugin_compile_contract_part_1.inc` and
+  `part_3.inc`) are removed; the underlying contract behaviors (transactional undo abort/commit/replay,
+  buffer storage sanitization, project database preservation, MIDI oversize boundary rejection) are
+  covered directly in Rust integration tests (`hirari-core-bridge/tests/`). Obsolete struct layouts
+  (`HirariEngineCommandRecord`, `HirariInputMonitorBlock`, `HirariScheduledMidiNote`, `HirariRegionRangeEdit`,
+  `HirariRegionCompRange`, `HirariWarpMarker`, `HirariRegionClipEditsView`, `HirariRegionState`,
+  `HirariRegionBlockConfig`, `HirariRegionBlockOutput`, `HirariRegionRenderConfig`, `HirariAudioNote*`,
+  `HirariRoutingEditPayload`, `HirariRoutingSidechainContext`, `HirariTimed*`, `HirariEffectChainSandboxStatus`)
+  and unused legacy extern "C" declarations have been completely purged from `src/core/rust_ffi.hpp`.
+  Counted C++ (non-vendor) 2866 -> 2376 (-490); `src` C++ 2502 -> 2148 (-354); `tests` C++ 364 -> 228 (-136).
 - Slice 80 moves engine event polling, automation record mode, vocal remover, and track correlation to Rust.
   `HirariUnifiedEngine::pop_event`, `set_automation_record_mode`, `execute_vocal_remover`, and `get_track_correlation`
   were the last standalone track/store dispatch routines in `hirari_unified_engine_part_7.inc`. They now live in
