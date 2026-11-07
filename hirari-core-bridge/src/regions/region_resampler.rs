@@ -163,6 +163,7 @@ fn interpolate_hermite(y0: f32, y1: f32, y2: f32, y3: f32, t: f32) -> f32 {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "dsp-differential-reference")]
     use super::hirari_region_read_warped;
 
     #[cfg(feature = "dsp-differential-reference")]

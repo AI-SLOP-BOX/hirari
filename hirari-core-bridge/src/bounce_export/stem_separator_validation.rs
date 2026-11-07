@@ -73,44 +73,6 @@ pub fn validate_model(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_stem_separator_validate_model(
-    backend: u8,
-    model_path: *const u8,
-    model_path_len: usize,
-    model_sample_rate: u32,
-    max_channels: u32,
-) -> u8 {
-    if backend == 0 {
-        return 0;
-    }
-    if model_path_len == 0 {
-        return 1;
-    }
-    if model_sample_rate < 8_000 || model_sample_rate > 384_000 {
-        return 2;
-    }
-    if max_channels == 0 || max_channels > 32 {
-        return 3;
-    }
-    if model_path.is_null() {
-        return 1;
-    }
-    // SAFETY: The caller promises `model_path_len` readable bytes at `model_path`.
-    let bytes = unsafe { std::slice::from_raw_parts(model_path, model_path_len) };
-    #[cfg(unix)]
-    let path = {
-        use std::os::unix::ffi::OsStrExt;
-        Path::new(std::ffi::OsStr::from_bytes(bytes))
-    };
-    #[cfg(not(unix))]
-    let path = match std::str::from_utf8(bytes) {
-        Ok(path) => Path::new(path),
-        Err(_) => return 4,
-    };
-    validate_model_file(backend, path)
-}
-
-#[no_mangle]
 pub extern "C" fn hirari_stem_separator_backend_name(backend: u8) -> *const c_char {
     // Every arm is a NUL-terminated C string literal.
     let name: &'static CStr = match backend {

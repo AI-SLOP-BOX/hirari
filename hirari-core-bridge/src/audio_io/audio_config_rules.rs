@@ -22,12 +22,6 @@ pub(crate) fn apply_config_valid(tempo: f32, sample_rate: f64, block_size: u32) 
         && sample_format_valid(sample_rate, block_size)
 }
 
-/// Full configuration request: tempo, sample rate and block size.
-#[no_mangle]
-pub extern "C" fn hirari_audio_config_valid(tempo: f32, sample_rate: f64, block_size: u32) -> bool {
-    apply_config_valid(tempo, sample_rate, block_size)
-}
-
 /// Format-only negotiation used by `prepareToPlay` before a device is prepared.
 #[no_mangle]
 pub extern "C" fn hirari_audio_format_valid(sample_rate: f64, block_size: u32) -> bool {

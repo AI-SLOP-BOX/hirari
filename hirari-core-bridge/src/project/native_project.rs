@@ -7,8 +7,6 @@
 //! file with a JSON parser error.
 
 use crate::ffi::{NativeArrangerPartState, NativeMarkerState, NativeProjectState, NativeRouteState, NativeSidechainState, NativeTrackState, };
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -610,20 +608,6 @@ pub(crate) fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
-/// Shared CRC32 entrypoint for native compatibility code. An empty input has
-/// the standard CRC32 value of zero; a null pointer with nonzero length is
-/// rejected without constructing an invalid Rust slice.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_crc32_bytes(data: *const u8, size: usize) -> u32 {
-    if size == 0 {
-        return crc32(&[]);
-    }
-    if data.is_null() {
-        return 0;
-    }
-    crc32(std::slice::from_raw_parts(data, size))
-}
-
 /// Bridge entrypoint: decode an `ARUA` container into the engine state record.
 pub fn native_project_load(path: &str) -> NativeProjectState {
     load_state(path)
@@ -761,8 +745,6 @@ mod tests {
     #[test]
     fn rejects_duplicate_tracks_orphan_regions_corruption_and_oversize() {
         use crate::ffi::{NativeRegionState, NativeTrackState};
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
 
         let track = NativeTrackState {
             id: 7,
@@ -838,8 +820,6 @@ use crate::HirariUnifiedEngine;
 
     fn v42_document() -> NativeProjectState {
         use crate::ffi::{NativeRegionState, NativeRouteState, NativeSidechainState, NativeTrackState, };
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
         let audio = |id: u32| NativeTrackState {
             id,
             trackType: 0,

@@ -224,19 +224,6 @@ fn range_with(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_region_audio_interleaved(
-    host: *mut c_void,
-    track_id: u32,
-    region_id: u32,
-    max_frames: u32,
-) -> *mut c_void {
-    let Some(ops) = host_ops() else {
-        return float_buffer(Vec::new());
-    };
-    float_buffer(interleaved_with(&ops, host, track_id, region_id, max_frames))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_region_audio_interleaved_range(
     host: *mut c_void,
     track_id: u32,

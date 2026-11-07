@@ -5,7 +5,6 @@
 
 use std::ffi::c_void;
 
-use crate::ffi;
 use crate::midi_note_edit::{
     hirari_midi_notes_edit_range, hirari_midi_notes_pack, hirari_midi_notes_replace,
     hirari_midi_notes_snapshot_take, hirari_midi_notes_snapshot_take_free,

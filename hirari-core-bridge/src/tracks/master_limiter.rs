@@ -6,10 +6,6 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const LOOKAHEAD_CAPACITY: usize = 2048;
 const LOOKAHEAD_MASK: usize = LOOKAHEAD_CAPACITY - 1;
-const STATE_MAGIC: u32 = 0x4155_5241;
-const STATE_VERSION: u16 = 1;
-const STATE_BYTES: usize = 32;
-
 pub struct MasterLimiter {
     sample_rate: f64,
     threshold_gain: AtomicU32,
@@ -190,51 +186,7 @@ impl MasterLimiter {
         (30.0 * self.sample_rate).min(release_ms as f64 * 0.001 * self.sample_rate * 8.0) as u32
     }
 
-    fn set_control(&self, control: u32, value: f32) {
-        if !value.is_finite() {
-            return;
-        }
-        let stored = match control {
-            0 => 10.0f32.powf(value.clamp(-60.0, 24.0) / 20.0),
-            1 => 10.0f32.powf(value.clamp(-60.0, 0.0) / 20.0),
-            2 => value.clamp(1.0, 1000.0),
-            3 => value.clamp(0.0, 20.0),
-            _ => return,
-        };
-        let target = match control {
-            0 => &self.threshold_gain,
-            1 => &self.ceiling,
-            2 => &self.release_ms,
-            _ => &self.lookahead_ms,
-        };
-        target.store(stored.to_bits(), Ordering::Relaxed);
-    }
-
-    fn set_parameter(&self, id: u32, value: f32) {
-        if !value.is_finite() {
-            return;
-        }
-        match id {
-            0 => self.set_control(0, -60.0 + value * 84.0),
-            1 => self.set_control(1, -60.0 + value * 60.0),
-            2 => self.set_control(2, 1.0 + value * 999.0),
-            3 => self.set_control(3, value * 20.0),
-            _ => {}
-        }
-    }
-
-    fn parameter(&self, id: u32) -> f32 {
-        let load = |value: &AtomicU32| f32::from_bits(value.load(Ordering::Relaxed));
-        match id {
-            0 => ((20.0 * load(&self.threshold_gain).max(0.001).log10() + 60.0) / 84.0)
-                .clamp(0.0, 1.0),
-            1 => ((20.0 * load(&self.ceiling).max(0.001).log10() + 60.0) / 60.0).clamp(0.0, 1.0),
-            2 => ((load(&self.release_ms) - 1.0) / 999.0).clamp(0.0, 1.0),
-            3 => (load(&self.lookahead_ms) / 20.0).clamp(0.0, 1.0),
-            _ => 0.0,
-        }
-    }
-}
+            }
 
 #[no_mangle]
 pub extern "C" fn hirari_master_limiter_create(sample_rate: f64) -> *mut c_void {
@@ -286,126 +238,6 @@ pub unsafe extern "C" fn hirari_master_limiter_process(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_master_limiter_set_control(
-    state: *const c_void,
-    control: u32,
-    value: f32,
-) {
-    if let Some(state) = unsafe { state.cast::<MasterLimiter>().as_ref() } {
-        state.set_control(control, value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_limiter_set_parameter(
-    state: *const c_void,
-    id: u32,
-    value: f32,
-) {
-    if let Some(state) = unsafe { state.cast::<MasterLimiter>().as_ref() } {
-        state.set_parameter(id, value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_limiter_parameter(state: *const c_void, id: u32) -> f32 {
-    unsafe { state.cast::<MasterLimiter>().as_ref() }.map_or(0.0, |state| state.parameter(id))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_limiter_save_state(
-    state: *const c_void,
-    bypassed: u8,
-    mix: f32,
-    sidechain_bus_id: u32,
-    output: *mut u8,
-    capacity: usize,
-) -> usize {
-    let Some(state) = (unsafe { state.cast::<MasterLimiter>().as_ref() }) else {
-        return 0;
-    };
-    if output.is_null() || capacity < STATE_BYTES || !mix.is_finite() || !(0.0..=1.0).contains(&mix)
-    {
-        return 0;
-    }
-    let bytes = unsafe { std::slice::from_raw_parts_mut(output, STATE_BYTES) };
-    bytes.fill(0);
-    bytes[0..4].copy_from_slice(&STATE_MAGIC.to_ne_bytes());
-    bytes[4..6].copy_from_slice(&STATE_VERSION.to_ne_bytes());
-    let flags: u16 = if bypassed != 0 { 1 } else { 0 };
-    bytes[6..8].copy_from_slice(&flags.to_ne_bytes());
-    bytes[8..12].copy_from_slice(&mix.to_ne_bytes());
-    bytes[12..16].copy_from_slice(&sidechain_bus_id.to_ne_bytes());
-    for (index, parameter) in (0..4).map(|id| state.parameter(id)).enumerate() {
-        bytes[16 + index * 4..20 + index * 4].copy_from_slice(&parameter.to_ne_bytes());
-    }
-    STATE_BYTES
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_limiter_restore_state(
-    state: *const c_void,
-    input: *const u8,
-    length: usize,
-    bypassed: *mut u8,
-    mix: *mut f32,
-    sidechain_bus_id: *mut u32,
-) -> bool {
-    let Some(state) = (unsafe { state.cast::<MasterLimiter>().as_ref() }) else {
-        return false;
-    };
-    if input.is_null()
-        || length != STATE_BYTES
-        || bypassed.is_null()
-        || mix.is_null()
-        || sidechain_bus_id.is_null()
-    {
-        return false;
-    }
-    let bytes = unsafe { std::slice::from_raw_parts(input, STATE_BYTES) };
-    let read_u16 = |offset: usize| u16::from_ne_bytes([bytes[offset], bytes[offset + 1]]);
-    let read_u32 = |offset: usize| {
-        u32::from_ne_bytes([
-            bytes[offset],
-            bytes[offset + 1],
-            bytes[offset + 2],
-            bytes[offset + 3],
-        ])
-    };
-    let read_f32 = |offset: usize| {
-        f32::from_ne_bytes([
-            bytes[offset],
-            bytes[offset + 1],
-            bytes[offset + 2],
-            bytes[offset + 3],
-        ])
-    };
-    let flags = read_u16(6);
-    let restored_mix = read_f32(8);
-    let values = [read_f32(16), read_f32(20), read_f32(24), read_f32(28)];
-    if read_u32(0) != STATE_MAGIC
-        || read_u16(4) != STATE_VERSION
-        || flags & !1 != 0
-        || !restored_mix.is_finite()
-        || !(0.0..=1.0).contains(&restored_mix)
-        || values
-            .iter()
-            .any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-    {
-        return false;
-    }
-    for (id, value) in values.into_iter().enumerate() {
-        state.set_parameter(id as u32, value);
-    }
-    unsafe {
-        bypassed.write((flags & 1) as u8);
-        mix.write(restored_mix);
-        sidechain_bus_id.write(read_u32(12));
-    }
-    true
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_master_limiter_latency(state: *const c_void) -> u32 {
     unsafe { state.cast::<MasterLimiter>().as_ref() }.map_or(0, |state| {
         state.latency_samples(f32::from_bits(state.lookahead_ms.load(Ordering::Relaxed)))
@@ -421,7 +253,9 @@ pub unsafe extern "C" fn hirari_master_limiter_tail(state: *const c_void) -> u32
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "dsp-differential-reference")]
     use super::MasterLimiter;
+    #[cfg(feature = "dsp-differential-reference")]
     use std::sync::atomic::Ordering;
 
     #[cfg(feature = "dsp-differential-reference")]

@@ -2,7 +2,7 @@
 
 use std::alloc::{alloc, dealloc, Layout};
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 thread_local! {
     static AUDIO_BUFFER_REALTIME_GUARD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -10,90 +10,6 @@ thread_local! {
 static AUDIO_BUFFER_RESIZE_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
 static AUDIO_BUFFER_LAST_REQUESTED_CAPACITY: AtomicUsize = AtomicUsize::new(0);
 static AUDIO_BUFFER_LAST_CAPACITY: AtomicUsize = AtomicUsize::new(0);
-
-struct BuiltinGainState {
-    gain: AtomicU32,
-    prepared: AtomicBool,
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_builtin_gain_create() -> *mut c_void {
-    Box::into_raw(Box::new(BuiltinGainState {
-        gain: AtomicU32::new(1.0f32.to_bits()),
-        prepared: AtomicBool::new(false),
-    }))
-    .cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_builtin_gain_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        unsafe { drop(Box::from_raw(state.cast::<BuiltinGainState>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_builtin_gain_prepare(
-    state: *const c_void,
-    sample_rate: f64,
-    block_size: u32,
-) {
-    if let Some(state) = unsafe { state.cast::<BuiltinGainState>().as_ref() } {
-        state.prepared.store(
-            sample_rate.is_finite() && sample_rate > 0.0 && block_size > 0,
-            Ordering::Release,
-        );
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_builtin_gain_set_parameter(
-    state: *const c_void,
-    id: u32,
-    value: f32,
-) {
-    if id != 0 || !value.is_finite() {
-        return;
-    }
-    if let Some(state) = unsafe { state.cast::<BuiltinGainState>().as_ref() } {
-        state
-            .gain
-            .store(value.clamp(0.0, 4.0).to_bits(), Ordering::Relaxed);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_builtin_gain_get_parameter(state: *const c_void, id: u32) -> f32 {
-    if id != 0 {
-        return 0.0;
-    }
-    unsafe { state.cast::<BuiltinGainState>().as_ref() }.map_or(0.0, |state| {
-        f32::from_bits(state.gain.load(Ordering::Relaxed))
-    })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_builtin_gain_process_state(
-    state: *const c_void,
-    channels: *const *mut f32,
-    channel_count: u32,
-    sample_count: u32,
-) -> u32 {
-    let Some(state) = (unsafe { state.cast::<BuiltinGainState>().as_ref() }) else {
-        return 0;
-    };
-    if !state.prepared.load(Ordering::Acquire) {
-        return 0;
-    }
-    unsafe {
-        hirari_builtin_gain_process(
-            channels,
-            channel_count,
-            sample_count,
-            f32::from_bits(state.gain.load(Ordering::Relaxed)),
-        )
-    }
-}
 
 const AUDIO_BUFFER_INLINE_CHANNELS: usize = 16;
 
@@ -263,33 +179,6 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_reserve(
     true
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_release(storage: *mut std::ffi::c_void) {
-    if let Some(storage) = storage.cast::<AlignedAudioStorage>().as_mut() {
-        storage.release();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_data(
-    storage: *const std::ffi::c_void,
-) -> *mut f32 {
-    storage
-        .cast::<AlignedAudioStorage>()
-        .as_ref()
-        .map_or(std::ptr::null_mut(), |storage| storage.samples)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_capacity(
-    storage: *const std::ffi::c_void,
-) -> usize {
-    storage
-        .cast::<AlignedAudioStorage>()
-        .as_ref()
-        .map_or(0, |storage| storage.capacity)
-}
-
 /// Reserves the planar channel pointer table used by the C++ AudioBuffer
 /// compatibility facade. Allocation is only requested from its control path.
 #[no_mangle]
@@ -360,14 +249,6 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_pointers(
 ) -> *mut *mut f32 {
     unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
         .map_or(std::ptr::null_mut(), |storage| storage.channel_pointers())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_channel_count(
-    storage: *const c_void,
-) -> usize {
-    unsafe { storage.cast::<AlignedAudioStorage>().as_ref() }
-        .map_or(0, |storage| storage.pointer_count)
 }
 
 /// Applies the AudioBuffer growth plan on the Rust side. Status is 0 for
@@ -577,20 +458,6 @@ pub unsafe extern "C" fn hirari_audio_buffer_storage_read_pointer(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_storage_write_pointer_at(
-    storage: *const c_void,
-    channel: u32,
-    offset: u32,
-) -> *mut f32 {
-    let pointer = unsafe { hirari_audio_buffer_storage_write_pointer(storage, channel) };
-    if pointer.is_null() {
-        return std::ptr::null_mut();
-    }
-    let samples = unsafe { hirari_audio_buffer_storage_samples(storage) };
-    unsafe { pointer.add(offset.min(samples) as usize) }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_audio_buffer_storage_clear(
     storage_handle: *const c_void,
     offset: u32,
@@ -732,18 +599,6 @@ pub extern "C" fn hirari_audio_buffer_realtime_resize_attempts() -> u64 {
 #[no_mangle]
 pub extern "C" fn hirari_audio_buffer_last_realtime_requested_capacity() -> usize {
     AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.load(Ordering::Relaxed)
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_audio_buffer_last_realtime_capacity() -> usize {
-    AUDIO_BUFFER_LAST_CAPACITY.load(Ordering::Relaxed)
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_audio_buffer_reset_realtime_resize_stats() {
-    AUDIO_BUFFER_RESIZE_ATTEMPTS.store(0, Ordering::Relaxed);
-    AUDIO_BUFFER_LAST_REQUESTED_CAPACITY.store(0, Ordering::Relaxed);
-    AUDIO_BUFFER_LAST_CAPACITY.store(0, Ordering::Relaxed);
 }
 
 #[no_mangle]
@@ -997,47 +852,6 @@ pub unsafe extern "C" fn hirari_builtin_gain_process(
         }
     }
     sanitized
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_copy(
-    destination_left: *mut f32,
-    destination_right: *mut f32,
-    source_left: *const f32,
-    source_right: *const f32,
-    sample_count: u32,
-) -> bool {
-    if sample_count == 0 {
-        return !source_left.is_null() && !source_right.is_null();
-    }
-    if destination_left.is_null()
-        || destination_right.is_null()
-        || source_left.is_null()
-        || source_right.is_null()
-    {
-        return false;
-    }
-    std::ptr::copy(source_left, destination_left, sample_count as usize);
-    std::ptr::copy(source_right, destination_right, sample_count as usize);
-    true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_buffer_magnitude(
-    samples: *const f32,
-    sample_count: u32,
-) -> f32 {
-    if samples.is_null() {
-        return 0.0;
-    }
-    let mut maximum = 0.0_f32;
-    for index in 0..sample_count as usize {
-        let magnitude = (*samples.add(index)).abs();
-        if magnitude > maximum {
-            maximum = magnitude;
-        }
-    }
-    maximum
 }
 
 #[cfg(test)]

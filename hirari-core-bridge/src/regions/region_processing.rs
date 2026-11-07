@@ -269,33 +269,6 @@ pub unsafe extern "C" fn hirari_region_set_trim_geometry(
     true
 }
 
-/// Repositions a trimmed region while retaining the source/timeline anchor
-/// represented by its base start and source offset.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_move_geometry(
-    region: *const NativeRegionGeometry,
-    new_start: u64,
-    output: *mut NativeRegionGeometry,
-) -> bool {
-    let (Some(region), Some(output)) = (region.as_ref(), output.as_mut()) else {
-        return false;
-    };
-    let source_trim = region
-        .source_offset
-        .saturating_sub(region.base_source_offset);
-    let Some(source_per_timeline) = source_frames_per_timeline_frame(region) else {
-        return false;
-    };
-    let timeline_trim = (source_trim as f64 / source_per_timeline).ceil();
-    if !timeline_trim.is_finite() || timeline_trim < 0.0 || timeline_trim > new_start as f64 {
-        return false;
-    }
-    *output = *region;
-    output.start = new_start;
-    output.base_start = new_start.saturating_sub(timeline_trim as u64);
-    true
-}
-
 /// Validates, clips, and orders a Track region's non-destructive range edits.
 /// The realtime renderer consumes this normalized array without extra scans
 /// for malformed project data.
@@ -1769,11 +1742,11 @@ pub unsafe extern "C" fn hirari_region_processor_apply_gain_fade(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+use super::*;
 
     #[test]
     fn region_range_edits_are_bounded_validated_and_sorted() {
-        let mut edits = [
+        let edits = [
             NativeRangeEdit {
                 start: 12,
                 end: 40,
@@ -1845,7 +1818,10 @@ mod tests {
         unsafe { hirari_free_range_edits(normalized, count) };
         assert_eq!(edits.len(), 5, "input must not be modified in place");
     }
+
+    #[cfg(feature = "dsp-differential-reference")]
     use crate::audio_note_curve::{HirariAudioNoteAnchor, HirariAudioNoteCurveView};
+    #[cfg(feature = "dsp-differential-reference")]
     use crate::region_warp::HirariWarpMarker;
 
     #[test]
@@ -2432,7 +2408,7 @@ pub unsafe extern "C" fn hirari_region_range_edits_apply(
     result.sort_by_key(|edit| edit.start);
     let length = result.len();
     unsafe { *out_count = length };
-    let mut boxed = result.into_boxed_slice();
+    let boxed = result.into_boxed_slice();
     Box::into_raw(boxed) as *mut NativeRangeEdit
 }
 

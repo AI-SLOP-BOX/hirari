@@ -1,80 +1,4 @@
-use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
-
-#[no_mangle]
-pub extern "C" fn hirari_parameter_smoother_create(initial: f32) -> *mut c_void {
-    Box::into_raw(Box::new(SmootherOrchestrator::new(initial))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<SmootherOrchestrator>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_set_target(state: *const c_void, value: f32) {
-    if !value.is_finite() {
-        return;
-    }
-    if let Some(state) = state.cast::<SmootherOrchestrator>().as_ref() {
-        state.set_target(value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_reset(state: *const c_void, value: f32) {
-    if !value.is_finite() {
-        return;
-    }
-    if let Some(state) = state.cast::<SmootherOrchestrator>().as_ref() {
-        state.reset(value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_set_time(
-    state: *const c_void,
-    milliseconds: f32,
-    sample_rate: f32,
-) {
-    let Some(state) = state.cast::<SmootherOrchestrator>().as_ref() else {
-        return;
-    };
-    state.set_smoothing_time(milliseconds, sample_rate);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_process(
-    state: *const c_void,
-    buffer: *mut f32,
-    length: u32,
-) {
-    let Some(state) = state.cast::<SmootherOrchestrator>().as_ref() else {
-        return;
-    };
-    if buffer.is_null() {
-        return;
-    }
-    state.process_raw(buffer, length as usize);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_next(state: *const c_void) -> f32 {
-    let Some(state) = state.cast::<SmootherOrchestrator>().as_ref() else {
-        return 0.0;
-    };
-    state.next_value()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_parameter_smoother_current(state: *const c_void) -> f32 {
-    state
-        .cast::<SmootherOrchestrator>()
-        .as_ref()
-        .map_or(0.0, SmootherOrchestrator::current)
-}
 
 pub struct SmootherOrchestrator {
     target_bits: AtomicU32,
@@ -210,7 +134,7 @@ mod tests {
 
     #[test]
     fn process_writes_a_monotonic_ramp_towards_target() {
-        let mut smoother = SmootherOrchestrator::new(0.0);
+        let smoother = SmootherOrchestrator::new(0.0);
         smoother.set_smoothing_time(10.0, 48_000.0);
         smoother.set_target(1.0);
         let mut buffer = [0.0; 8];
@@ -222,7 +146,7 @@ mod tests {
 
     #[test]
     fn non_finite_target_does_not_poison_output() {
-        let mut smoother = SmootherOrchestrator::new(0.25);
+        let smoother = SmootherOrchestrator::new(0.25);
         smoother.set_target(f32::NAN);
         let mut buffer = [0.0; 4];
         smoother.process(&mut buffer);

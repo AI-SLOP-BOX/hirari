@@ -100,17 +100,7 @@ impl MidiLearnState {
         self.publish(&mut store, mappings);
     }
 
-    fn remove_mapping(&self, controller: u16, channel: u8) {
-        if controller > 127 || channel > 16 {
-            return;
-        }
-        let mut store = self.snapshots.lock().unwrap_or_else(|e| e.into_inner());
-        let mut mappings = store.active.as_ref().clone();
-        mappings.retain(|mapping| mapping.controller != controller || mapping.channel != channel);
-        self.publish(&mut store, mappings);
-    }
-
-    fn handle(&self, channel: u8, controller: u16, value: u16, fourteen_bit: bool) {
+        fn handle(&self, channel: u8, controller: u16, value: u16, fourteen_bit: bool) {
         if channel > 15
             || controller > if fourteen_bit { 16_383 } else { 127 }
             || value > if fourteen_bit { 16_383 } else { 127 }
@@ -240,13 +230,6 @@ pub unsafe extern "C" fn hirari_midi_learn_add_mapping_14bit(
             pickup,
             true,
         );
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_midi_learn_remove_mapping(state: *mut c_void, cc: u8, channel: u8) {
-    if let Some(state) = unsafe { state.cast::<MidiLearnState>().as_ref() } {
-        state.remove_mapping(cc as u16, channel);
     }
 }
 

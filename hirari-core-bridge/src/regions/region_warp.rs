@@ -176,7 +176,7 @@ mod normalization_tests {
 
     #[test]
     fn warp_marker_normalization_bounds_and_enforces_monotonic_mapping() {
-        let mut markers = [
+        let markers = [
             HirariWarpMarker {
                 source_sample: 20,
                 timeline_sample: 20,

@@ -21,8 +21,6 @@ use crate::effect_chain_host::{
     hirari_effect_chain_processor_state_restore, hirari_effect_chain_set_bypass,
 };
 use crate::ffi::{NativeAutomationPoint, NativeProjectState, NativeTrackState, NativeTrackStorages, };
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
 use crate::track_automation_store::{
     hirari_track_automation_store_set_plugin_lanes, hirari_track_automation_store_set_points,
     AutomationPoint, PluginLaneView,

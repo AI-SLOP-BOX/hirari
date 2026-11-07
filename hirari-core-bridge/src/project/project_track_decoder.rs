@@ -5,8 +5,6 @@
 //! owned [`NativeTrackState`] records from the bridge.
 
 use crate::ffi::{NativeAutomationPoint, NativeBlob, NativePluginAutomationLane, NativeTrackState, };
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
 use std::collections::HashSet;
 
 struct Cursor<'a> {

@@ -257,31 +257,6 @@ pub fn estimate_frequency_native(buffer: &[f32], sample_rate: f64) -> f32 {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_pitch_detector_estimate(
-    buffer: *const f32,
-    size: usize,
-    sample_rate: f64,
-) -> f32 {
-    if buffer.is_null() || size < 3 {
-        return 0.0;
-    }
-    estimate_frequency_native(
-        unsafe { std::slice::from_raw_parts(buffer, size) },
-        sample_rate,
-    )
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_pitch_detector_frequency_to_midi(frequency: f32) -> u8 {
-    if !frequency.is_finite() || frequency < 10.0 {
-        return 0;
-    }
-    (12.0 * (f64::from(frequency) / 440.0).log2() + 69.0)
-        .round()
-        .clamp(0.0, 127.0) as u8
-}
-
 #[cfg(test)]
 mod tests {
     use super::PitchDetectorEngine;

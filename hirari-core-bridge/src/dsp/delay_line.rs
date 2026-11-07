@@ -64,49 +64,6 @@ pub extern "C" fn hirari_integer_delay_create(max_delay_samples: u32) -> *mut c_
     Box::into_raw(Box::new(state)).cast()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_integer_delay_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        // SAFETY: the handle is allocated by `hirari_integer_delay_create`.
-        unsafe { drop(Box::from_raw(state.cast::<IntegerDelayLine>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_integer_delay_process(
-    state: *mut c_void,
-    sample: f32,
-    delay_samples: u32,
-) -> f32 {
-    let Some(state) = (unsafe { state.cast::<IntegerDelayLine>().as_mut() }) else {
-        return 0.0;
-    };
-    state.process(sample, delay_samples)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_integer_delay_push(state: *mut c_void, sample: f32) {
-    if let Some(state) = unsafe { state.cast::<IntegerDelayLine>().as_mut() } {
-        state.push(sample);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_integer_delay_read(
-    state: *const c_void,
-    delay_samples: u32,
-) -> f32 {
-    unsafe { state.cast::<IntegerDelayLine>().as_ref() }
-        .map_or(0.0, |state| state.read(delay_samples))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_integer_delay_reset(state: *mut c_void) {
-    if let Some(state) = unsafe { state.cast::<IntegerDelayLine>().as_mut() } {
-        state.reset();
-    }
-}
-
 impl DelayLineEngine {
     pub fn new(max_delay_samples: u32) -> Self {
         let mut mask = 1;

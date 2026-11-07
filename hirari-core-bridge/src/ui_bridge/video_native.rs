@@ -54,7 +54,7 @@ impl<T> Reply<T> {
             if let Some(value) = guard.take() { return Some(value); }
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             if remaining.is_zero() { return None; }
-            let (next, wait) =
+            let (next, _wait) =
                 self.arrived.wait_timeout(guard, remaining).unwrap_or_else(|e| e.into_inner());
             guard = next;
         }

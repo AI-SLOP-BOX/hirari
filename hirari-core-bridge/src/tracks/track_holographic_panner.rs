@@ -229,13 +229,6 @@ pub unsafe extern "C" fn hirari_track_holographic_panner_set_sample_rate(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_track_holographic_panner_sample_rate(state: *const c_void) -> f64 {
-    unsafe { state.cast::<NativePanner>().as_ref() }
-        .map(|state| state.config.load().sample_rate)
-        .unwrap_or(48_000.0)
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_track_holographic_panner_set_kernel(
     state: *const c_void,
     left: *const f32,

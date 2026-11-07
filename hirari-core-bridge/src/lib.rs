@@ -59,7 +59,6 @@ use engine_edit_ext::TrackEditExt;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 include!("module_exports_tail.rs");
-use crate::summing::{SummingConfig, SummingOrchestrator};
 pub use engine_native::{
     get_unified_engine, new_audio_engine, new_audio_engine_offline, push_command,
 };

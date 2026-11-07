@@ -535,13 +535,6 @@ mod tests {
             assert!(unsafe { hirari_engine_track_insert(self.get(), usize::MAX, made.owner) });
             made
         }
-        /// A bus track claims the slot its own id names, which is how the
-        /// engine resolves one once the graph is committed.
-        fn add_bus(&self, id: u32) -> (*mut c_void, Weak<Track>) {
-            let (object, witness) = self.add(id, TRACK_TYPE_BUS);
-            unsafe { hirari_track_resolve_bus(object, std::ptr::null_mut(), true) };
-            (object, witness)
-        }
         fn publish(&self, generation: u64, stamp: bool) {
             unsafe { hirari_engine_track_publish(self.get(), generation, stamp) };
         }

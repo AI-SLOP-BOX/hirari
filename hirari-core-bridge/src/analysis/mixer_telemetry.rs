@@ -338,23 +338,7 @@ impl RealtimeTelemetrySlot {
         }
     }
 
-    fn snapshot(&self) -> HirariMixerTelemetrySnapshot {
-        HirariMixerTelemetrySnapshot {
-            peak_l: f32::from_bits(self.peak_l.load(Ordering::Relaxed)),
-            peak_r: f32::from_bits(self.peak_r.load(Ordering::Relaxed)),
-            rms_l: f32::from_bits(self.rms_l.load(Ordering::Relaxed)),
-            rms_r: f32::from_bits(self.rms_r.load(Ordering::Relaxed)),
-            clipping_count: self.clipping_count.load(Ordering::Relaxed),
-            dc_offset_l: f32::from_bits(self.dc_offset_l.load(Ordering::Relaxed)),
-            dc_offset_r: f32::from_bits(self.dc_offset_r.load(Ordering::Relaxed)),
-            phase_correlation: f32::from_bits(self.phase_correlation.load(Ordering::Relaxed)),
-            loudness_lufs: f32::from_bits(self.loudness_lufs.load(Ordering::Relaxed)),
-            spectrum_rms: std::array::from_fn(|index| {
-                f32::from_bits(self.spectrum_rms[index].load(Ordering::Relaxed))
-            }),
-        }
     }
-}
 
 struct RealtimeTelemetryHub {
     tracks: Box<[RealtimeTelemetrySlot]>,
@@ -472,40 +456,3 @@ pub unsafe extern "C" fn hirari_mixer_telemetry_destroy(state: *mut c_void) {
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mixer_telemetry_push(
-    state: *const c_void,
-    track_id: u32,
-    left: *const f32,
-    right: *const f32,
-    frames: u32,
-) {
-    let Some(hub) = (unsafe { state.cast::<RealtimeTelemetryHub>().as_ref() }) else {
-        return;
-    };
-    if frames == 0 || left.is_null() || right.is_null() {
-        return;
-    }
-    let left = unsafe { std::slice::from_raw_parts(left, frames as usize) };
-    let right = unsafe { std::slice::from_raw_parts(right, frames as usize) };
-    let _ = hub.push(track_id, left, right);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mixer_telemetry_read(
-    state: *const c_void,
-    track_id: u32,
-    output: *mut HirariMixerTelemetrySnapshot,
-) -> bool {
-    let Some(hub) = (unsafe { state.cast::<RealtimeTelemetryHub>().as_ref() }) else {
-        return false;
-    };
-    let Some(slot) = hub.tracks.get(track_id as usize) else {
-        return false;
-    };
-    if output.is_null() {
-        return false;
-    }
-    unsafe { output.write(slot.snapshot()) };
-    true
-}

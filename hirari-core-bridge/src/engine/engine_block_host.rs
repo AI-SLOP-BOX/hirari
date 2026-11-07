@@ -1722,13 +1722,6 @@ pub unsafe extern "C" fn hirari_engine_block_set_cycle(
 /// # Safety
 /// `state` must be null or a pointer from [`hirari_engine_block_create`].
 #[no_mangle]
-pub unsafe extern "C" fn hirari_engine_block_test_tone(state: *const c_void) -> u8 {
-    block(state).map_or(0, |state| u8::from(state.test_tone.load(Ordering::Relaxed)))
-}
-
-/// # Safety
-/// `state` must be null or a pointer from [`hirari_engine_block_create`].
-#[no_mangle]
 pub unsafe extern "C" fn hirari_engine_block_set_test_tone(state: *mut c_void, enabled: u8) {
     if let Some(state) = block(state) {
         state.test_tone.store(enabled != 0, Ordering::Release);
@@ -1819,15 +1812,6 @@ pub unsafe extern "C" fn hirari_engine_block_set_master_gain(state: *mut c_void,
     if let Some(state) = block(state) {
         state.master_gain.store(gain.to_bits(), Ordering::Release);
     }
-}
-
-/// The normalized record-arm wire mode the block tail gates on.
-///
-/// # Safety
-/// `state` must be null or a pointer from [`hirari_engine_block_create`].
-#[no_mangle]
-pub unsafe extern "C" fn hirari_engine_block_auto_record_mode(state: *const c_void) -> u32 {
-    block(state).map_or(0, |state| state.auto_record_mode.load(Ordering::Relaxed))
 }
 
 /// # Safety
@@ -2081,19 +2065,6 @@ pub unsafe extern "C" fn hirari_engine_block_range_overflowed(state: *const c_vo
     block(state).map_or(0, |state| {
         u8::from(state.range_overflow.load(Ordering::Acquire))
     })
-}
-
-/// Asks the next callback to release every preview voice it holds.
-///
-/// # Safety
-/// `state` must be null or a pointer from [`hirari_engine_block_create`].
-#[no_mangle]
-pub unsafe extern "C" fn hirari_engine_block_request_preview_voice_reset(state: *mut c_void) {
-    if let Some(state) = block(state) {
-        state
-            .preview_voices_need_reset
-            .store(true, Ordering::Release);
-    }
 }
 
 /// Empties the callback's own event collection, as a device re-preparation does.

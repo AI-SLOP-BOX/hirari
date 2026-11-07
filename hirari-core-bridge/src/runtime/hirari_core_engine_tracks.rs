@@ -438,7 +438,7 @@ impl HirariCore {
         }
         // Editor windows belong to the project that opened them, so the session
         // table resets with the rest of the project-scoped mirrors here.
-        if let Ok(mut sessions) = self.native_editor_sessions.lock() {
+        if let Ok(sessions) = self.native_editor_sessions.lock() {
             sessions.clear();
         }
         if let Ok(mut ids) = self.aux_track_ids.lock() {

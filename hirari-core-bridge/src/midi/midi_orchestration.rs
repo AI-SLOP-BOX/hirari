@@ -129,21 +129,6 @@ pub unsafe extern "C" fn hirari_mpe_state_reset(state: *mut MpeState) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_mpe_state_set_enabled(state: *mut MpeState, enabled: bool) {
-    if let Some(state) = state.as_ref() {
-        state.enabled.store(enabled, Ordering::Release);
-        state.reset_requested.store(true, Ordering::Release);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mpe_state_is_enabled(state: *const MpeState) -> bool {
-    state
-        .as_ref()
-        .is_some_and(|state| state.enabled.load(Ordering::Acquire))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_midi_process_mpe(
     state: *mut MpeState,
     events: *const c_void,
@@ -209,44 +194,6 @@ pub unsafe extern "C" fn hirari_midi_process_mpe(
                 notes[channel].bend = (bend as i32 - 8192) as f32 / 8192.0;
             }
             _ => {}
-        }
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_midi_apply_articulations(
-    events: *mut c_void,
-    event_count: usize,
-    maps: *const c_void,
-    map_count: usize,
-) {
-    if events.is_null() || maps.is_null() || event_count == 0 || map_count == 0 {
-        return;
-    }
-
-    let events = slice::from_raw_parts_mut(
-        events.cast::<MidiEvent>(),
-        event_count.min(MAX_EVENTS_PER_BLOCK),
-    );
-    let maps = slice::from_raw_parts(
-        maps.cast::<ArticulationMap>(),
-        map_count.min(MAX_ARTICULATION_MAPS),
-    );
-    for event in events {
-        if event.size < 3 || event.articulation_id == 0 {
-            continue;
-        }
-        let Some(map) = maps.iter().find(|map| {
-            map.id == event.articulation_id as u32
-                && map.trigger_channel > 0
-                && map.trigger_channel <= 16
-        }) else {
-            continue;
-        };
-
-        let status = event.data[0] & 0xf0;
-        if status == 0x90 || status == 0x80 {
-            event.data[0] = status | (map.trigger_channel as u8 - 1);
         }
     }
 }
@@ -400,11 +347,6 @@ pub unsafe extern "C" fn hirari_mpe_sysex_pop(
     let size = message.data.len();
     queue.pop_front();
     size
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_midi_sysex_size_is_valid(size: usize) -> bool {
-    (1..=MAX_SYSEX_BYTES).contains(&size)
 }
 
 #[no_mangle]

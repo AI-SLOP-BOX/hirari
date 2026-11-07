@@ -1682,23 +1682,6 @@ pub unsafe extern "C" fn hirari_routing_edit_set_track_solo(
     with_ops(|ops| set_track_solo_with(ops, host, track_id, solo, true))
 }
 
-/// Replays a recorded undo or redo payload list through the same policy.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_routing_edit_apply_payloads(
-    host: *mut c_void,
-    entries: *const HirariRoutingEditPayload,
-    count: usize,
-) {
-    let Some(ops) = host_ops() else {
-        return;
-    };
-    if entries.is_null() || count == 0 {
-        return;
-    }
-    let payloads = unsafe { std::slice::from_raw_parts(entries, count) };
-    apply_payloads_with(&ops, host, payloads);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

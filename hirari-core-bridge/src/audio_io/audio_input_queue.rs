@@ -3,7 +3,6 @@
 //! bounded sample blocks and update atomics.
 
 use std::cell::UnsafeCell;
-use std::ffi::c_void;
 use std::ptr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -184,74 +183,3 @@ impl AudioInputBlockQueue {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_audio_input_queue_create() -> *mut c_void {
-    Box::into_raw(Box::new(AudioInputBlockQueue::new())).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_free(queue: *mut c_void) {
-    if !queue.is_null() {
-        drop(Box::from_raw(queue.cast::<AudioInputBlockQueue>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_push(
-    queue: *const c_void,
-    channels: *const *const f32,
-    channel_count: u32,
-    frame_count: u32,
-) -> bool {
-    queue
-        .cast::<AudioInputBlockQueue>()
-        .as_ref()
-        .is_some_and(|queue| queue.push_planar(channels, channel_count, frame_count))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_poll(
-    queue: *const c_void,
-    destination: *const *mut f32,
-    destination_channels: u32,
-    destination_frames: u32,
-    channel_count_out: *mut u32,
-    frame_count_out: *mut u32,
-    dropped_out: *mut u64,
-) -> bool {
-    queue
-        .cast::<AudioInputBlockQueue>()
-        .as_ref()
-        .is_some_and(|queue| {
-            queue.poll(
-                destination,
-                destination_channels,
-                destination_frames,
-                channel_count_out,
-                frame_count_out,
-                dropped_out,
-            )
-        })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_dropped(queue: *const c_void) -> u64 {
-    queue
-        .cast::<AudioInputBlockQueue>()
-        .as_ref()
-        .map_or(0, AudioInputBlockQueue::dropped_blocks)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_discard(queue: *const c_void) {
-    if let Some(queue) = queue.cast::<AudioInputBlockQueue>().as_ref() {
-        queue.discard_pending();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_input_queue_reset(queue: *const c_void) {
-    if let Some(queue) = queue.cast::<AudioInputBlockQueue>().as_ref() {
-        queue.reset();
-    }
-}

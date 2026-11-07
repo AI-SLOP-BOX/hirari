@@ -281,38 +281,3 @@ pub unsafe extern "C" fn hirari_master_meter_analysis_stats(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_meter_spectrum_band(
-    state: *const c_void,
-    channel: u32,
-    band: u32,
-) -> f32 {
-    let Some(core) = (unsafe { state.cast::<MeterCore>().as_ref() }) else {
-        return 0.0;
-    };
-    unsafe { crate::analysis_engine::hirari_analysis_engine_get_band(core.analysis, channel, band) }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_master_meter_goniometer(
-    state: *const c_void,
-    left: *mut f32,
-    right: *mut f32,
-    frames: usize,
-    correlation: *mut f32,
-    balance: *mut f32,
-) -> bool {
-    let Some(core) = (unsafe { state.cast::<MeterCore>().as_ref() }) else {
-        return false;
-    };
-    unsafe {
-        crate::goniometer::hirari_goniometer_snapshot(
-            core.goniometer,
-            left,
-            right,
-            frames,
-            correlation,
-            balance,
-        )
-    }
-}

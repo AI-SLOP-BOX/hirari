@@ -41,65 +41,7 @@ impl MacroSlot {
         }
     }
 
-    fn publish(&self, store: &mut SnapshotStore, mappings: Vec<Mapping>) {
-        let mut next = Box::new(mappings);
-        let pointer = next.as_mut() as *mut Vec<Mapping>;
-        let previous = std::mem::replace(&mut store.active, next);
-        self.current.store(pointer, Ordering::SeqCst);
-        store.retired.push(previous);
-        if self.readers.load(Ordering::SeqCst) == 0 {
-            store.retired.clear();
-        }
-    }
-
-    fn add(&self, mapping: Mapping) {
-        let mut store = self.snapshots.lock().unwrap_or_else(|e| e.into_inner());
-        let mut mappings = store.active.as_ref().clone();
-        if let Some(existing) = mappings
-            .iter_mut()
-            .find(|existing| existing.target_id == mapping.target_id)
-        {
-            *existing = mapping;
-        } else {
-            mappings.push(mapping);
-        }
-        self.publish(&mut store, mappings);
-    }
-
-    fn clear(&self) {
-        let mut store = self.snapshots.lock().unwrap_or_else(|e| e.into_inner());
-        self.publish(&mut store, Vec::new());
-    }
-
-    fn evaluate(&self, target_id: u32, normalized: f32) -> f32 {
-        self.readers.fetch_add(1, Ordering::SeqCst);
-        let _reader = ReaderGuard(&self.readers);
-        let snapshot = self.current.load(Ordering::SeqCst);
-        if snapshot.is_null() {
-            return normalized;
-        }
-        let Some(mapping) = (unsafe { &*snapshot })
-            .iter()
-            .find(|mapping| mapping.target_id == target_id)
-        else {
-            return normalized;
-        };
-        let source = if mapping.invert {
-            1.0 - normalized
-        } else {
-            normalized
-        };
-        mapping.minimum + source * (mapping.maximum - mapping.minimum)
-    }
-}
-
-struct ReaderGuard<'a>(&'a AtomicUsize);
-
-impl Drop for ReaderGuard<'_> {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
+                }
 
 struct MacroMappingState {
     slots: [MacroSlot; MAX_MACROS],
@@ -129,13 +71,7 @@ impl MacroMappingState {
             .unwrap_or(0.0)
     }
 
-    fn update_smoothers(&self, sample_rate: f32) {
-        for (index, smoother) in self.smoothers.iter().enumerate() {
-            smoother.set_smoothing_time(10.0, sample_rate);
-            smoother.set_target(self.target(index));
-        }
     }
-}
 
 #[no_mangle]
 pub extern "C" fn hirari_macro_mapping_create() -> *mut c_void {
@@ -189,67 +125,3 @@ pub unsafe extern "C" fn hirari_macro_control_set_midi_target(
     }
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_macro_control_update_smoothers(
-    state: *const c_void,
-    sample_rate: f32,
-) {
-    if let Some(state) = unsafe { state.cast::<MacroMappingState>().as_ref() } {
-        state.update_smoothers(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_macro_mapping_add(
-    state: *mut c_void,
-    macro_index: u32,
-    target_id: u32,
-    minimum: f32,
-    maximum: f32,
-    invert: bool,
-) {
-    if macro_index as usize >= MAX_MACROS || !minimum.is_finite() || !maximum.is_finite() {
-        return;
-    }
-    let Some(state) = (unsafe { state.cast::<MacroMappingState>().as_ref() }) else {
-        return;
-    };
-    let mut minimum = minimum.clamp(0.0, 1.0);
-    let mut maximum = maximum.clamp(0.0, 1.0);
-    if minimum > maximum {
-        std::mem::swap(&mut minimum, &mut maximum);
-    }
-    state.slots[macro_index as usize].add(Mapping {
-        target_id,
-        minimum,
-        maximum,
-        invert,
-    });
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_macro_mapping_clear(state: *mut c_void, macro_index: u32) {
-    if macro_index as usize >= MAX_MACROS {
-        return;
-    }
-    if let Some(state) = unsafe { state.cast::<MacroMappingState>().as_ref() } {
-        state.slots[macro_index as usize].clear();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_macro_mapping_evaluate(
-    state: *const c_void,
-    macro_index: u32,
-    target_id: u32,
-) -> f32 {
-    if macro_index as usize >= MAX_MACROS {
-        return 0.0;
-    }
-    let Some(state) = (unsafe { state.cast::<MacroMappingState>().as_ref() }) else {
-        return 0.0;
-    };
-    let index = macro_index as usize;
-    let normalized = state.smoothers[index].current_value().clamp(0.0, 1.0);
-    state.slots[index].evaluate(target_id, normalized)
-}

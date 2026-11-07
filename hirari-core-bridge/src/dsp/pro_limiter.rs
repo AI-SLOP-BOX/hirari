@@ -186,13 +186,6 @@ pub unsafe extern "C" fn hirari_pro_limiter_get_parameter(state: *const c_void, 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_pro_limiter_set_threshold_db(state: *const c_void, db: f32) {
-    if let Some(state) = state.cast::<ProLimiterEngine>().as_ref() {
-        state.set_threshold_db(db);
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_pro_limiter_threshold_linear(state: *const c_void) -> f32 {
     state
         .cast::<ProLimiterEngine>()

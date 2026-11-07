@@ -124,11 +124,6 @@ impl TpdfDitherEngine {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_tpdf_dither_create() -> *mut c_void {
-    Box::into_raw(Box::new(TpdfDitherEngine::new())).cast()
-}
-
 /// Create a dither engine with an explicit seed so channels can be given
 /// distinct, reproducible sequences.
 #[no_mangle]
@@ -151,57 +146,3 @@ pub unsafe extern "C" fn hirari_tpdf_dither_next(state: *mut c_void) -> f32 {
         .map_or(0.0, TpdfDitherEngine::next_sample)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_tpdf_dither_process(
-    state: *mut c_void,
-    samples: *mut f32,
-    frames: usize,
-) {
-    if samples.is_null() {
-        return;
-    }
-    let Some(state) = state.cast::<TpdfDitherEngine>().as_mut() else {
-        return;
-    };
-    state.process(std::slice::from_raw_parts_mut(samples, frames));
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_noise_shaping_dither_create() -> *mut c_void {
-    Box::into_raw(Box::new(NoiseShapingDitherEngine::new())).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_noise_shaping_dither_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<NoiseShapingDitherEngine>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_noise_shaping_dither_process_sample(
-    state: *mut c_void,
-    sample: f32,
-    bits: i32,
-) -> f32 {
-    state
-        .cast::<NoiseShapingDitherEngine>()
-        .as_mut()
-        .map_or(sample, |state| state.process_sample(sample, bits))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_noise_shaping_dither_process(
-    state: *mut c_void,
-    samples: *mut f32,
-    frames: usize,
-    bits: i32,
-) {
-    if samples.is_null() {
-        return;
-    }
-    let Some(state) = state.cast::<NoiseShapingDitherEngine>().as_mut() else {
-        return;
-    };
-    state.process(std::slice::from_raw_parts_mut(samples, frames), bits);
-}

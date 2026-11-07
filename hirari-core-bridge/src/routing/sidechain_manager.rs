@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 
 const SIDECHAIN_SLOTS: usize = 256;
 const SIDECHAIN_BLOCK: usize = 4096;
@@ -397,23 +397,6 @@ pub unsafe extern "C" fn hirari_sidechain_has_link(
         slot.key.load(Ordering::Acquire) == key
             && slot.source_track.load(Ordering::Relaxed) == source_track
     })
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_sidechain_level(
-    state: *const c_void,
-    destination_track: u32,
-    plugin_index: u32,
-) -> f32 {
-    let Some(runtime) = (unsafe { gate_ref(state) }) else {
-        return 0.0;
-    };
-    let key = sidechain_key(destination_track, plugin_index);
-    runtime
-        .slots
-        .iter()
-        .find(|slot| slot.key.load(Ordering::Acquire) == key)
-        .map_or(0.0, |slot| f32::from_bits(slot.level_bits.load(Ordering::Relaxed)))
 }
 
 #[no_mangle]
@@ -830,10 +813,10 @@ mod tests {
     fn engine_handle_matches_the_native_snapshot_contract() {
         let engine = hirari_sidechain_engine_create();
         assert!(!false);
-        let mut left_a = [1.0f32, 2.0, 3.0, 4.0];
-        let mut right_a = [-1.0f32, -2.0, -3.0, -4.0];
-        let mut left_b = [5.0f32, 6.0, 7.0, 8.0];
-        let mut right_b = [-5.0f32, -6.0, -7.0, -8.0];
+        let left_a = [1.0f32, 2.0, 3.0, 4.0];
+        let right_a = [-1.0f32, -2.0, -3.0, -4.0];
+        let left_b = [5.0f32, 6.0, 7.0, 8.0];
+        let right_b = [-5.0f32, -6.0, -7.0, -8.0];
 
         assert!(!register(engine, 10, 0, std::ptr::null(), std::ptr::null(), 0, 0, 0, 1.0));
         assert!(!unsafe { hirari_sidechain_engine_resolve_links(engine) });
@@ -942,8 +925,8 @@ mod tests {
         // pointers do not depend on the caller's temporary arrays.
         let owned = hirari_sidechain_engine_create();
         assert!(!owned.is_null());
-        let mut owned_left = [9.0f32, 8.0, 7.0, 6.0];
-        let mut owned_right = [-9.0f32, -8.0, -7.0, -6.0];
+        let owned_left = [9.0f32, 8.0, 7.0, 6.0];
+        let owned_right = [-9.0f32, -8.0, -7.0, -6.0];
         assert!(register(
             owned,
             20,
@@ -972,8 +955,8 @@ mod tests {
         assert_eq!(owned_copy_left[0], 9.0);
         assert_eq!(owned_copy_right[3], -6.0);
 
-        let mut next_left = [1.0f32; 4];
-        let mut next_right = [-1.0f32; 4];
+        let next_left = [1.0f32; 4];
+        let next_right = [-1.0f32; 4];
         assert!(unsafe {
             hirari_sidechain_engine_refresh_source(
                 owned,
@@ -1413,29 +1396,6 @@ pub extern "C" fn hirari_sidechain_engine_create() -> *mut c_void {
 // Process-wide fallback for native callers that build an effect chain without
 // an engine handle. It is created once and intentionally never freed; the
 // engine-owned handles cover the real session.
-static DEFAULT_ENGINE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
-
-#[no_mangle]
-pub extern "C" fn hirari_sidechain_engine_default() -> *mut c_void {
-    let existing = DEFAULT_ENGINE.load(Ordering::Acquire);
-    if !existing.is_null() {
-        return existing;
-    }
-    let created = hirari_sidechain_engine_create();
-    match DEFAULT_ENGINE.compare_exchange(
-        std::ptr::null_mut(),
-        created,
-        Ordering::AcqRel,
-        Ordering::Acquire,
-    ) {
-        Ok(_) => created,
-        Err(raced) => {
-            unsafe { hirari_sidechain_engine_destroy(created) };
-            raced
-        }
-    }
-}
-
 /// Legacy entry point kept so the retired in-place registration API still
 /// reports its misuse exactly once per reset.
 #[no_mangle]
@@ -1678,23 +1638,6 @@ pub unsafe extern "C" fn hirari_sidechain_engine_publish_source(
         )
     };
     unsafe { hirari_sidechain_publication_gate_end_audio(engine.gate) };
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_sidechain_engine_capture_track(
-    state: *const c_void,
-    track: u32,
-    context: *mut c_void,
-    callback: Option<SidechainCaptureCallback>,
-) -> bool {
-    let Some(engine) = (unsafe { engine_ref(state) }) else {
-        return false;
-    };
-    unsafe {
-        with_control(engine, |gate| {
-            hirari_sidechain_capture_track(gate, track, context, callback)
-        })
-    }
 }
 
 // ---- Captured links: the undo snapshot for a removed track ---------------

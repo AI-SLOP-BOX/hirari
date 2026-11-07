@@ -565,7 +565,7 @@ pub unsafe extern "C" fn hirari_routing_engine_enter_send_pdc_read(state: *mut c
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_routing_engine_leave_send_pdc_read(state: *mut c_void) {
-    if let Some(core) = (unsafe { engine(state) }) {
+    if let Some(core) = unsafe { engine(state) } {
         unsafe { crate::send_pdc_manager::hirari_send_pdc_manager_leave_read(core.send_pdc) };
     }
 }

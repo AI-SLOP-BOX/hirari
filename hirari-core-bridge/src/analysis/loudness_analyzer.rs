@@ -1,5 +1,4 @@
 use crate::k_weighting_filter::KWeightingFilterEngine;
-use std::ffi::c_void;
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
@@ -9,61 +8,6 @@ pub struct Metrics {
     pub true_peak_db_l: f32,
     pub true_peak_db_r: f32,
     pub true_peak_db: f32,
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_loudness_analyzer_create(sample_rate: f64) -> *mut c_void {
-    Box::into_raw(Box::new(LoudnessAnalyzerEngine::new(sample_rate))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_loudness_analyzer_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<LoudnessAnalyzerEngine>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_loudness_analyzer_prepare(state: *mut c_void, sample_rate: f64) {
-    if !state.is_null() {
-        (*state.cast::<LoudnessAnalyzerEngine>()).prepare_to_play(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_loudness_analyzer_process(
-    state: *mut c_void,
-    left: *const f32,
-    right: *const f32,
-    frames: usize,
-) -> Metrics {
-    if state.is_null() || left.is_null() || right.is_null() || frames == 0 {
-        return Metrics {
-            momentary_lufs: -70.0,
-            short_term_lufs: -70.0,
-            true_peak_db_l: -100.0,
-            true_peak_db_r: -100.0,
-            true_peak_db: -100.0,
-        };
-    }
-    (*state.cast::<LoudnessAnalyzerEngine>()).process(
-        std::slice::from_raw_parts(left, frames),
-        std::slice::from_raw_parts(right, frames),
-    )
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_loudness_analyzer_get_metrics(state: *const c_void) -> Metrics {
-    if state.is_null() {
-        return Metrics {
-            momentary_lufs: -70.0,
-            short_term_lufs: -70.0,
-            true_peak_db_l: -100.0,
-            true_peak_db_r: -100.0,
-            true_peak_db: -100.0,
-        };
-    }
-    (*state.cast::<LoudnessAnalyzerEngine>()).latest_metrics
 }
 
 pub struct LoudnessAnalyzerEngine {

@@ -758,16 +758,6 @@ impl SandboxHost {
         false
     }
 
-    #[cfg(unix)]
-    fn request_plugin_reset(&self) -> bool {
-        let control = lock_control(&self.control);
-        if !self.is_alive() || control.control_fd < 0 {
-            return false;
-        }
-        let command = [0xA4u8];
-        unsafe { libc::write(control.control_fd, command.as_ptr().cast(), 1) == 1 }
-    }
-
     fn poll_health(&self) -> bool {
         let mut control = lock_control(&self.control);
         self.poll_health_locked(&mut control)
@@ -1092,11 +1082,7 @@ impl SandboxHost {
         self.failure() == FAILURE_PLUGIN_QUARANTINED
     }
 
-    fn restart_attempts(&self) -> u32 {
-        lock_control(&self.control).restart_attempts
-    }
-
-    fn clear_quarantine(&self) {
+        fn clear_quarantine(&self) {
         let mut control = lock_control(&self.control);
         if self.is_quarantined() {
             control.restart_attempts = 0;
@@ -1122,41 +1108,7 @@ impl SandboxHost {
         failure != FAILURE_NONE && failure != FAILURE_PLUGIN_QUARANTINED && self.can_retry()
     }
 
-    fn enqueue_extended_midi(
-        &self,
-        sample_offset: u64,
-        articulation_id: u8,
-        data: &[u8],
-    ) -> bool {
-        let Some(access) = self.acquire_shared_access() else {
-            return false;
-        };
-        let shared = access.ptr;
-        // SAFETY: Liveness was checked; lifecycle teardown drains process
-        // calls before unmapping. The ring is the SPSC transport for the
-        // control-thread producer.
-        let ring = unsafe { std::ptr::addr_of_mut!((*shared).extended_midi.bytes).cast::<c_void>() };
-        let ok = unsafe {
-            hirari_midi_extended_ring_push(
-                ring,
-                sample_offset,
-                articulation_id,
-                data.as_ptr(),
-                data.len(),
-            )
-        };
-        if !ok {
-            // SAFETY: same liveness argument as above.
-            unsafe {
-                (*shared)
-                    .input_midi_truncations
-                    .fetch_add(1, Ordering::Relaxed);
-            }
-        }
-        ok
-    }
-
-    fn enqueue_parameter_change(&self, parameter_id: u32, value: f64, sample_offset: u32) -> bool {
+        fn enqueue_parameter_change(&self, parameter_id: u32, value: f64, sample_offset: u32) -> bool {
         if !value.is_finite() || sample_offset as usize > MAX_FRAMES {
             return false;
         }
@@ -1510,35 +1462,7 @@ impl SandboxHost {
         }
     }
 
-    fn take_process_errors(&self) -> u32 {
-        let Some(access) = self.acquire_shared_access() else { return 0 };
-        let shared = access.ptr;
-        // SAFETY: Telemetry counter read is valid while the mapping is owned.
-        unsafe { (*shared).process_errors.swap(0, Ordering::AcqRel) }
-    }
-
-    fn heartbeat(&self) -> u64 {
-        let Some(access) = self.acquire_shared_access() else { return 0 };
-        let shared = access.ptr;
-        // SAFETY: Telemetry read is valid while the mapping is owned.
-        unsafe { (*shared).heartbeat.load(Ordering::Acquire) }
-    }
-
-    fn active_sample_rate(&self) -> u32 {
-        let Some(access) = self.acquire_shared_access() else { return 0 };
-        let shared = access.ptr;
-        // SAFETY: Telemetry read is valid while the mapping is owned.
-        unsafe { (*shared).active_sample_rate.load(Ordering::Acquire) }
-    }
-
-    fn active_channels(&self) -> u32 {
-        let Some(access) = self.acquire_shared_access() else { return 0 };
-        let shared = access.ptr;
-        // SAFETY: Telemetry read is valid while the mapping is owned.
-        unsafe { (*shared).active_channels.load(Ordering::Acquire) }
-    }
-
-    fn is_midi_instrument(&self) -> bool {
+                    fn is_midi_instrument(&self) -> bool {
         let Some(access) = self.acquire_shared_access() else { return false };
         let shared = access.ptr;
         // SAFETY: Telemetry read is valid while the mapping is owned.

@@ -552,16 +552,6 @@ pub unsafe extern "C" fn hirari_native_pdc_set_track_destination(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_set_send_route(
-    handle: *const c_void,
-    source: u32,
-    destination: u32,
-    enabled: bool,
-) -> bool {
-    unsafe { state(handle) }.is_some_and(|state| state.set_send_route(source, destination, enabled))
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_native_pdc_set_track_latency(
     handle: *const c_void,
     track: u32,
@@ -576,11 +566,6 @@ pub unsafe extern "C" fn hirari_native_pdc_set_low_latency_mode(
     active: bool,
 ) -> bool {
     unsafe { state(handle) }.is_some_and(|state| state.set_low_latency_mode(active))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_clear_configuration(handle: *const c_void) -> bool {
-    unsafe { state(handle) }.is_some_and(NativePdcManager::clear_configuration)
 }
 
 #[no_mangle]
@@ -608,15 +593,6 @@ pub unsafe extern "C" fn hirari_native_pdc_get_track_offset(
     track: u32,
 ) -> u32 {
     unsafe { state(handle) }.map_or(0, |state| state.track_offset(track))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_native_pdc_get_send_offset(
-    handle: *const c_void,
-    source: u32,
-    destination: u32,
-) -> u32 {
-    unsafe { state(handle) }.map_or(0, |state| state.send_offset(source, destination))
 }
 
 #[no_mangle]

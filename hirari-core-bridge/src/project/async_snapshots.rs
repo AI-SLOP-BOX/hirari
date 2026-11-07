@@ -7,7 +7,7 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Condvar, Mutex, MutexGuard, OnceLock};
+use std::sync::{Condvar, Mutex, OnceLock};
 use std::thread;
 
 type ComputeLayout = unsafe extern "C" fn(*mut c_void, *mut *mut c_void) -> bool;
@@ -209,43 +209,6 @@ pub unsafe extern "C" fn hirari_layout_snapshot_cancel(id: u64, owner: u64) -> b
 #[no_mangle]
 pub extern "C" fn hirari_layout_snapshot_owner_create() -> u64 {
     next_id()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_layout_snapshot_owner_release(owner: u64) {
-    release_layout_owner(owner);
-}
-
-/// Retires an owner and waits for the worker it still has in flight. The C++
-/// session calls this before its engine can die, so the worker's reads of the
-/// engine host are bounded by the owner's lifetime.
-pub(crate) fn release_layout_owner(owner: u64) {
-    if owner == 0 {
-        return;
-    }
-    let mut state = layouts().lock().unwrap_or_else(|e| e.into_inner());
-    state.results.retain(|_, (result_owner, _)| *result_owner != owner);
-    let active = state
-        .active
-        .iter()
-        .find(|(_, active)| active.owner == owner)
-        .map(|(id, active)| (*id, active.context, active.cancel));
-    if let Some((id, context, cancel)) = active {
-        state.released_owners.insert(owner);
-        unsafe { cancel(context as *mut c_void) };
-        drop(wait_for_layout_worker(state, id));
-    }
-}
-
-fn wait_for_layout_worker(
-    mut state: MutexGuard<'static, LayoutState>,
-    id: u64,
-) -> MutexGuard<'static, LayoutState> {
-    while !state.finished.contains(&id) {
-        state = LAYOUT_COMPLETION.wait(state).unwrap_or_else(|e| e.into_inner());
-    }
-    state.finished.remove(&id);
-    state
 }
 
 #[no_mangle]

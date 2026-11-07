@@ -48,13 +48,7 @@ impl NativeTempoMap {
         }
     }
 
-    fn sample_rate(&self) -> f64 {
-        f64::from_bits(
-            self.sample_rate_bits
-                .load(std::sync::atomic::Ordering::Relaxed),
-        )
     }
-}
 
 unsafe fn tempo_map_from_ptr<'a>(state: *const std::ffi::c_void) -> Option<&'a NativeTempoMap> {
     if state.is_null() {
@@ -481,26 +475,6 @@ pub unsafe extern "C" fn hirari_tempo_map_beats_to_samples(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_tempo_map_bpm_at_sample(
-    state: *const std::ffi::c_void,
-    sample_pos: u64,
-) -> f64 {
-    let Some(map) = (unsafe { tempo_map_from_ptr(state) }) else {
-        return 120.0;
-    };
-    let events = map.events.load();
-    unsafe { hirari_tempo_bpm_at_sample(events.as_ptr().cast(), events.len(), sample_pos) }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_tempo_map_set_bpm(state: *mut std::ffi::c_void, bpm: f64) -> bool {
-    let Some(map) = (unsafe { state.cast::<NativeTempoMap>().as_ref() }) else {
-        return false;
-    };
-    unsafe { hirari_tempo_map_add_tempo(state, 0, bpm, map.sample_rate(), false) }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_tempo_map_get_current_bpm(state: *const std::ffi::c_void) -> f32 {
     unsafe { tempo_map_from_ptr(state) }.map_or(120.0, |map| {
         f32::from_bits(
@@ -638,18 +612,6 @@ pub unsafe extern "C" fn hirari_time_signature_find(
     };
     *output.cast::<NativeTimeSignatureEvent>() = *event;
     true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_time_signature_reset(output: *mut std::ffi::c_void) {
-    if !output.is_null() {
-        *output.cast::<NativeTimeSignatureEvent>() = NativeTimeSignatureEvent {
-            sample_pos: 0,
-            numerator: 4,
-            denominator: 4,
-            beat: 0.0,
-        };
-    }
 }
 
 #[no_mangle]

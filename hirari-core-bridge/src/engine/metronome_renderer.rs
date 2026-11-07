@@ -43,18 +43,7 @@ impl Metronome {
         }
     }
 
-    fn set_sample_rate(&self, sample_rate: f64) {
-        // SAFETY: sample-rate changes are control-thread operations and must
-        // be serialized with reset/process, matching the former C++ API.
-        unsafe { &mut *self.audio.get() }.set_sample_rate(sample_rate);
-    }
-
-    fn reset(&self) {
-        // SAFETY: reset is serialized with process by the transport owner.
-        unsafe { &mut *self.audio.get() }.reset();
-    }
-
-    fn process(
+            fn process(
         &self,
         left: &mut [f32],
         right: &mut [f32],
@@ -186,20 +175,6 @@ pub unsafe extern "C" fn hirari_metronome_destroy(state: *mut c_void) {
         // SAFETY: the handle was allocated by `hirari_metronome_create` and is
         // destroyed exactly once after the audio callback has stopped using it.
         drop(unsafe { Box::from_raw(state.cast::<Metronome>()) });
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_metronome_set_sample_rate(state: *mut c_void, sample_rate: f64) {
-    if let Some(state) = unsafe { state_from_ptr(state) } {
-        state.set_sample_rate(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_metronome_reset(state: *mut c_void) {
-    if let Some(state) = unsafe { state_from_ptr(state) } {
-        state.reset();
     }
 }
 

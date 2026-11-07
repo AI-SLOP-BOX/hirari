@@ -32,13 +32,12 @@ use crate::channel_strip::{
     hirari_channel_strip_begin_pitch_analysis, hirari_channel_strip_create,
     hirari_channel_strip_destroy, hirari_channel_strip_finish_pitch_analysis,
     hirari_channel_strip_gain, hirari_channel_strip_is_pitch_analysis_running,
-    hirari_channel_strip_is_record_armed, hirari_channel_strip_is_solo, hirari_channel_strip_pan,
+    hirari_channel_strip_is_record_armed, hirari_channel_strip_pan,
     hirari_channel_strip_set_gain, hirari_channel_strip_set_pan,
     hirari_channel_strip_set_record_armed, hirari_channel_strip_set_solo,
 };
 use crate::effect_chain_host::{
-    hirari_effect_chain_create, hirari_effect_chain_destroy, hirari_effect_chain_reclaim,
-    hirari_effect_chain_remove, hirari_effect_chain_restore, hirari_effect_chain_sandbox_maintain,
+    hirari_effect_chain_create, hirari_effect_chain_destroy, hirari_effect_chain_reclaim, hirari_effect_chain_sandbox_maintain,
     hirari_effect_chain_sandbox_slot_count, hirari_effect_chain_sandbox_status,
     hirari_effect_chain_total_latency_samples, SandboxStatusOut,
 };
@@ -73,8 +72,7 @@ use crate::track_name_store::{
 use crate::track_pdc_delay::{hirari_track_pdc_delay_create, hirari_track_pdc_delay_destroy};
 use crate::track_region_render::HirariTrackRegionRenderInput;
 use crate::track_runtime::{
-    hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_is_muted,
-    hirari_track_runtime_is_phase_inverted, hirari_track_runtime_pdc_requested,
+    hirari_track_runtime_create, hirari_track_runtime_destroy, hirari_track_runtime_is_muted, hirari_track_runtime_pdc_requested,
     hirari_track_runtime_prepare, hirari_track_runtime_publish_regions,
     hirari_track_runtime_reset_for_offline_render, hirari_track_runtime_set_delays,
     hirari_track_runtime_set_muted, hirari_track_runtime_set_phase_invert,
@@ -495,15 +493,6 @@ pub unsafe extern "C" fn hirari_track_type_byte(track: *mut c_void) -> u8 {
     unsafe { hirari_track_type(track) as u8 }
 }
 
-/// The bus slot, or [`NO_BUS_ID`] for a track that is not a bus.
-///
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_bus_id(track: *mut c_void) -> u32 {
-    track_ref(track).map_or(NO_BUS_ID, |track| track.bus_id)
-}
-
 /// Binds a bus track to the bus state its engine's bus system hands out. The
 /// bus system is only mutated on the control thread, so resolution happens
 /// after the replacement graph is committed, never while it is provisional. An
@@ -662,34 +651,12 @@ pub unsafe extern "C" fn hirari_track_set_delay_samples(track: *mut c_void, samp
     }
 }
 
-/// Applies one solved delay-compensation offset. This is not an edit: the value
-/// comes from the graph, so nothing audible changed and the frozen render
-/// stays valid.
-///
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_set_pdc_offset(track: *mut c_void, samples: u32) {
-    if let Some(track) = track_ref(track) {
-        track.set_delays(samples, track.manual_delay());
-    }
-}
-
 /// # Safety
 /// `track` is null or a live track object.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_track_get_volume(track: *mut c_void) -> f32 {
     track_ref(track).map_or(0.0, |track| unsafe {
         hirari_channel_strip_gain(track.strip)
-    })
-}
-
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_get_pan(track: *mut c_void) -> f32 {
-    track_ref(track).map_or(0.0, |track| unsafe {
-        hirari_channel_strip_pan(track.strip)
     })
 }
 
@@ -729,13 +696,6 @@ pub unsafe extern "C" fn hirari_track_set_solo(track: *mut c_void, solo: bool) {
 /// # Safety
 /// `track` is null or a live track object.
 #[no_mangle]
-pub unsafe extern "C" fn hirari_track_is_solo(track: *mut c_void) -> bool {
-    track_ref(track).is_some_and(|track| unsafe { hirari_channel_strip_is_solo(track.strip) })
-}
-
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
 pub unsafe extern "C" fn hirari_track_set_muted(track: *mut c_void, muted: bool) {
     if let Some(track) = track_ref(track) {
         track.begin_edit();
@@ -762,15 +722,6 @@ pub unsafe extern "C" fn hirari_track_set_phase_inverted(track: *mut c_void, inv
     }
 }
 
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_is_phase_inverted(track: *mut c_void) -> bool {
-    track_ref(track).is_some_and(|track| {
-        unsafe { hirari_track_runtime_is_phase_inverted(track.runtime) }
-    })
-}
-
 /// Record arm reports whether it actually changed, because the automation
 /// recorder admission and the undo entry both key off the transition.
 ///
@@ -786,15 +737,6 @@ pub unsafe extern "C" fn hirari_track_set_record_armed(track: *mut c_void, armed
         return true;
     }
     false
-}
-
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_is_record_armed(track: *mut c_void) -> bool {
-    track_ref(track).is_some_and(|track| {
-        unsafe { hirari_channel_strip_is_record_armed(track.strip) }
-    })
 }
 
 /// Spatial coordinates are control-thread input, so a non-finite one is folded
@@ -979,91 +921,6 @@ pub unsafe extern "C" fn hirari_track_reclaim_chain(track: *mut c_void) {
     if let Some(track) = track_ref(track) {
         unsafe { hirari_effect_chain_reclaim(track.chain) };
     }
-}
-
-/// Removes one insert addressed by the token the chain issued for it, so an
-/// undo entry carries no processor reference. `snapshot` receives that token
-/// with the bypass and parallel flags the node had.
-///
-/// # Safety
-/// `track` is null or a live track object, `snapshot` is writable or null and
-/// the token must come from the chain this track owns.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_remove_plugin(
-    track: *mut c_void,
-    index: u32,
-    token: *mut u32,
-    kind: *mut u32,
-    bypassed: *mut bool,
-    parallel: *mut bool,
-) -> bool {
-    let Some(track) = track_ref(track) else {
-        return false;
-    };
-    let mut node_kind = 0u32;
-    let mut node_token = 0u32;
-    let mut node_bypassed = false;
-    let mut node_parallel = false;
-    if !unsafe {
-        hirari_effect_chain_remove(
-            track.chain,
-            index,
-            &mut node_bypassed,
-            &mut node_parallel,
-            &mut node_kind,
-            &mut node_token,
-        )
-    } {
-        return false;
-    }
-    unsafe {
-        if !token.is_null() {
-            *token = node_token;
-        }
-        if !kind.is_null() {
-            *kind = node_kind;
-        }
-        if !bypassed.is_null() {
-            *bypassed = node_bypassed;
-        }
-        if !parallel.is_null() {
-            *parallel = node_parallel;
-        }
-    }
-    track.begin_edit();
-    true
-}
-
-/// # Safety
-/// `track` is null or a live track object and `token` was issued by its chain.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_restore_plugin(
-    track: *mut c_void,
-    index: u32,
-    token: u32,
-    bypassed: bool,
-    parallel: bool,
-) -> bool {
-    let Some(track) = track_ref(track) else {
-        return false;
-    };
-    if !unsafe { hirari_effect_chain_restore(track.chain, index, token, bypassed, parallel) } {
-        return false;
-    }
-    track.begin_edit();
-    true
-}
-
-/// The number of slots a track's chain can report, so a host walk can size its
-/// own buffer.
-///
-/// # Safety
-/// `track` is null or a live track object.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_track_sandbox_slot_count(track: *mut c_void) -> usize {
-    track_ref(track).map_or(0, |track| unsafe {
-        hirari_effect_chain_sandbox_slot_count(track.chain)
-    })
 }
 
 /// One sandbox slot's health, in the layout the maintenance pass reports.

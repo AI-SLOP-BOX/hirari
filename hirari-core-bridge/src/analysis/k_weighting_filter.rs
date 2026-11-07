@@ -1,4 +1,3 @@
-use std::ffi::c_void;
 
 // Compatibility implementation for the historic C++ filter. Keep its exact
 // coefficients and state equations while moving ownership and processing to Rust.
@@ -63,13 +62,6 @@ impl LegacyKWeightingFilter {
         self.shelf_a = (-2.0 * std::f64::consts::PI * 1681.974 / safe_rate).exp() as f32;
     }
 
-    pub(crate) fn set_sample_rate(&mut self, sample_rate: f64) {
-        self.sample_rate = sample_rate;
-        self.setup_coefficients();
-        self.left = LegacyChannelState::new();
-        self.right = LegacyChannelState::new();
-    }
-
     pub(crate) fn process_stereo(&mut self, left: f32, right: f32) -> (f32, f32) {
         (
             self.left.process(left, self.hp_a, self.shelf_a),
@@ -77,54 +69,6 @@ impl LegacyKWeightingFilter {
         )
     }
 
-    pub(crate) fn reset(&mut self) {
-        self.left = LegacyChannelState::new();
-        self.right = LegacyChannelState::new();
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_legacy_k_weighting_create(sample_rate: f64) -> *mut c_void {
-    Box::into_raw(Box::new(LegacyKWeightingFilter::new(sample_rate))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_legacy_k_weighting_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<LegacyKWeightingFilter>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_legacy_k_weighting_set_sample_rate(
-    state: *mut c_void,
-    sample_rate: f64,
-) {
-    if !state.is_null() {
-        (*state.cast::<LegacyKWeightingFilter>()).set_sample_rate(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_legacy_k_weighting_reset(state: *mut c_void) {
-    if !state.is_null() {
-        (*state.cast::<LegacyKWeightingFilter>()).reset();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_legacy_k_weighting_process(
-    state: *mut c_void,
-    left: f32,
-    right: f32,
-    out_left: *mut f32,
-    out_right: *mut f32,
-) {
-    if state.is_null() || out_left.is_null() || out_right.is_null() {
-        return;
-    }
-    let filter = &mut *state.cast::<LegacyKWeightingFilter>();
-    (*out_left, *out_right) = filter.process_stereo(left, right);
 }
 
 pub struct KWeightingFilterEngine {

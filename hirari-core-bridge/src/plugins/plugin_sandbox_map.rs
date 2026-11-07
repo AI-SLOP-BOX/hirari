@@ -133,19 +133,6 @@ pub unsafe extern "C" fn hirari_sandbox_slots_index(
         .unwrap_or(u32::MAX)
 }
 
-/// Position of the slot that points at `plugin_index`, or `usize::MAX` when no
-/// slot does. Callers use it to reach the parallel path entry.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_sandbox_slots_find(
-    store: *const SandboxSlotStore,
-    plugin_index: u32,
-) -> usize {
-    if store.is_null() {
-        return usize::MAX;
-    }
-    unsafe { &*store }.position(plugin_index).unwrap_or(usize::MAX)
-}
-
 #[no_mangle]
 pub unsafe extern "C" fn hirari_sandbox_slots_path_size(
     store: *const SandboxSlotStore,

@@ -135,7 +135,7 @@ mod tests {
     }
 
     fn write_planes(path: &std::path::Path, channels: &[Vec<f32>], rate: u32, format: u8) -> u8 {
-        let sizes: Vec<usize> = channels.iter().map(Vec::len).collect();
+        let _sizes: Vec<usize> = channels.iter().map(Vec::len).collect();
         let frames = channels.first().map_or(0, Vec::len) as u64;
         let planes: Vec<*const f32> = channels.iter().map(|channel| channel.as_ptr()).collect();
         let bytes = path_bytes(path);

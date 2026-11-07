@@ -599,21 +599,6 @@ pub unsafe extern "C" fn hirari_undo_manager_live_callback_count(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_undo_manager_copy_live_callbacks(
-    state: *const std::ffi::c_void,
-    output: *mut u64,
-    capacity: usize,
-) -> usize {
-    let Some(state) = (unsafe { undo_state(state) }) else { return 0; };
-    let callbacks = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner).live_callback_ids();
-    if output.is_null() || capacity < callbacks.len() {
-        return callbacks.len();
-    }
-    unsafe { std::slice::from_raw_parts_mut(output, callbacks.len()).copy_from_slice(&callbacks) };
-    callbacks.len()
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_undo_manager_clear(state: *mut std::ffi::c_void) {
     let Some(state) = (unsafe { undo_state(state) }) else { return; };
     let mut state = state.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

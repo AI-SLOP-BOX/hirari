@@ -4,7 +4,6 @@
 //! parsing, sample decoding, and invalidation checks live here.
 
 use memmap2::{Mmap, MmapOptions};
-use std::ffi::{c_void, CStr};
 use std::fs::File;
 use std::io;
 use std::path::Path;
@@ -260,86 +259,6 @@ fn read_u64(bytes: &[u8], offset: usize) -> io::Result<u64> {
     Ok(u64::from_le_bytes(
         slice.try_into().expect("eight byte slice"),
     ))
-}
-
-pub(crate) unsafe fn audio_file<'a>(handle: *const c_void) -> Option<&'a MappedAudioFile> {
-    handle.cast::<MappedAudioFile>().as_ref()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_open(
-    path: *const std::ffi::c_char,
-) -> *mut c_void {
-    if path.is_null() {
-        return std::ptr::null_mut();
-    }
-    let path = CStr::from_ptr(path);
-    let Ok(path) = path.to_str() else {
-        return std::ptr::null_mut();
-    };
-    MappedAudioFile::open(Path::new(path))
-        .map(Box::new)
-        .map(Box::into_raw)
-        .map_or(std::ptr::null_mut(), |handle| handle.cast())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_destroy(handle: *mut c_void) {
-    if !handle.is_null() {
-        drop(Box::from_raw(handle.cast::<MappedAudioFile>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_is_valid(handle: *const c_void) -> bool {
-    audio_file(handle).is_some_and(MappedAudioFile::refresh)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_sample(
-    handle: *const c_void,
-    channel: u32,
-    frame: u64,
-) -> f32 {
-    audio_file(handle).map_or(0.0, |file| file.sample(channel, frame))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_frames(handle: *const c_void) -> u64 {
-    audio_file(handle).map_or(0, MappedAudioFile::frame_count)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_channels(handle: *const c_void) -> u32 {
-    audio_file(handle).map_or(0, |file| file.channels as u32)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_sample_rate(handle: *const c_void) -> u32 {
-    audio_file(handle).map_or(0, |file| file.sample_rate)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_size(handle: *const c_void) -> usize {
-    audio_file(handle).map_or(0, |file| file.mapping.len())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_data(handle: *const c_void) -> *const c_void {
-    let Some(file) = audio_file(handle) else {
-        return std::ptr::null();
-    };
-    if file.invalidated.load(Ordering::Acquire) {
-        return std::ptr::null();
-    }
-    file.mapping
-        .get(file.data_offset..)
-        .map_or(std::ptr::null(), |data| data.as_ptr().cast())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_mapped_audio_file_refresh(handle: *const c_void) -> bool {
-    audio_file(handle).is_some_and(MappedAudioFile::refresh)
 }
 
 #[cfg(test)]

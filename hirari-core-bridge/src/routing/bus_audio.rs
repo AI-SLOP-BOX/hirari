@@ -237,14 +237,6 @@ unsafe fn bus_system(handle: *mut c_void) -> Option<&'static BusSystemState> {
     }
 }
 
-unsafe fn bus_system_mut(handle: *mut c_void) -> Option<&'static mut BusSystemState> {
-    if handle.is_null() {
-        None
-    } else {
-        Some(unsafe { &mut *handle.cast::<BusSystemState>() })
-    }
-}
-
 #[no_mangle]
 pub extern "C" fn hirari_bus_system_create() -> *mut c_void {
     let mut state = BusSystemState::new();

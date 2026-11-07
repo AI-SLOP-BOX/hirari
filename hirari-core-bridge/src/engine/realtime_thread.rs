@@ -7,16 +7,6 @@ thread_local! {
 }
 
 #[no_mangle]
-pub extern "C" fn hirari_realtime_thread_set(active: bool) {
-    IS_REALTIME_THREAD.with(|state| state.set(active));
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_realtime_thread_is_active() -> bool {
-    IS_REALTIME_THREAD.with(Cell::get)
-}
-
-#[no_mangle]
 pub extern "C" fn hirari_denormal_control_enter() -> u64 {
     #[cfg(target_arch = "x86_64")]
     unsafe {

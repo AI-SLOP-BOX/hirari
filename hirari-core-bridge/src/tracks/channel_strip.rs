@@ -272,26 +272,6 @@ pub unsafe extern "C" fn hirari_channel_strip_is_pitch_analysis_running(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_channel_strip_process(
-    state: *const c_void,
-    channels: *const *mut f32,
-    channel_count: u32,
-    offset: u32,
-    frames: usize,
-) {
-    if let Some(state) = state.cast::<NativeChannelStrip>().as_ref() {
-        state.process(
-            channels,
-            channel_count as usize,
-            offset as usize,
-            std::ptr::null(),
-            0,
-            frames,
-        );
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_channel_strip_process_mirror(
     state: *const c_void,
     channels: *const *mut f32,

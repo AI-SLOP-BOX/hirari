@@ -352,51 +352,6 @@ pub unsafe extern "C" fn hirari_dynamic_compressor_get_parameter(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_dynamic_compressor_set_control(
-    state: *mut c_void,
-    control: u32,
-    value: f32,
-) {
-    let Some(state) = state.cast::<DynamicCompressorEngine>().as_mut() else {
-        return;
-    };
-    match control {
-        0 => state.set_lookahead(value),
-        1 => state.set_threshold(value),
-        2 => state.set_ratio(value),
-        3 => state.set_attack(value),
-        4 => state.set_release(value),
-        5 => state.set_makeup(value),
-        6 => state.auto_gain = value != 0.0,
-        7 => state.set_knee(value),
-        8 => state.use_rms = value != 0.0,
-        _ => {}
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_dynamic_compressor_get_control(
-    state: *const c_void,
-    control: u32,
-) -> f32 {
-    let Some(state) = state.cast::<DynamicCompressorEngine>().as_ref() else {
-        return 0.0;
-    };
-    match control {
-        0 => state.lookahead_samples as f32,
-        1 => state.threshold_db,
-        2 => state.ratio,
-        3 => state.attack_ms(),
-        4 => state.release_ms(),
-        5 => state.makeup_db,
-        6 => f32::from(state.auto_gain),
-        7 => state.knee_db,
-        8 => f32::from(state.use_rms),
-        _ => 0.0,
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_dynamic_compressor_save_state(
     state: *const c_void,
     output: *mut u8,

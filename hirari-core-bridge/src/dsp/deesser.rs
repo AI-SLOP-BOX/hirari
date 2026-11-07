@@ -183,72 +183,10 @@ pub extern "C" fn hirari_deesser_create(sample_rate: f64) -> *mut c_void {
     Box::into_raw(Box::new(DeEsserEngine::new(sample_rate))).cast()
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        // SAFETY: handle was allocated by `hirari_deesser_create`.
-        unsafe { drop(Box::from_raw(state.cast::<DeEsserEngine>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_prepare(state: *mut c_void, sample_rate: f64) {
-    if let Some(state) = unsafe { state.cast::<DeEsserEngine>().as_ref() } {
-        state.prepare(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_reset(state: *mut c_void) {
-    if let Some(state) = unsafe { state.cast::<DeEsserEngine>().as_ref() } {
-        state.reset();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_set_threshold(state: *mut c_void, value: f32) {
-    if let Some(state) = unsafe { state.cast::<DeEsserEngine>().as_ref() } {
-        state.set_threshold(value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_set_intensity(state: *mut c_void, value: f32) {
-    if let Some(state) = unsafe { state.cast::<DeEsserEngine>().as_ref() } {
-        state.set_intensity(value);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_tail_samples(state: *const c_void) -> u32 {
-    unsafe { state.cast::<DeEsserEngine>().as_ref() }.map_or(0, |state| state.tail_samples())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_process(
-    state: *mut c_void,
-    left: *mut f32,
-    right: *mut f32,
-    frames: u32,
-) {
-    let Some(state) = (unsafe { state.cast::<DeEsserEngine>().as_ref() }) else {
-        return;
-    };
-    if left.is_null() || frames == 0 || right == left {
-        return;
-    }
-    let left = unsafe { std::slice::from_raw_parts_mut(left, frames as usize) };
-    if right.is_null() {
-        state.process(left, None);
-    } else {
-        let right = unsafe { std::slice::from_raw_parts_mut(right, frames as usize) };
-        state.process(left, Some(right));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{DeEsserEngine, SimpleBandpass};
+    #[cfg(feature = "dsp-differential-reference")]
     use std::ffi::c_void;
 
     struct FrozenCppDeEsser {

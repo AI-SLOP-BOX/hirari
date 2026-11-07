@@ -971,22 +971,7 @@ impl MacAudioHost {
         self.realtime.queue.dropped_blocks()
     }
 
-    fn register_input_capture_sink(&self, sink: *const InputCaptureSink) -> bool {
-        if sink.is_null() || unsafe { (*sink).callback.is_none() } {
-            return false;
         }
-        self.realtime
-            .input_sink
-            .store(sink.cast_mut(), Ordering::Release);
-        true
-    }
-
-    fn unregister_input_capture_sink(&self) {
-        self.realtime
-            .input_sink
-            .store(ptr::null_mut(), Ordering::Release);
-    }
-}
 
 impl Drop for MacAudioHost {
     fn drop(&mut self) {
@@ -2552,17 +2537,6 @@ pub extern "C" fn hirari_mac_audio_host_select_device(
 }
 
 #[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_set_process_callback(
-    host: *mut c_void,
-    process: Option<ProcessCallback>,
-    context: *mut c_void,
-) {
-    if let Some(host) = host_ref(host) {
-        host.set_process_callback(process, context);
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_mac_audio_host_poll_input_block(
     host: *mut c_void,
     destination: *const *mut f32,
@@ -2586,21 +2560,6 @@ pub unsafe extern "C" fn hirari_mac_audio_host_poll_input_block(
 pub extern "C" fn hirari_mac_audio_host_discard_pending_input(host: *mut c_void) {
     if let Some(host) = host_ref(host) {
         host.discard_pending_input_blocks();
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_register_input_sink(
-    host: *mut c_void,
-    sink: *const InputCaptureSink,
-) -> bool {
-    host_ref(host).is_some_and(|host| host.register_input_capture_sink(sink))
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_mac_audio_host_unregister_input_sink(host: *mut c_void) {
-    if let Some(host) = host_ref(host) {
-        host.unregister_input_capture_sink();
     }
 }
 

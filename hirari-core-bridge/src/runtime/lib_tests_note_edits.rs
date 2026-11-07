@@ -302,7 +302,7 @@ fn processing_history_policy_is_enforced_end_to_end() {
     let source_path = std::env::temp_dir().join(format!("{unique}-source.wav"));
     let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
     let source = source_path.to_str().unwrap();
-    let project = project_path.to_str().unwrap();
+    let _project = project_path.to_str().unwrap();
 
     let track_id = engine_ref.add_track(0);
     assert!(engine_ref.bounce_project(source, 0));

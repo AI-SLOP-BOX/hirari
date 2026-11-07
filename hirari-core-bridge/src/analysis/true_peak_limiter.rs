@@ -72,12 +72,7 @@ impl TruePeakLimiterState {
             .store(engine.get_tail_samples(), Ordering::Relaxed);
     }
 
-    fn reset(&self) {
-        // SAFETY: the host serializes reset against process and prepare.
-        unsafe { &mut *self.engine.get() }.reset();
-    }
-
-    fn process(&self, left: &mut [f32], right: &mut [f32]) {
+        fn process(&self, left: &mut [f32], right: &mut [f32]) {
         let threshold = f32::from_bits(self.threshold_db.load(Ordering::Relaxed));
         let ceiling = f32::from_bits(self.ceiling_db.load(Ordering::Relaxed));
         // SAFETY: the host calls the audio callback from one processing thread.
@@ -243,32 +238,6 @@ impl TruePeakLimiterEngine {
 }
 
 #[no_mangle]
-pub extern "C" fn hirari_true_peak_limiter_create(sample_rate: f64) -> *mut c_void {
-    Box::into_raw(Box::new(TruePeakLimiterState::new(sample_rate))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<TruePeakLimiterState>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_prepare(state: *mut c_void, sample_rate: f64) {
-    if let Some(state) = state.cast::<TruePeakLimiterState>().as_ref() {
-        state.prepare(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_reset(state: *mut c_void) {
-    if let Some(state) = state.cast::<TruePeakLimiterState>().as_ref() {
-        state.reset();
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_true_peak_limiter_process(
     state: *mut c_void,
     left: *mut f32,
@@ -296,17 +265,6 @@ pub unsafe extern "C" fn hirari_true_peak_limiter_set_parameter(
     if let Some(state) = state.cast::<TruePeakLimiterState>().as_ref() {
         state.set_parameter(id, value);
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_get_parameter(
-    state: *const c_void,
-    id: u32,
-) -> f32 {
-    state
-        .cast::<TruePeakLimiterState>()
-        .as_ref()
-        .map_or(0.0, |state| state.parameter(id))
 }
 
 #[no_mangle]
@@ -353,22 +311,6 @@ pub unsafe extern "C" fn hirari_true_peak_limiter_restore_state(
     state.set_parameter(0, threshold);
     state.set_parameter(1, ceiling);
     true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_latency(state: *const c_void) -> u32 {
-    state
-        .cast::<TruePeakLimiterState>()
-        .as_ref()
-        .map_or(0, |state| state.latency.load(Ordering::Relaxed))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_true_peak_limiter_tail(state: *const c_void) -> u32 {
-    state
-        .cast::<TruePeakLimiterState>()
-        .as_ref()
-        .map_or(0, |state| state.tail.load(Ordering::Relaxed))
 }
 
 #[cfg(test)]

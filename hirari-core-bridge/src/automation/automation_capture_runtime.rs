@@ -262,13 +262,6 @@ pub extern "C" fn hirari_automation_recorder_create() -> *mut c_void {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_automation_recorder_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        unsafe { drop(Box::from_raw(state.cast::<AutomationRecorderState>())) };
-    }
-}
-
-#[no_mangle]
 pub extern "C" fn hirari_automation_recorder_instance() -> *mut c_void {
     static INSTANCE: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
     *INSTANCE.get_or_init(|| hirari_automation_recorder_create() as usize) as *mut c_void
@@ -301,57 +294,6 @@ pub extern "C" fn hirari_automation_record_mode_apply(mode: u32) -> u32 {
 pub unsafe extern "C" fn hirari_automation_recorder_get_mode(state: *const c_void) -> u32 {
     unsafe { state.cast::<AutomationRecorderState>().as_ref() }
         .map_or(0, |state| state.mode.load(Ordering::Acquire))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_automation_recorder_set_punch_range(
-    state: *const c_void,
-    start: u64,
-    end: u64,
-) {
-    if let Some(state) = unsafe { state.cast::<AutomationRecorderState>().as_ref() } {
-        state.punch_start.store(start, Ordering::Release);
-        state.punch_end.store(end, Ordering::Release);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_automation_recorder_record_value(
-    state: *const c_void,
-    track_id: u32,
-    param_id: u32,
-    value: f32,
-    timestamp: u64,
-) {
-    if let Some(state) = unsafe { state.cast::<AutomationRecorderState>().as_ref() } {
-        state.record_value(track_id, param_id, value, timestamp);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_automation_recorder_flush(state: *const c_void) {
-    if let Some(state) = unsafe { state.cast::<AutomationRecorderState>().as_ref() } {
-        state.flush();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_automation_recorder_snapshot(
-    state: *const c_void,
-    output: *mut NativeAutomationEvent,
-    capacity: usize,
-) -> usize {
-    let Some(state) = (unsafe { state.cast::<AutomationRecorderState>().as_ref() }) else {
-        return 0;
-    };
-    let events = state.snapshot();
-    if output.is_null() || capacity < events.len() {
-        return events.len();
-    }
-    unsafe {
-        std::ptr::copy_nonoverlapping(events.as_ptr(), output, events.len());
-    }
-    events.len()
 }
 
 #[no_mangle]

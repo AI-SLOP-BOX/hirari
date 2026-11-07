@@ -43,11 +43,6 @@ fn last_error(host: *mut c_void) -> u8 {
         .unwrap_or(COMMAND_ERROR_NONE)
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_engine_last_command_error(host: *mut c_void) -> u8 {
-    last_error(host)
-}
-
 /// Reads the admission error recorded for `host` without a C++ accessor.
 pub fn engine_last_command_error(host: usize) -> u8 {
     last_error(host as *mut c_void)

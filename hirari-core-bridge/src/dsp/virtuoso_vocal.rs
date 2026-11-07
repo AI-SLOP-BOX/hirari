@@ -345,88 +345,6 @@ impl VirtuosoVocalEngine {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_virtuoso_vocal_create(sample_rate: f64) -> *mut c_void {
-    let engine = VirtuosoVocalEngine::new(sample_rate);
-    Box::into_raw(Box::new(VirtuosoVocalFfiState {
-        engine: UnsafeCell::new(engine),
-        pitch_shift_bits: AtomicU32::new(0.0f32.to_bits()),
-        formant_shift_bits: AtomicU32::new(0.0f32.to_bits()),
-    }))
-    .cast()
-}
-
-struct VirtuosoVocalFfiState {
-    engine: UnsafeCell<VirtuosoVocalEngine>,
-    pitch_shift_bits: AtomicU32,
-    formant_shift_bits: AtomicU32,
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        unsafe { drop(Box::from_raw(state.cast::<VirtuosoVocalFfiState>())) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_prepare(state: *mut c_void, sample_rate: f64) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoVocalFfiState>().as_ref() } {
-        unsafe { &mut *state.engine.get() }.prepare(sample_rate);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_reset(state: *mut c_void) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoVocalFfiState>().as_ref() } {
-        unsafe { &mut *state.engine.get() }.reset();
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_set_pitch(state: *mut c_void, semitones: f32) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoVocalFfiState>().as_ref() } {
-        state
-            .pitch_shift_bits
-            .store(semitones.to_bits(), Ordering::Relaxed);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_set_formant(state: *mut c_void, semitones: f32) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoVocalFfiState>().as_ref() } {
-        state
-            .formant_shift_bits
-            .store(semitones.to_bits(), Ordering::Relaxed);
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_vocal_process(
-    state: *mut c_void,
-    left: *mut f32,
-    right: *mut f32,
-    frames: usize,
-) {
-    let Some(state) = (unsafe { state.cast::<VirtuosoVocalFfiState>().as_ref() }) else {
-        return;
-    };
-    if frames == 0 || left.is_null() {
-        return;
-    }
-    let left = unsafe { std::slice::from_raw_parts_mut(left, frames) };
-    // UI setters publish through atomics; the audio callback owns DSP state.
-    let engine = unsafe { &mut *state.engine.get() };
-    engine.pitch_shift_semi = f32::from_bits(state.pitch_shift_bits.load(Ordering::Relaxed));
-    engine.formant_shift = f32::from_bits(state.formant_shift_bits.load(Ordering::Relaxed));
-    if right.is_null() {
-        engine.process_mono(left);
-    } else {
-        let right = unsafe { std::slice::from_raw_parts_mut(right, frames) };
-        engine.process(left, right);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::VirtuosoVocalEngine;
@@ -449,6 +367,3 @@ mod tests {
         assert!(!e.audit_virtuoso_vocal());
     }
 }
-use std::cell::UnsafeCell;
-use std::ffi::c_void;
-use std::sync::atomic::{AtomicU32, Ordering};

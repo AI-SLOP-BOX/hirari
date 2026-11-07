@@ -275,31 +275,6 @@ pub unsafe extern "C" fn hirari_control_room_remove_speaker(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_control_room_rename_speaker(
-    handle: *mut c_void,
-    index: usize,
-    name: *const u8,
-    name_length: usize,
-) -> bool {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return false;
-    };
-    if name.is_null() || name_length == 0 || name_length > 128 {
-        return false;
-    }
-    let name = unsafe { std::slice::from_raw_parts(name, name_length) };
-    if !valid_speaker_name(name) {
-        return false;
-    }
-    let mut model = state.lock_model();
-    let Some(speaker) = model.speakers.get_mut(index) else {
-        return false;
-    };
-    speaker.name = name.to_vec();
-    true
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_control_room_set_speaker_gain(
     handle: *mut c_void,
     index: usize,
@@ -361,11 +336,6 @@ pub unsafe extern "C" fn hirari_control_room_set_dim_db(handle: *mut c_void, db:
     model.dim_gain = 10.0_f32.powf(db / 20.0);
     state.publish_monitor_gain(&model);
     true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_control_room_dim_db(handle: *mut c_void) -> f32 {
-    unsafe { state(handle) }.map_or(-20.0, |state| state.lock_model().dim_db)
 }
 
 #[no_mangle]
@@ -716,14 +686,6 @@ pub unsafe extern "C" fn hirari_control_room_validate(handle: *mut c_void) -> bo
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_control_room_active_speaker(handle: *mut c_void) -> usize {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return 0;
-    };
-    state.lock_model().active_speaker
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_control_room_speaker_snapshot(
     handle: *mut c_void,
     output: *mut SpeakerSnapshot,
@@ -748,36 +710,6 @@ pub unsafe extern "C" fn hirari_control_room_speaker_snapshot(
         snapshot.name[..speaker.name.len()].copy_from_slice(&speaker.name);
         unsafe {
             output.add(index).write(snapshot);
-        }
-    }
-    count
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_control_room_cue_snapshot(
-    handle: *mut c_void,
-    output: *mut CueSnapshot,
-    capacity: usize,
-) -> usize {
-    let Some(state) = (unsafe { state(handle) }) else {
-        return 0;
-    };
-    let model = state.lock_model();
-    if output.is_null() {
-        return model.cues.len();
-    }
-    let count = model.cues.len().min(capacity);
-    for index in 0..count {
-        let cue = model.cues[index];
-        unsafe {
-            output.add(index).write(CueSnapshot {
-                id: cue.id,
-                gain: cue.gain,
-                enabled: u8::from(cue.enabled),
-                bus_track_id: cue.bus_track_id,
-                output_channel: cue.output_channel,
-                click_enabled: u8::from(cue.click_enabled),
-            });
         }
     }
     count

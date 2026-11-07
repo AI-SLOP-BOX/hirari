@@ -391,13 +391,6 @@ pub unsafe extern "C" fn hirari_region_stretch_lookahead(handle: *const std::ffi
     state.kernel.output_latency().max(0) as u32
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_stretch_reset(handle: *mut std::ffi::c_void) {
-    if let Some(state) = unsafe { handle.cast::<StretchState>().as_mut() } {
-        state.reset();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

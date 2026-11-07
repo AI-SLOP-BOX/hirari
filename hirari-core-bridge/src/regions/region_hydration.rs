@@ -8,8 +8,6 @@
 
 use crate::audio_note_curve::HirariAudioNoteAnchor;
 use crate::ffi::{NativeNoteSegment, NativeProjectState, NativeRegionState, NativeTrackHandle};
-use crate::AudioEngine;
-use crate::HirariUnifiedEngine;
 use crate::region_edit_host::HirariRegionState;
 use crate::region_warp::HirariWarpMarker;
 use crate::vari_audio::{
@@ -129,16 +127,6 @@ unsafe fn migrate(input: &mut HirariRegionLegacyMigration) -> bool {
     input.len = length;
     input.source_sample_rate = source_rate;
     true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_region_legacy_source_rate_migrate(
-    input: *mut HirariRegionLegacyMigration,
-) -> bool {
-    if input.is_null() {
-        return false;
-    }
-    migrate(&mut *input)
 }
 
 /// True when a persisted range edit is safe for the renderer: a forward,

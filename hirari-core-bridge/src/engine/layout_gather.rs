@@ -1076,23 +1076,6 @@ fn existing_owner(host: usize) -> Option<u64> {
         .copied()
 }
 
-/// Retires the snapshots of one engine and joins its worker. The native
-/// `AudioEngine` destructor calls this before its graph can be released.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_layout_snapshot_owner_release_host(host: *mut c_void) {
-    let owner = (!host.is_null())
-        .then(|| {
-            layout_owners()
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .remove(&(host as usize))
-        })
-        .flatten();
-    if let Some(owner) = owner {
-        crate::async_snapshots::release_layout_owner(owner);
-    }
-}
-
 /// The live project layout as JSON. The gather is Rust and reads the engine's
 /// own stores through its session bag; the host contributes only its address.
 pub fn project_layout_json(core: *const crate::HirariUnifiedEngine) -> String {

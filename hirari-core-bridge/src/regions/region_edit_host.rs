@@ -3099,15 +3099,9 @@ mod tests {
     use std::slice;
 
 use crate::vari_audio::{
-    hirari_region_vari_audio_store_clear_segments, hirari_region_vari_audio_store_new,
-    hirari_region_vari_audio_store_remove, hirari_region_vari_audio_store_upsert,
-    hirari_region_vari_audio_store_upsert_anchor, hirari_region_vari_audio_store_warp,
-    vari_store_clone, vari_store_release, vari_store_restore, vari_store_view,
-    HirariAudioNoteSegment, HirariRegionVariAudioStore,
+    hirari_region_vari_audio_store_new, HirariRegionVariAudioStore,
 };
-use crate::audio_note_curve::{
-    hirari_audio_note_curve_component_anchor, HirariAudioNoteAnchor,
-};
+use crate::audio_note_curve::HirariAudioNoteAnchor;
     use std::sync::Mutex;
 
     #[derive(Default)]

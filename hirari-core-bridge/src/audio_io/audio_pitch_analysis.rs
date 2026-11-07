@@ -474,39 +474,6 @@ fn analyze(samples: &[f32], sample_rate: f64, mut config: Config) -> Vec<NoteSeg
     segments
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_pitch_analyze(
-    samples: *const f32,
-    count: usize,
-    sample_rate: f64,
-    min_hz: f64,
-    max_hz: f64,
-    window: usize,
-    hop: usize,
-    threshold: f64,
-    note_change_threshold_cents: f64,
-    note_change_confirmation_frames: usize,
-) -> *mut c_void {
-    if samples.is_null() || count == 0 || count > MAX_SAMPLES {
-        return std::ptr::null_mut();
-    }
-    let config = Config {
-        min_hz,
-        max_hz,
-        window,
-        hop,
-        threshold,
-        note_change_threshold_cents,
-        note_change_confirmation_frames,
-    };
-    let segments = analyze(
-        std::slice::from_raw_parts(samples, count),
-        sample_rate,
-        config,
-    );
-    Box::into_raw(Box::new(AnalysisResult { segments })).cast()
-}
-
 /// Runs the complete region-analysis preparation path in Rust: channel
 /// selection, bounded decimation, pitch analysis, and source-to-timeline
 /// coordinate mapping. The returned opaque result remains consumable by the
@@ -637,84 +604,6 @@ pub unsafe extern "C" fn hirari_audio_pitch_result_destroy(state: *mut c_void) {
     if !state.is_null() {
         drop(Box::from_raw(state.cast::<AnalysisResult>()));
     }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_pitch_segment_count(state: *const c_void) -> usize {
-    if state.is_null() {
-        return 0;
-    }
-    (*state.cast::<AnalysisResult>()).segments.len()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_pitch_get_segment(
-    state: *const c_void,
-    index: usize,
-    start_seconds: *mut f64,
-    end_seconds: *mut f64,
-    detected_pitch_cents: *mut f64,
-) -> bool {
-    if state.is_null()
-        || start_seconds.is_null()
-        || end_seconds.is_null()
-        || detected_pitch_cents.is_null()
-    {
-        return false;
-    }
-    let result = &*state.cast::<AnalysisResult>();
-    let Some(segment) = result.segments.get(index) else {
-        return false;
-    };
-    *start_seconds = segment.start_seconds;
-    *end_seconds = segment.end_seconds;
-    *detected_pitch_cents = segment.detected_pitch_cents;
-    true
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_pitch_anchor_count(
-    state: *const c_void,
-    segment_index: usize,
-) -> usize {
-    if state.is_null() {
-        return 0;
-    }
-    let result = &*state.cast::<AnalysisResult>();
-    result
-        .segments
-        .get(segment_index)
-        .map_or(0, |segment| segment.anchors.len())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_audio_pitch_get_anchor(
-    state: *const c_void,
-    segment_index: usize,
-    anchor_index: usize,
-    position_seconds: *mut f64,
-    pitch_cents: *mut f64,
-    formant_cents: *mut f64,
-) -> bool {
-    if state.is_null()
-        || position_seconds.is_null()
-        || pitch_cents.is_null()
-        || formant_cents.is_null()
-    {
-        return false;
-    }
-    let result = &*state.cast::<AnalysisResult>();
-    let Some(anchor) = result
-        .segments
-        .get(segment_index)
-        .and_then(|segment| segment.anchors.get(anchor_index))
-    else {
-        return false;
-    };
-    *position_seconds = anchor.position_seconds;
-    *pitch_cents = anchor.pitch_cents;
-    *formant_cents = anchor.formant_cents;
-    true
 }
 
 #[cfg(test)]

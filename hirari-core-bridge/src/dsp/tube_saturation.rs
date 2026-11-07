@@ -264,23 +264,6 @@ pub unsafe extern "C" fn hirari_tube_saturation_restore_state(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_tube_saturation_set_control(
-    state: *const c_void,
-    control: u32,
-    value: f32,
-) {
-    let Some(state) = state.cast::<TubeSaturationEngine>().as_ref() else {
-        return;
-    };
-    match control {
-        0 => state.set_drive(value),
-        1 => state.set_bias(value),
-        2 => state.set_dry_wet(value),
-        _ => {}
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_tube_saturation_process(
     state: *const c_void,
     left: *mut f32,

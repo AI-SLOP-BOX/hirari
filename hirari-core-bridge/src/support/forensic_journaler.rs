@@ -170,60 +170,8 @@ pub unsafe extern "C" fn hirari_forensic_journaler_log(
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_forensic_journaler_log_description(
-    state: *const c_void,
-    kind: u32,
-    description: *const u8,
-    description_len: usize,
-    value: f32,
-) -> bool {
-    if description_len > 0 && description.is_null() {
-        return false;
-    }
-    let bytes = if description_len == 0 {
-        &[]
-    } else {
-        unsafe { std::slice::from_raw_parts(description, description_len) }
-    };
-    let hash = bytes.iter().fold(2_166_136_261_u32, |hash, byte| {
-        (hash ^ u32::from(*byte)).wrapping_mul(16_777_619)
-    });
-    unsafe { hirari_forensic_journaler_log(state, kind, hash, value, 0) }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_forensic_journaler_stop(state: *mut c_void) {
     if let Some(journaler) = state.cast::<Journaler>().as_ref() { stop(journaler); }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_forensic_journaler_recover(
-    path: *const u8, path_len: usize, context: *mut c_void,
-    callback: Option<unsafe extern "C" fn(*mut c_void, u32, u32, f32, u64)>,
-) -> bool {
-    if path_len > 0 && path.is_null() { return false; }
-    let bytes = if path_len == 0 { &[] } else { std::slice::from_raw_parts(path, path_len) };
-    let Some(callback) = callback else { return false };
-    #[cfg(unix)]
-    let path = path_from_bytes(bytes);
-    #[cfg(not(unix))]
-    let Some(path) = path_from_bytes(bytes) else { return false };
-    let Ok(mut file) = File::open(path) else { return true };
-    loop {
-        let mut row = [0u8; ENTRY_SIZE];
-        match file.read_exact(&mut row) {
-            Ok(()) => {
-                let entry = Entry {
-                    kind: u32::from_ne_bytes(row[0..4].try_into().unwrap()),
-                    track_id: u32::from_ne_bytes(row[4..8].try_into().unwrap()),
-                    value: f32::from_ne_bytes(row[8..12].try_into().unwrap()),
-                    timestamp: u64::from_ne_bytes(row[16..24].try_into().unwrap()),
-                };
-                callback(context, entry.kind, entry.track_id, entry.value, entry.timestamp);
-            }
-            Err(_) => return true,
-        }
-    }
 }
 
 #[cfg(test)]

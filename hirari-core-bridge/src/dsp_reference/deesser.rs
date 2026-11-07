@@ -85,13 +85,6 @@ pub unsafe extern "C" fn hirari_deesser_reference_prepare(state: *mut c_void, sa
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn hirari_deesser_reference_reset(state: *mut c_void) {
-    if !state.is_null() {
-        (*(state as *mut DeEsser)).reset();
-    }
-}
-
-#[no_mangle]
 pub unsafe extern "C" fn hirari_deesser_reference_set_parameters(
     state: *mut c_void,
     threshold: f32,

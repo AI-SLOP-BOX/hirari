@@ -58,36 +58,6 @@ pub unsafe extern "C" fn hirari_plugin_admission_error(path: *const c_char) -> u
     }
 }
 
-/// Stable plugin format IDs used by the C++ compatibility layer.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_format_for_path(path: *const c_char) -> u8 {
-    let Some(path) = (unsafe { c_string(path) }) else {
-        return 0;
-    };
-    match classify_format(Path::new(&path)) {
-        Some("VST3") => 1,
-        Some("AU") => 2,
-        Some("CLAP") => 3,
-        _ => 0,
-    }
-}
-
-/// Rejects symlinks and special files before plugin metadata is inspected or
-/// a binary is loaded. An empty expected format only asks for a safe file or
-/// directory; a non-empty format must match the path extension.
-#[no_mangle]
-pub unsafe extern "C" fn hirari_plugin_is_safe_candidate(
-    path: *const c_char,
-    expected_format: *const c_char,
-) -> bool {
-    let (Some(path), Some(expected)) = (unsafe { c_string(path) }, unsafe {
-        c_string(expected_format)
-    }) else {
-        return false;
-    };
-    safe_candidate(Path::new(&path), &expected)
-}
-
 /// Admission for `PluginScanner::scanInSandbox`. Returns null when the path may
 /// be scanned, otherwise the rejection text the scanner publishes verbatim.
 /// The checks mirror the filesystem contract the native scanner used: empty

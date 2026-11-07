@@ -1,5 +1,4 @@
 use std::cell::UnsafeCell;
-use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 const FFT_SIZE: usize = 1024;
@@ -164,36 +163,3 @@ impl SpectrumState {
     }
 }
 
-#[no_mangle]
-pub extern "C" fn hirari_spectrum_analyzer_create() -> *mut c_void {
-    Box::into_raw(Box::new(SpectrumState::new())).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_spectrum_analyzer_destroy(state: *mut c_void) {
-    if !state.is_null() {
-        drop(Box::from_raw(state.cast::<SpectrumState>()));
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_spectrum_analyzer_process(
-    state: *mut c_void,
-    data: *const f32,
-    frames: usize,
-    sample_rate: f64,
-) {
-    if state.is_null() || data.is_null() {
-        return;
-    }
-    let handle = &*state.cast::<SpectrumState>();
-    handle.process(std::slice::from_raw_parts(data, frames), sample_rate);
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_spectrum_analyzer_get_band(state: *const c_void, band: u32) -> f32 {
-    if state.is_null() || band as usize >= BAND_COUNT {
-        return 0.0;
-    }
-    (*state.cast::<SpectrumState>()).get_band(band as usize)
-}

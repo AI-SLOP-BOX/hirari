@@ -1,8 +1,5 @@
-use std::ffi::c_void;
 
 const LINES: usize = 16;
-const MAGIC: u32 = 0x4155_5241;
-const VERSION: u16 = 1;
 const SAMPLE_RATE_MIN: f64 = 8_000.0;
 const SAMPLE_RATE_MAX: f64 = 384_000.0;
 const PRIMES: [usize; LINES] = [
@@ -67,51 +64,7 @@ impl VirtuosoSpaceEngine {
         self.line_read.fill(0.0);
     }
 
-    fn reset(&mut self) {
-        for line in &mut self.delay_lines {
-            line.fill(0.0);
-        }
-        self.filter_state.fill(0.0);
-        self.line_read.fill(0.0);
-        self.write_indices.fill(0);
-        for (i, line) in self.delay_lines.iter().enumerate() {
-            self.read_indices[i] = 1 % line.len().max(1);
-        }
-    }
-
-    fn parameter(&self, id: u32) -> f32 {
-        match id {
-            0 => (self.decay / 0.999).clamp(0.0, 1.0),
-            1 => (self.damping / 0.99).clamp(0.0, 1.0),
-            2 => ((self.size - 0.25) / 3.75).clamp(0.0, 1.0),
-            3 => self.mix,
-            _ => 0.0,
-        }
-    }
-
-    fn set_parameter(&mut self, id: u32, value: f32) {
-        if !value.is_finite() || id >= 4 {
-            return;
-        }
-        let value = value.clamp(0.0, 1.0);
-        match id {
-            0 => self.decay = value * 0.999,
-            1 => self.damping = value * 0.99,
-            2 => {
-                self.size = 0.25 + value * 3.75;
-                self.setup_fdn();
-            }
-            3 => self.mix = value,
-            _ => {}
-        }
-    }
-
-    fn tail_samples(&self) -> u32 {
-        let longest = 3851.0 * (self.sample_rate / 44_100.0) * self.size as f64;
-        (longest * 48.0).min(self.sample_rate * 30.0) as u32
-    }
-
-    /// The control wrapper supplies the writable channel pointers. Processing
+                    /// The control wrapper supplies the writable channel pointers. Processing
     /// is allocation-free and keeps the original C++ mono/stereo behavior.
     unsafe fn process_raw(&mut self, left: *mut f32, right: *mut f32, frames: u32) {
         if left.is_null() || right.is_null() || frames == 0 {
@@ -184,114 +137,5 @@ impl VirtuosoSpaceEngine {
             && self.delay_lines.iter().all(|line| !line.is_empty())
     }
 
-    fn set_state(&mut self, bytes: &[u8]) -> bool {
-        if bytes.len() != 32 {
-            return false;
         }
-        let read_u16 = |offset| u16::from_ne_bytes([bytes[offset], bytes[offset + 1]]);
-        let read_u32 = |offset| u32::from_ne_bytes(bytes[offset..offset + 4].try_into().unwrap());
-        let read_f32 = |offset| f32::from_ne_bytes(bytes[offset..offset + 4].try_into().unwrap());
-        let magic = read_u32(0);
-        let version = read_u16(4);
-        let flags = read_u16(6);
-        let mix = read_f32(8);
-        let values = [read_f32(16), read_f32(20), read_f32(24), read_f32(28)];
-        if magic != MAGIC || version != VERSION || flags & !1 != 0
-            || !mix.is_finite() || !(0.0..=1.0).contains(&mix)
-            || values.iter().any(|value| !value.is_finite() || !(0.0..=1.0).contains(value))
-        {
-            return false;
-        }
-        self.mix = mix;
-        for (id, value) in values.into_iter().enumerate() {
-            self.set_parameter(id as u32, value);
-        }
-        true
-    }
 
-    fn write_state(&self, output: &mut [u8], bypassed: bool, sidechain_bus_id: u32) -> usize {
-        const SIZE: usize = 32;
-        if output.len() < SIZE { return SIZE; }
-        output[..SIZE].fill(0);
-        output[0..4].copy_from_slice(&MAGIC.to_ne_bytes());
-        output[4..6].copy_from_slice(&VERSION.to_ne_bytes());
-        let flags: u16 = u16::from(bypassed);
-        output[6..8].copy_from_slice(&flags.to_ne_bytes());
-        output[8..12].copy_from_slice(&self.mix.to_ne_bytes());
-        output[12..16].copy_from_slice(&sidechain_bus_id.to_ne_bytes());
-        for id in 0..4 {
-            let offset = 16 + id * 4;
-            output[offset..offset + 4].copy_from_slice(&self.parameter(id as u32).to_ne_bytes());
-        }
-        SIZE
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_virtuoso_space_create(sample_rate: f64) -> *mut c_void {
-    Box::into_raw(Box::new(VirtuosoSpaceEngine::new(sample_rate))).cast()
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_destroy(state: *mut c_void) {
-    if !state.is_null() { unsafe { drop(Box::from_raw(state.cast::<VirtuosoSpaceEngine>())) }; }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_prepare(state: *mut c_void, sample_rate: f64) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoSpaceEngine>().as_mut() } { state.prepare(sample_rate); }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_set_parameter(state: *mut c_void, id: u32, value: f32) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoSpaceEngine>().as_mut() } { state.set_parameter(id, value); }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_get_parameter(state: *const c_void, id: u32) -> f32 {
-    unsafe { state.cast::<VirtuosoSpaceEngine>().as_ref() }.map_or(0.0, |state| state.parameter(id))
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_reset(state: *mut c_void) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoSpaceEngine>().as_mut() } { state.reset(); }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_tail_samples(state: *const c_void) -> u32 {
-    unsafe { state.cast::<VirtuosoSpaceEngine>().as_ref() }.map_or(0, |state| state.tail_samples())
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_process(
-    state: *mut c_void, left: *mut f32, right: *mut f32, frames: u32,
-) {
-    if let Some(state) = unsafe { state.cast::<VirtuosoSpaceEngine>().as_mut() } {
-        unsafe { state.process_raw(left, right, frames) };
-    }
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_write_state(
-    state: *const c_void, output: *mut u8, capacity: usize,
-    bypassed: bool, sidechain_bus_id: u32,
-) -> usize {
-    let Some(state) = (unsafe { state.cast::<VirtuosoSpaceEngine>().as_ref() }) else { return 0; };
-    if output.is_null() { return 32; }
-    state.write_state(
-        unsafe { std::slice::from_raw_parts_mut(output, capacity) },
-        bypassed,
-        sidechain_bus_id,
-    )
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn hirari_virtuoso_space_set_state(
-    state: *mut c_void, input: *const u8, length: usize,
-) -> bool {
-    let (Some(state), Some(input)) = (
-        unsafe { state.cast::<VirtuosoSpaceEngine>().as_mut() },
-        (!input.is_null()).then(|| unsafe { std::slice::from_raw_parts(input, length) }),
-    ) else { return false; };
-    state.set_state(input)
-}
