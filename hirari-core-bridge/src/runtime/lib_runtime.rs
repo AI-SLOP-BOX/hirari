@@ -125,10 +125,9 @@ pub struct HirariCore {
     /// with. The object itself is Rust-owned (`control_room_runtime.rs`) and is
     /// created by the engine's `ControlRoom` member, so it lives exactly as
     /// long as `engine` above. Holding the handle here lets every Control Room
-    /// operation call straight into the same object the audio thread reads,
-    /// instead of round-tripping through the C++ forwarding shims. A zero
-    /// handle means "no engine", which those functions already treat as the
-    /// same falsy/defaults their null-`m_engine` branches returned.
+    /// operation call straight into the same object the audio thread reads.
+    /// A zero handle means "no engine", which those functions treat as the
+    /// same falsy/defaults their null-engine branches returned.
     control_room_state: usize,
     /// Addresses of the Rust-owned tempo map, the undo history and the
     /// diagnostic ring this Core writes into. Captured here for the same

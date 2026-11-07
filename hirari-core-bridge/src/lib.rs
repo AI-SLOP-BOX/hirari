@@ -9,7 +9,6 @@
 // resolves the Mach-O image inside the bundle before loading it.
 
 include!("module_exports.rs");
-use core::pin::Pin;
 
 pub use analysis_views::{
     analysis_arrangement_advice, analysis_creative_advice, analysis_dashboard_json,
@@ -68,7 +67,9 @@ pub use engine_native::{AudioEngine, HirariUnifiedEngine};
 use persistence::*;
 use project::ProjectDocument;
 
-#[cxx::bridge(namespace = "Hirari::Core::Bridge")]
+// Shared data types exchanged between the engine, the project codec and the
+// UI. Plain Rust structs; the former cxx bridge generated C++ glue for them
+// until the last C++ consumer was migrated.
 pub mod ffi {
     #[derive(Debug, Clone, Copy)]
     pub struct BridgeEvent {
@@ -125,116 +126,12 @@ pub mod ffi {
         SetAutomationRecordMode = 12,
     }
 
-    extern "Rust" {
-
-        type AudioEngine;
-
-        type HirariUnifiedEngine;
-
-        // The inner engine is a per-session object that never changes identity.
-        // Rust reaches its getters directly here instead of through an
-        // AudioEngine forwarder per getter.
-        fn get_core(self: &AudioEngine) -> &HirariUnifiedEngine;
-
-        // --- LIFECYCLE: No more global singletons ---
-        fn new_audio_engine() -> Box<AudioEngine>;
-        fn new_audio_engine_offline() -> Box<AudioEngine>;
-
-        fn join_audio_callbacks(self: &HirariUnifiedEngine);
-        // Rebuilding the graph for a new device format stays in C++; Rust's
-        // config transaction calls it once its own gates pass.
-        #[cxx_name = "prepareToPlay"]
-        fn prepare_to_play(self: &HirariUnifiedEngine, sample_rate: f64, block_size: u32);
-        fn set_tempo(self: &HirariUnifiedEngine, bpm: f32) -> bool;
-        fn set_master_gain(self: &HirariUnifiedEngine, value: f32) -> bool;
-        fn control_room_state(self: &AudioEngine) -> usize;
-        fn tempo_state(self: &AudioEngine) -> usize;
-        fn undo_state(self: &AudioEngine) -> usize;
-        fn log_state(self: &AudioEngine) -> usize;
-        // The MIDI snapshot store is native to Rust already; the engine keeps
-        // the handle its render callback pins, so hand that address back.
-        fn midi_snapshot_store(self: &HirariUnifiedEngine) -> usize;
-        fn midi_learn_state(self: &HirariUnifiedEngine) -> usize;
-        fn preview_synth_state(self: &HirariUnifiedEngine) -> usize;
-        fn mark_project_state_changed(self: &HirariUnifiedEngine);
-        fn bus_track_exists(self: &HirariUnifiedEngine, bus_track_id: u32) -> bool;
-        fn get_master_gain(self: &HirariUnifiedEngine) -> f32;
-        fn bounce_session_state(self: &HirariUnifiedEngine) -> usize;
-        fn audio_driver_host(self: &AudioEngine) -> usize;
-        fn engine_block_state(self: &AudioEngine) -> usize;
-        fn is_audio_device_ready(self: &AudioEngine) -> bool;
-        fn try_reconnect_audio_device(self: &AudioEngine);
-        // The device-config transaction itself, including device selection, is
-        // Rust-owned (`engine_config.rs`); only the session mutex it shares with
-        // the destructor, shutdown and reconnect paths is handed across here.
-        fn get_audio_config_generation(self: &AudioEngine) -> u64;
-        fn process_audio_block(self: &AudioEngine, left: &mut [f32], right: &mut [f32]);
-        fn shutdown(self: &AudioEngine);
-        fn new_project(self: &HirariUnifiedEngine);
-
-        fn add_region(self: &AudioEngine, tid: u32, path: &str, start: f64) -> bool;
-
-        fn set_plugin_bypass(
-            self: &HirariUnifiedEngine,
-            tid: u32,
-            plugin_index: u32,
-            bypassed: bool,
-        ) -> bool;
-        fn has_sidechain_link(
-            self: &HirariUnifiedEngine,
-            source_id: u32,
-            dest_id: u32,
-            plugin_index: u32,
-        ) -> bool;
-        fn save_project(self: &AudioEngine, path: &str) -> bool;
-        fn load_project(self: &AudioEngine, path: &str) -> bool;
-        fn bounce_project(self: &AudioEngine, path: &str, format: u32) -> bool;
-        fn bounce_project_async(self: &AudioEngine, path: &str, format: u32) -> bool;
-        fn get_bounce_progress(self: &HirariUnifiedEngine) -> f32;
-        fn get_bounce_state(self: &HirariUnifiedEngine) -> u32;
-        fn cancel_bounce(self: &HirariUnifiedEngine) -> bool;
-        fn pause_bounce(self: &HirariUnifiedEngine) -> bool;
-        fn resume_bounce(self: &HirariUnifiedEngine) -> bool;
-        fn midi_clock_tick(self: &HirariUnifiedEngine, timestamp: u64);
-        fn midi_clock_ticks(self: &HirariUnifiedEngine) -> u64;
-        fn midi_clock_last_tick(self: &HirariUnifiedEngine) -> u64;
-        fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
-        fn set_midi_clock_rate(self: &HirariUnifiedEngine, bpm: f64);
-        fn execute_auto_arrangement(self: &HirariUnifiedEngine) -> bool;
-        fn set_project_scale(self: &HirariUnifiedEngine, root: i32, scale_type: i32) -> bool;
-        fn set_articulation_map(self: &HirariUnifiedEngine, tid: u32, map_hash: u32) -> bool;
-        // Rust analysis reads (engine_analysis_reads.rs) sample telemetry and
-        // meter straight from these Rust-owned stores.
-        fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
-        fn meter_state(self: &HirariUnifiedEngine) -> usize;
-        fn mark_project_layout_changed(self: &HirariUnifiedEngine);
-
-        fn pdc_state(self: &HirariUnifiedEngine) -> usize;
-        fn preview_sampler(self: &HirariUnifiedEngine) -> usize;
-        fn metronome_state(self: &HirariUnifiedEngine) -> usize;
-        fn routing_engine_state(self: &HirariUnifiedEngine) -> usize;
-        fn get_sample_rate(self: &HirariUnifiedEngine) -> f64;
-
-        fn push_command(
-            engine: &AudioEngine,
-            cmd: HirariCommand,
-            tid: u32,
-            val: f32,
-            ts: u64,
-            expected_project_generation: u64,
-            expected_audio_generation: u64,
-        ) -> bool;
-
-        fn queue_region_waveform(self: &AudioEngine, tid: u32, rid: u32) -> u64;
-        // --- OWNERSHIP: Tied lifetime to the bridge host ---
-    }
-
     // ---------------------------------------------------------------------
     // Native project container (`ARUA`) codec.
     //
     // Rust owns the binary layout, version compatibility branches, checksum
-    // policy and file I/O. The C++ engine only extracts its live state into
-    // these structs on save, and hydrates its graph from them on load.
+    // policy and file I/O. The engine extracts its live state into these
+    // structs on save, and hydrates its graph from them on load.
     // Field names intentionally mirror the former C++ `ProjectState` so the
     // engine adapter stays a direct field-by-field copy.
     // ---------------------------------------------------------------------
@@ -451,72 +348,6 @@ pub mod ffi {
         pub trackType: u32,
         pub chain: usize,
         pub automation: usize,
-    }
-
-    extern "Rust" {
-        fn analysis_spectral_display(spectrum: &[f32], sample_rate: f64) -> Vec<f32>;
-        fn analysis_phase_heatmap(spectrum: &[f32]) -> Vec<f32>;
-        fn analysis_partials(spectrum: &[f32]) -> Vec<f32>;
-        fn analysis_mel_spectrogram(spectrum: &[f32]) -> Vec<f32>;
-        fn analysis_motion_vectors(spectrum: &[f32]) -> Vec<f32>;
-        fn analysis_motion_energy(spectrum: &[f32]) -> f32;
-        /// Packs every sandbox status of the engine at `host` into the UI wire
-        /// format. The engine pointer must remain valid for the call.
-        fn sandbox_statuses_packed(host: usize) -> Vec<u32>;
-        /// Admission error code of the most recent command on `host`.
-        fn engine_last_command_error(host: usize) -> u8;
-        fn analysis_synesthesia_colors(spectrum: &[f32]) -> Vec<f32>;
-        fn analysis_arrangement_advice(track_id: u32) -> String;
-        fn analysis_mixing_advice(true_peak_l: f32, true_peak_r: f32, correlation: f32)
-            -> Vec<f32>;
-        fn analysis_spectral_clashes(
-            true_peak_l: f32,
-            true_peak_r: f32,
-            correlation: f32,
-        ) -> Vec<f32>;
-        fn analysis_song_structure_json(
-            kinds: &[u8],
-            starts: &[u64],
-            ends: &[u64],
-            energies: &[f32],
-            flows: &[f32],
-        ) -> String;
-        fn analysis_structure_sections(
-            region_starts: &[u64],
-            total_length: u64,
-            bpm: f64,
-            sample_rate: f64,
-            tension: f32,
-            valence: f32,
-        ) -> Vec<ArrangementSection>;
-        fn analysis_waveform_peak_envelope(
-            left: &[f32],
-            right: &[f32],
-            peak_count: u32,
-        ) -> Vec<f32>;
-        fn resample_waveform_peak_envelope(peaks: &[f32], peak_count: u32) -> Vec<f32>;
-        fn analysis_creative_advice(true_peak_l: f32, true_peak_r: f32, correlation: f32)
-            -> String;
-        fn analysis_dashboard_json(
-            lufs_short: f32,
-            lufs_integrated: f32,
-            true_peak_l: f32,
-            true_peak_r: f32,
-            correlation: f32,
-        ) -> String;
-
-        type SummingOrchestrator;
-        type SummingConfig;
-        fn mix_buses_boutique(
-            self: &SummingOrchestrator,
-            target_l: &mut [f32],
-            target_r: &mut [f32],
-        );
-        fn process_limiter(
-            self: &mut SummingOrchestrator,
-            buffer: &mut [f32],
-            config: &SummingConfig,
-        ) -> f32;
     }
 }
 

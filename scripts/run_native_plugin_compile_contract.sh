@@ -5,8 +5,8 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
 # Compile the real out-of-process worker as part of the normal native
-# contract.  The header-only contract below cannot catch translation-unit
-# errors in the executable that loads third-party plugins.
+# contract; the staticlib check below cannot catch build errors in the
+# executable that loads third-party plugins.
 "$ROOT_DIR/scripts/build_plugin_worker.sh"
 
 # The worker is an external-process trust boundary. Invalid option values and
@@ -40,25 +40,8 @@ if "$ROOT_DIR/build-tools/hirari-plugin-host-worker" \
     exit 1
 fi
 
-CXX=${CXX:-c++}
-OUT_DIR=${TMPDIR:-/tmp}/hirari-native-contract
-mkdir -p "$OUT_DIR"
-
-# The native surface is backed by the Rust core bridge. Without the staticlib,
-# every hirari_* symbol in the contract below is undefined at link time.
+# The native surface is backed by the Rust core bridge staticlib.
 BRIDGE_LIB=$("$ROOT_DIR/scripts/build_bridge_staticlib.sh")
-
-# Shared link inputs for every contract on macOS. The engine's CoreAudio
-# driver translation unit references AudioComponent/AudioUnit/AudioObject
-# symbols, and the Rust staticlib archives Objective-C driver objects; with
-# LINK_FLAGS left empty those symbols stayed unresolved, so
-# native-plugin-compile could never leave BUILD_OR_LINK_FAILED. This block
-# existed earlier in the script's history and was lost in a later refactor.
-# HIRARI_NO_FRAMEWORKS=1 disables it for negative-control runs.
-LINK_FLAGS=""
-if [ "$(uname -s)" = "Darwin" ] && [ "${HIRARI_NO_FRAMEWORKS:-0}" != "1" ]; then
-    LINK_FLAGS="-framework Foundation -framework CoreAudio -framework CoreMIDI -framework AudioToolbox -framework CoreMedia"
-fi
 
 # ---------------------------------------------------------------------------
 # Contract runner

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build the Rust staticlib that every native C++ contract links against, and
+# Build the Rust staticlib that the native contract links against, and
 # prove the resulting archive is not stale.
 #
 # The crate declares no crate-type, so `cargo build --lib` emits only an rlib.

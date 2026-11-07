@@ -22,7 +22,6 @@ use crate::engine_block_host::{
     hirari_engine_block_device_block_frames, hirari_engine_block_generation,
     hirari_engine_block_is_playing,
 };
-use crate::ffi;
 use crate::tempo::hirari_tempo_map_set_current_bpm;
 
 /// Holds the session lock for one configuration transaction. Two UI or CLI

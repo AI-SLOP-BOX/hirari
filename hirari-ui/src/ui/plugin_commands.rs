@@ -15,10 +15,11 @@ use crate::slint_ui::{
 thread_local! {
     /// The engine handle owned by the UI thread.
     ///
-    /// HirariCore holds a cxx::UniquePtr and is deliberately not `Send`, so it
-    /// cannot be captured by a closure handed to `invoke_from_event_loop`. The
-    /// closures below run *on* the UI thread, so a thread-local gives them the
-    /// engine without an unsafe raw pointer or an unjustified `Send` impl.
+    /// HirariCore owns a Box<AudioEngine> whose raw-pointer stores make it
+    /// deliberately not `Send`, so it cannot be captured by a closure handed
+    /// to `invoke_from_event_loop`. The closures below run *on* the UI thread,
+    /// so a thread-local gives them the engine without an unsafe raw pointer
+    /// or an unjustified `Send` impl.
     static THREAD_CORE: RefCell<Option<Rc<HirariCore>>> = const { RefCell::new(None) };
 }
 

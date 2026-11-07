@@ -51,109 +51,6 @@ pub const STATE_ERROR_UNAVAILABLE: u8 = 5;
 pub const STATE_ERROR_BUSY: u8 = 6;
 pub const STATE_ERROR_TIMEOUT: u8 = 7;
 
-#[cxx::bridge(namespace = "Hirari::Core::Bridge::Sandbox")]
-mod ffi {
-    struct SandboxGeneration {
-        project: u64,
-        plugin: u64,
-        audio: u64,
-        state: u64,
-    }
-
-    extern "Rust" {
-        type SandboxHost;
-
-        fn new_sandbox_host(
-            plugin_path: &str,
-            sample_rate: f64,
-            max_block_size: u32,
-            channels: u32,
-            requested_format: &str,
-        ) -> Box<SandboxHost>;
-
-        fn start(&self) -> bool;
-        fn stop(&self);
-        fn request_plugin_reset(&self) -> bool;
-        fn is_alive(&self) -> bool;
-        fn poll_health(&self) -> bool;
-        fn restart(&self, force: bool) -> bool;
-        fn auto_restart(&self) -> bool;
-        fn reconfigure(&self, sample_rate: f64, max_block_size: u32) -> bool;
-        fn prepare(&self, sample_rate: f64, max_block_size: u32) -> bool;
-        fn reset_recovery(&self);
-        fn observe_block(&self, deadline_missed: bool, completed_late: bool, produced: bool) -> u32;
-        fn recovery_failed(&self) -> bool;
-        fn clear_recovery_failure(&self);
-        fn latch_recovery_failure(&self);
-        fn remember_parameter(&self, parameter_id: u32, value: f64) -> bool;
-        fn parameter_value(&self, parameter_id: u32, value: &mut f64) -> bool;
-        fn failure(&self) -> u8;
-        fn is_quarantined(&self) -> bool;
-        fn restart_attempts(&self) -> u32;
-        fn clear_quarantine(&self);
-        fn can_retry(&self) -> bool;
-        fn can_auto_retry(&self) -> bool;
-
-        fn set_generation_context(
-            &self,
-            project: u64,
-            plugin: u64,
-            audio: u64,
-            state: u64,
-        ) -> bool;
-        fn generation_context(&self) -> SandboxGeneration;
-
-        fn enqueue_extended_midi(
-            &self,
-            sample_offset: u64,
-            articulation_id: u8,
-            data: &[u8],
-        ) -> bool;
-        fn enqueue_parameter_change(
-            &self,
-            parameter_id: u32,
-            value: f64,
-            sample_offset: u32,
-        ) -> bool;
-
-        fn reset_staged_midi(&self);
-        fn stage_input_midi(
-            &self,
-            sample_offset: u64,
-            articulation_id: u8,
-            data: &[u8],
-            frames: u32,
-        ) -> bool;
-        fn process(&self, left: &mut [f32], right: &mut [f32], channels: u32, frames: u32) -> u8;
-        fn output_midi_count(&self) -> u32;
-        fn copy_output_midi(
-            &self,
-            index: u32,
-            sample_offset: &mut u64,
-            articulation_id: &mut u8,
-            data: &mut [u8],
-        ) -> u32;
-        fn take_last_process_overrun(&self) -> bool;
-        fn take_completed_sequence_overrun(&self) -> bool;
-
-        fn take_dropped_output_midi(&self) -> u32;
-        fn take_mailbox_overruns(&self) -> u32;
-        fn take_input_midi_truncations(&self) -> u32;
-        fn record_input_midi_rejection(&self);
-        fn take_process_errors(&self) -> u32;
-        fn heartbeat(&self) -> u64;
-        fn active_sample_rate(&self) -> u32;
-        fn active_channels(&self) -> u32;
-        fn is_midi_instrument(&self) -> bool;
-
-        fn set_state(&self, data: &[u8]) -> bool;
-        fn get_state(&self) -> Vec<u8>;
-        fn state_error_code(&self) -> u8;
-    }
-}
-
-pub use ffi::SandboxGeneration;
-
 // The mailbox layout has exactly one owner: `hirari_plugin_protocol::mailbox`.
 // The host and the isolated worker map the same shm object, so a second
 // definition here could drift silently and corrupt the protocol.
@@ -1189,16 +1086,6 @@ impl SandboxHost {
         let mut state_lock = lock_control(&self.state);
         state_lock.generation = context;
         true
-    }
-
-    fn generation_context(&self) -> SandboxGeneration {
-        let state = lock_control(&self.state);
-        SandboxGeneration {
-            project: state.generation.project,
-            plugin: state.generation.plugin,
-            audio: state.generation.audio,
-            state: state.generation.state,
-        }
     }
 
     fn is_quarantined(&self) -> bool {

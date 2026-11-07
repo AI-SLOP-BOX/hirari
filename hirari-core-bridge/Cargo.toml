@@ -9,9 +9,6 @@ description = "Rust DAW runtime and native audio integration boundary for Hirari
 [dependencies]
 parking_lot = { workspace = true }
 
-# 🔵 FFI LAYER
-# Using CXX for safer C++/Rust interoperability.
-cxx = "1.0.199"
 arc-swap = "1.9.2"
 
 # 🔵 LOGGING & ERRORS
@@ -71,10 +68,6 @@ objc2-av-foundation = { version = "0.3", features = [
     "objc2-core-graphics",
     "objc2-core-media",
 ] }
-
-[build-dependencies]
-cxx-build = "1.0.199"
-glob = "0.3"
 
 [features]
 dsp-differential-reference = []
