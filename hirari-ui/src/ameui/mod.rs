@@ -6,8 +6,9 @@
 //! arrangement Canvas: lanes, clips, measure ruler, markers and playhead
 //! drawn from the neutral arrange model. Slice 4 makes that canvas
 //! seekable (click/drag moves the playhead); slice 5 adds zoom (toolbar
-//! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection
-//! (a click selects, a drag seeks). Audio playback is real; the Slint UI
+//! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection;
+//! slice 7 adds clip drag-move (live preview, commit on release via the
+//! engine undo transaction). Audio playback is real; the Slint UI
 //! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
@@ -39,6 +40,21 @@ use crate::ui::arrange_model::{
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
 
+/// Clip-move snap in beats: the Slint default division (1/16 of a 4-beat
+/// bar). A snap picker is a later slice; the move itself already matches.
+const MOVE_SNAP_BEATS: f32 = 0.25;
+
+/// What a lane press turned into once it crossed the click threshold.
+#[derive(Clone, Copy, PartialEq)]
+enum LaneDrag {
+    /// Empty lane space: drag seeks the playhead.
+    Seek,
+    /// A non-MIDI clip: drag moves it, commit on release.
+    Move,
+    /// A MIDI clip: select on press, drag does nothing (Slint parity).
+    Hold,
+}
+
 pub struct HirariAmeApp {
     core: Option<Rc<HirariCore>>,
     plots: PlotFrameStore,
@@ -67,6 +83,12 @@ pub struct HirariAmeApp {
     down_x: f64,
     down_y: f64,
     down_clip: Option<(u32, i32)>,
+    down_mode: LaneDrag,
+    /// Clip being dragged, with its original start and snapped delta for
+    /// the live preview; committed to the engine on release.
+    move_clip: Option<(u32, i32)>,
+    move_start_beat: f32,
+    move_delta_beats: f32,
     tick: u64,
 }
 
@@ -101,6 +123,10 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         down_x: 0.0,
         down_y: 0.0,
         down_clip: None,
+        down_mode: LaneDrag::Seek,
+        move_clip: None,
+        move_start_beat: 0.0,
+        move_delta_beats: 0.0,
         tick: 0,
     }
 }
@@ -136,31 +162,76 @@ impl HirariAmeApp {
         // second rather than on every 30 Hz tick.
         self.tick = self.tick.wrapping_add(1);
         if self.tick % 10 == 1 {
-            // The neutral arrange model is the one layout parser for both
-            // surfaces, so this shell and the Slint arranger reduce the
-            // same native layout to the same lanes, ruler and timeline.
-            let tracks = parse_arrange_tracks(&core.get_project_layout_json(), |samples| {
-                core.samples_to_beats(samples)
-            });
-            let raw_time_signatures = core.get_time_signature_events();
-            let timeline_end = arrangement_timeline_end(
-                last_clip_end(&tracks),
-                &valid_time_signatures(&raw_time_signatures),
-            );
-            self.markers.set(parse_markers(&core.markers_json()));
-            self.measure_starts.set(arrangement_measure_starts(
-                &raw_time_signatures,
-                timeline_end,
-            ));
-            self.timeline_end_beats.set(timeline_end);
-            self.tracks.set(tracks);
+            self.refresh_arrange_state(&core);
         }
+    }
+
+    /// Republishes lanes, markers, ruler and timeline end from the engine.
+    /// Shared by the poll cadence and by clip-move commits, which refresh
+    /// immediately instead of waiting for the next layout tick.
+    fn refresh_arrange_state(&self, core: &HirariCore) {
+        // The neutral arrange model is the one layout parser for both
+        // surfaces, so this shell and the Slint arranger reduce the
+        // same native layout to the same lanes, ruler and timeline.
+        let tracks = parse_arrange_tracks(&core.get_project_layout_json(), |samples| {
+            core.samples_to_beats(samples)
+        });
+        let raw_time_signatures = core.get_time_signature_events();
+        let timeline_end = arrangement_timeline_end(
+            last_clip_end(&tracks),
+            &valid_time_signatures(&raw_time_signatures),
+        );
+        self.markers.set(parse_markers(&core.markers_json()));
+        self.measure_starts.set(arrangement_measure_starts(
+            &raw_time_signatures,
+            timeline_end,
+        ));
+        self.timeline_end_beats.set(timeline_end);
+        self.tracks.set(tracks);
     }
 
     /// Pointer travel since the lane press, in logical pixels. Clicks
     /// within this distance select; beyond it the press becomes a seek drag.
     fn click_distance(&self, event: &CanvasPointerEvent) -> f64 {
         (event.x - self.down_x).hypot(event.y - self.down_y)
+    }
+
+    /// Commits the dragged clip move through the engine, mirroring the
+    /// Slint `on_clip_moved` path: one undo transaction, sync-group aware,
+    /// abort on failure, immediate layout refresh on success.
+    fn commit_clip_move(&mut self) {
+        let Some((track_id, clip_id)) = self.move_clip else {
+            return;
+        };
+        let delta = self.move_delta_beats;
+        if delta == 0.0 {
+            return;
+        }
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        let tracks = self.tracks.get();
+        let Some(clip) = tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == clip_id))
+        else {
+            return;
+        };
+        let next = (clip.start_beat + delta).max(0.0);
+        core.begin_undo_transaction("Move Selected Clips");
+        let moved = if clip.sync_group > 0 {
+            core.move_region_sync_group(track_id, clip_id as u32, f64::from(next))
+        } else {
+            core.move_region(track_id, clip_id as u32, f64::from(next))
+        };
+        if !moved {
+            let _ = core.abort_undo_transaction();
+            return;
+        }
+        if core.end_undo_transaction() {
+            self.refresh_arrange_state(&core);
+        }
     }
 
     /// Moves the engine playhead to the beat under a canvas x. Seek only:
@@ -273,7 +344,14 @@ impl HirariAmeApp {
             let clip_height = (lane_height - 4.0).clamp(2.0, 42.0);
             for clip in &track.clips {
                 let selected = selected_clip == Some((track.id, clip.id));
-                let clip_x = x_for_beat(clip.start_beat);
+                // Live move preview: the dragged clip follows the pointer
+                // until release commits it (Slint `drag-current-delta`).
+                let drag_delta = if self.move_clip == Some((track.id, clip.id)) {
+                    self.move_delta_beats
+                } else {
+                    0.0
+                };
+                let clip_x = x_for_beat(clip.start_beat + drag_delta);
                 let clip_width = (f64::from(clip.length_beats) * px_per_beat).max(4.0) - 2.0;
                 let clip_y = top + (lane_height - clip_height) / 2.0;
                 let rect = RoundedRect::new(
@@ -398,17 +476,38 @@ impl App for HirariAmeApp {
                     self.pan_last_x = event.x;
                     true
                 } else {
-                    // Provisional: a click (no drag) selects the clip under
-                    // the point, or seeks on empty lane space; a drag seeks.
+                    // Provisional until the click threshold is crossed:
+                    // a clip press selects immediately (Slint parity) and
+                    // arms a move; empty space arms a seek.
                     self.seeking = true;
                     self.down_x = event.x;
                     self.down_y = event.y;
+                    let tracks = self.tracks.get();
                     self.down_clip = clip_at(
-                        &self.tracks.get(),
+                        &tracks,
                         &self.arrange_geometry,
                         event.x as f32,
                         event.y as f32,
                     );
+                    match self.down_clip {
+                        Some((track_id, clip_id)) => {
+                            self.selected_clip.set(Some((track_id, clip_id)));
+                            let clip = tracks.iter().find(|track| track.id == track_id).and_then(
+                                |track| track.clips.iter().find(|clip| clip.id == clip_id),
+                            );
+                            match clip {
+                                Some(clip) if clip.midi => self.down_mode = LaneDrag::Hold,
+                                Some(clip) => {
+                                    self.down_mode = LaneDrag::Move;
+                                    self.move_clip = Some((track_id, clip_id));
+                                    self.move_start_beat = clip.start_beat;
+                                    self.move_delta_beats = 0.0;
+                                }
+                                None => self.down_mode = LaneDrag::Seek,
+                            }
+                        }
+                        None => self.down_mode = LaneDrag::Seek,
+                    }
                     true
                 }
             }
@@ -424,29 +523,53 @@ impl App for HirariAmeApp {
                     self.pan_last_x = event.x;
                     true
                 } else if self.seeking {
-                    if self.down_clip.is_some() && self.click_distance(&event) <= 4.0 {
-                        // Still a click candidate; do not seek yet.
-                        true
-                    } else {
-                        self.down_clip = None;
-                        self.seek_arrange(event.x)
+                    match self.down_mode {
+                        LaneDrag::Hold => true,
+                        LaneDrag::Move => {
+                            if self.click_distance(&event) <= 4.0 {
+                                true
+                            } else {
+                                let px_per_beat = self.arrange_geometry.px_per_beat;
+                                if px_per_beat > 0.0 {
+                                    let raw =
+                                        ((event.x - self.down_x) / f64::from(px_per_beat)) as f32;
+                                    let snapped = (raw / MOVE_SNAP_BEATS).round() * MOVE_SNAP_BEATS;
+                                    self.move_delta_beats = snapped.max(-self.move_start_beat);
+                                }
+                                true
+                            }
+                        }
+                        LaneDrag::Seek => {
+                            if self.click_distance(&event) <= 4.0 {
+                                // Still a click candidate; seek on release.
+                                true
+                            } else {
+                                self.seek_arrange(event.x)
+                            }
+                        }
                     }
                 } else {
                     false
                 }
             }
             CanvasPointerPhase::Up | CanvasPointerPhase::Cancelled => {
-                if event.phase == CanvasPointerPhase::Up && self.seeking {
-                    if let Some(clip) = self.down_clip {
-                        self.selected_clip.set(Some(clip));
-                    } else if self.click_distance(&event) <= 4.0 {
-                        // Click on empty lane space seeks on release.
-                        self.seek_arrange(self.down_x);
+                if event.phase == CanvasPointerPhase::Up {
+                    match self.down_mode {
+                        LaneDrag::Move => self.commit_clip_move(),
+                        LaneDrag::Hold => {}
+                        LaneDrag::Seek => {
+                            if self.seeking && self.click_distance(&event) <= 4.0 {
+                                // Click on empty lane space seeks on release.
+                                self.seek_arrange(self.down_x);
+                            }
+                        }
                     }
                 }
                 self.seeking = false;
                 self.panning = false;
                 self.down_clip = None;
+                self.move_clip = None;
+                self.move_delta_beats = 0.0;
                 true
             }
         }
@@ -545,7 +668,7 @@ impl App for HirariAmeApp {
             zoom_in.into(),
             zoom_fit.into(),
             View::Caption(format!("ZOOM {}%", (zoom * 100.0).round() as u32)),
-            View::Caption("drag ruler to pan · drag lanes to seek".to_owned()),
+            View::Caption("ruler: pan · empty lane: seek · clip: move".to_owned()),
         ])]);
 
         // The canvas draws geometry only (no text); the list below keeps

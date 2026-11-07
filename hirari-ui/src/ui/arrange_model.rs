@@ -28,6 +28,9 @@ pub struct ArrangeClip {
     pub start_beat: f32,
     pub length_beats: f32,
     pub midi: bool,
+    /// Sync group the clip moves with; 0 means it moves alone. Drives the
+    /// `move_region_sync_group` engine call, as in the Slint move path.
+    pub sync_group: u32,
 }
 
 /// One arrangement lane reduced to what the timeline draws.
@@ -241,6 +244,8 @@ struct RegionLayout {
     name: String,
     start: u64,
     len: u64,
+    #[serde(default)]
+    sync_group: u32,
 }
 
 #[derive(Deserialize)]
@@ -280,6 +285,7 @@ pub fn parse_arrange_tracks(
                         start_beat: start_beat.max(0.0) as f32,
                         length_beats: (end_beat - start_beat).max(0.0) as f32,
                         midi: false,
+                        sync_group: region.sync_group,
                     }
                 })
                 .collect();
@@ -563,7 +569,7 @@ mod tests {
     #[test]
     fn parses_tracks_and_regions_from_layout_json() {
         let json = r#"[{"id":7,"name":"Drums","type":"Audio","regions":[
-            {"id":1,"name":"Kick","start":0,"len":48000},
+            {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3},
             {"id":2,"name":"Snare","start":96000,"len":48000}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
         let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
@@ -575,6 +581,8 @@ mod tests {
         assert_eq!(tracks[0].clips[0].length_beats, 1.0);
         assert_eq!(tracks[0].clips[1].start_beat, 2.0);
         assert!(!tracks[0].clips[0].midi);
+        assert_eq!(tracks[0].clips[0].sync_group, 3);
+        assert_eq!(tracks[0].clips[1].sync_group, 0);
     }
 
     #[test]
@@ -684,6 +692,7 @@ mod tests {
                     start_beat: 0.0,
                     length_beats: 4.0,
                     midi: false,
+                    sync_group: 0,
                 },
                 ArrangeClip {
                     id: 2,
@@ -691,6 +700,7 @@ mod tests {
                     start_beat: 8.0,
                     length_beats: 4.0,
                     midi: false,
+                    sync_group: 0,
                 },
             ],
         }];
@@ -722,6 +732,7 @@ mod tests {
                     start_beat: 2.0,
                     length_beats: 3.0,
                     midi: false,
+                    sync_group: 0,
                 }],
             },
             ArrangeTrack {
@@ -735,6 +746,7 @@ mod tests {
                     start_beat: 10.0,
                     length_beats: 4.0,
                     midi: false,
+                    sync_group: 0,
                 }],
             },
         ];
