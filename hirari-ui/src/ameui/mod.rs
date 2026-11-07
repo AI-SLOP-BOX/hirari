@@ -12,14 +12,15 @@
 //! only, fraction-clamped like the Slint dock); slice 9 draws clip
 //! waveform peaks from the async decode queue; slice 10 adds the snap
 //! division picker; slice 11 adds the edit lock; slice 12 turns the
-//! track list into mixer strips (fader/pan/mute/solo/arm). Audio
-//! playback is real; the Slint UI remains the default entry until the
-//! port reaches parity.
+//! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
+//! project open/save/new. Audio playback is real; the Slint UI remains
+//! the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
 //! `AppMessage("tick")` through the event-loop proxy; `on_event` does the poll.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -119,6 +120,8 @@ pub struct HirariAmeApp {
     gen_revision: u64,
     gen_value: u64,
     last_gen: u64,
+    /// Last opened/saved project path, for save-without-dialog.
+    project_path: Rc<RefCell<Option<String>>>,
     tick: u64,
 }
 
@@ -168,6 +171,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         gen_revision: u64::MAX,
         gen_value: 0,
         last_gen: u64::MAX,
+        project_path: Rc::new(RefCell::new(None)),
         tick: 0,
     }
 }
@@ -898,6 +902,101 @@ impl App for HirariAmeApp {
         let zoom = self.arrange_zoom.get();
         let status = self.status.get();
 
+        // Project bar: open/save/new. The file dialog blocks the UI thread
+        // while it is open, same as the Slint project actions.
+        let open_core = self.core.clone();
+        let open_path = self.project_path.clone();
+        let open_selected = self.selected_clip.clone();
+        let open_status = self.status.clone();
+        let open_button = ButtonView::new("Open")
+            .action_id("project.open")
+            .secondary()
+            .on_press(move |_| {
+                let Some(core) = &open_core else { return };
+                let dialog = rfd::FileDialog::new().add_filter("Hirari project", &["hirari"]);
+                let dialog = match open_path.borrow().as_deref() {
+                    Some(path) => dialog.set_directory(
+                        std::path::Path::new(path)
+                            .parent()
+                            .map(|parent| parent.to_path_buf())
+                            .unwrap_or_default(),
+                    ),
+                    None => dialog,
+                };
+                let Some(output) = dialog.pick_file() else {
+                    return;
+                };
+                let path = output.to_string_lossy().into_owned();
+                if core.load_project(&path) {
+                    *open_path.borrow_mut() = Some(path.clone());
+                    open_selected.set(None);
+                    open_status.set(format!(
+                        "OPENED {}",
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or(path)
+                    ));
+                } else {
+                    open_status.set("LOAD FAILED".to_owned());
+                }
+            });
+        let save_core = self.core.clone();
+        let save_path = self.project_path.clone();
+        let save_status = self.status.clone();
+        let save_button = ButtonView::new("Save")
+            .action_id("project.save")
+            .secondary()
+            .on_press(move |_| {
+                let Some(core) = &save_core else { return };
+                let path = match save_path.borrow().clone() {
+                    Some(path) => path,
+                    None => {
+                        let dialog = rfd::FileDialog::new()
+                            .set_file_name("Untitled.hirari")
+                            .add_filter("Hirari project", &["hirari"]);
+                        let Some(output) = dialog.save_file() else {
+                            return;
+                        };
+                        output.to_string_lossy().into_owned()
+                    }
+                };
+                if core.save_project(&path) {
+                    *save_path.borrow_mut() = Some(path.clone());
+                    save_status.set(format!(
+                        "SAVED {}",
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or(path)
+                    ));
+                } else {
+                    save_status.set("SAVE FAILED".to_owned());
+                }
+            });
+        let new_core = self.core.clone();
+        let new_path = self.project_path.clone();
+        let new_selected = self.selected_clip.clone();
+        let new_status = self.status.clone();
+        let new_button = ButtonView::new("New")
+            .action_id("project.new")
+            .secondary()
+            .on_press(move |_| {
+                if let Some(core) = &new_core {
+                    core.new_project();
+                    *new_path.borrow_mut() = None;
+                    new_selected.set(None);
+                    new_status.set("NEW PROJECT".to_owned());
+                }
+            });
+        let project_bar = View::Card(vec![View::HStack(vec![
+            View::Text("PROJECT".to_owned()),
+            open_button.into(),
+            save_button.into(),
+            new_button.into(),
+            View::Caption(status.clone()),
+        ])]);
+
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
         let play_button = ButtonView::new(if playing { "Playing" } else { "Play" })
@@ -1095,6 +1194,7 @@ impl App for HirariAmeApp {
         };
 
         View::VStack(vec![
+            project_bar,
             transport,
             meter,
             arrange_toolbar,
