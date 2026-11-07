@@ -1,5 +1,6 @@
 pub mod app;
 pub mod arrange;
+pub mod arrange_model;
 pub mod articulation_commands;
 pub mod audio_import;
 pub mod audio_settings;

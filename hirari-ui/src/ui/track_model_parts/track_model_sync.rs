@@ -24,7 +24,7 @@ fn synthesize_midi_clips(
         start_beat: f64,
         end_beat: f64,
     }
-    let mut spans: Vec<NoteSpan> = notes
+    let spans: Vec<NoteSpan> = notes
         .iter()
         .filter(|note| {
             note.get("track_id").and_then(serde_json::Value::as_u64)
@@ -41,20 +41,16 @@ fn synthesize_midi_clips(
             })
         })
         .collect();
-    spans.sort_by(|a, b| a.start_beat.total_cmp(&b.start_beat));
-
     // Notes closer than a quarter beat belong to the same region; anything
-    // further apart is a separate take and gets its own clip.
-    const MAX_GAP_BEATS: f64 = 0.25;
-    let mut groups: Vec<(f64, f64)> = Vec::new();
-    for span in spans {
-        match groups.last_mut() {
-            Some(group) if span.start_beat - group.1 <= MAX_GAP_BEATS => {
-                group.1 = group.1.max(span.end_beat);
-            }
-            _ => groups.push((span.start_beat, span.end_beat)),
-        }
-    }
+    // further apart is a separate take and gets its own clip. The grouping
+    // rule (and its sort) is shared with the AmeUI arranger via the neutral
+    // arrange model.
+    let groups = crate::ui::arrange_model::group_midi_spans(
+        spans
+            .into_iter()
+            .map(|span| (span.start_beat, span.end_beat))
+            .collect(),
+    );
     groups
         .into_iter()
         .enumerate()
@@ -370,13 +366,10 @@ fn sync_tracks_from_engine_with_empty_policy(
         for (idx, layout) in layouts.into_iter().enumerate() {
             let track_id = layout.id as i32;
             let is_folder = layout.track_type == "FOLD" || layout.track_type == "Bus";
-            let color = match idx % 5 {
-                0 => slint::Color::from_rgb_u8(120, 130, 143), // Slate
-                1 => slint::Color::from_rgb_u8(127, 165, 138), // Sage
-                2 => slint::Color::from_rgb_u8(169, 104, 104), // Oxide
-                3 => slint::Color::from_rgb_u8(177, 154, 104), // Brass
-                _ => slint::Color::from_rgb_u8(130, 148, 154), // Steel
-            };
+            // Shared with the neutral arrange model so the Slint and AmeUI
+            // surfaces keep a project's lane colors identical.
+            let [r, g, b] = crate::ui::arrange_model::track_color(idx);
+            let color = slint::Color::from_rgb_u8(r, g, b);
 
             let clips: Vec<Z_Clip> = layout
                 .regions

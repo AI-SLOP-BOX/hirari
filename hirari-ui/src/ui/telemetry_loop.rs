@@ -1,6 +1,10 @@
 //! Main-thread engine telemetry and UI synchronization loop.
 
 use crate::slint_ui::*;
+use crate::ui::arrange_model::{
+    arrangement_measure_starts, arrangement_timeline_end, time_signature_at, valid_time_signatures,
+    MeasureStart,
+};
 use hirari_core_bridge::HirariCore;
 use slint::{Model, SharedString};
 use std::cell::{Cell, RefCell};
@@ -135,145 +139,6 @@ fn active_send_state(
         }
     }
     (active, gains, pre_fader)
-}
-
-fn valid_time_signatures(events: &[f64]) -> Vec<(f64, u8, u8)> {
-    let mut meters = events
-        .chunks_exact(3)
-        .filter_map(|event| {
-            let beat = event[0];
-            let numerator = event[1];
-            let denominator = event[2];
-            if !beat.is_finite()
-                || beat < 0.0
-                || !numerator.is_finite()
-                || numerator.fract() != 0.0
-                || !(1.0..=32.0).contains(&numerator)
-                || !denominator.is_finite()
-                || denominator.fract() != 0.0
-                || ![1.0, 2.0, 4.0, 8.0, 16.0, 32.0].contains(&denominator)
-            {
-                return None;
-            }
-            Some((beat, numerator as u8, denominator as u8))
-        })
-        .collect::<Vec<_>>();
-    meters.sort_by(|left, right| left.0.total_cmp(&right.0));
-
-    let mut unique_meters = Vec::with_capacity(meters.len());
-    for meter in meters {
-        if let Some(previous) = unique_meters.last_mut() {
-            let previous: &mut (f64, u8, u8) = previous;
-            if (previous.0 - meter.0).abs() <= f64::EPSILON {
-                *previous = meter;
-                continue;
-            }
-        }
-        unique_meters.push(meter);
-    }
-    unique_meters
-}
-
-fn time_signature_at(events: &[(f64, u8, u8)], beat: f32) -> (u8, u8) {
-    events
-        .iter()
-        .take_while(|event| event.0 <= f64::from(beat.max(0.0)) + 1e-6)
-        .last()
-        .map(|event| (event.1, event.2))
-        .unwrap_or((4, 4))
-}
-
-fn arrangement_timeline_end(last_clip_end: f32, events: &[(f64, u8, u8)]) -> f32 {
-    const EPSILON_BEATS: f64 = 1e-6;
-    let last_clip_end = f64::from(last_clip_end.max(0.0));
-    let active_meter = events
-        .iter()
-        .take_while(|event| event.0 <= last_clip_end + EPSILON_BEATS)
-        .last()
-        .copied()
-        .unwrap_or((0.0, 4, 4));
-    let bar_length = f64::from(active_meter.1) * 4.0 / f64::from(active_meter.2);
-    let bars_from_anchor = ((last_clip_end - active_meter.0).max(0.0) / bar_length).ceil();
-    let mut boundary = active_meter.0 + bars_from_anchor * bar_length;
-    if boundary + EPSILON_BEATS < last_clip_end {
-        boundary += bar_length;
-    }
-    if let Some(next_meter) = events.iter().find(|event| {
-        event.0 > active_meter.0 + EPSILON_BEATS && event.0 <= boundary + EPSILON_BEATS
-    }) {
-        boundary = next_meter.0;
-    }
-
-    for _ in 0..4 {
-        let meter = events
-            .iter()
-            .take_while(|event| event.0 <= boundary + EPSILON_BEATS)
-            .last()
-            .copied()
-            .unwrap_or((0.0, 4, 4));
-        let next_bar = boundary + f64::from(meter.1) * 4.0 / f64::from(meter.2);
-        boundary = events
-            .iter()
-            .find(|event| event.0 > boundary + EPSILON_BEATS && event.0 < next_bar - EPSILON_BEATS)
-            .map_or(next_bar, |event| event.0);
-    }
-
-    let timeline_end = boundary as f32;
-    if timeline_end.is_finite() {
-        timeline_end.max(128.0)
-    } else {
-        128.0
-    }
-}
-
-fn arrangement_measure_starts(events: &[f64], end_beat: f32) -> Vec<Z_MeasureStart> {
-    const MAX_MEASURE_MARKERS: usize = 16_384;
-    let mut unique_meters = valid_time_signatures(events);
-    if unique_meters
-        .first()
-        .is_none_or(|meter| meter.0 > f64::EPSILON)
-    {
-        unique_meters.insert(0, (0.0, 4, 4));
-    }
-
-    let end_beat = f64::from(end_beat.max(0.0));
-    let mut starts = Vec::with_capacity(128);
-    starts.push(Z_MeasureStart {
-        beat: 0.0,
-        number: 1,
-    });
-    for (index, (segment_start, numerator, denominator)) in
-        unique_meters.iter().copied().enumerate()
-    {
-        if segment_start > end_beat {
-            break;
-        }
-        if segment_start > starts.last().map_or(0.0, |marker| f64::from(marker.beat)) + 1e-6 {
-            starts.push(Z_MeasureStart {
-                beat: segment_start as f32,
-                number: starts.len() as i32 + 1,
-            });
-        }
-        let segment_end = unique_meters
-            .get(index + 1)
-            .map_or(end_beat, |next| next.0.min(end_beat));
-        let beats_per_measure = f64::from(numerator) * 4.0 / f64::from(denominator);
-        let mut next_start = segment_start + beats_per_measure;
-        while next_start < segment_end - 1e-6
-            && next_start <= end_beat
-            && starts.len() < MAX_MEASURE_MARKERS
-        {
-            starts.push(Z_MeasureStart {
-                beat: next_start as f32,
-                number: starts.len() as i32 + 1,
-            });
-            next_start += beats_per_measure;
-        }
-        if starts.len() >= MAX_MEASURE_MARKERS {
-            break;
-        }
-    }
-    starts
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -653,7 +518,7 @@ pub(crate) fn install_telemetry_loop(
     let mut last_route_matrix: Vec<bool> = Vec::new();
     let mut last_send_state: (Vec<bool>, Vec<f32>, Vec<bool>) =
         (Vec::new(), Vec::new(), Vec::new());
-    let mut last_arrangement_measure_starts: Vec<Z_MeasureStart> = Vec::new();
+    let mut last_arrangement_measure_starts: Vec<MeasureStart> = Vec::new();
     let mut last_time_signature_label = String::new();
     let mut last_device_catalog = String::new();
     let mut last_input_endpoint_uid = String::new();
@@ -951,7 +816,15 @@ pub(crate) fn install_telemetry_loop(
                         arrangement_measure_starts(&raw_time_signatures, timeline_end);
                     if measure_starts != last_arrangement_measure_starts {
                         ui.set_arrangement_measure_starts(slint::ModelRc::new(
-                            slint::VecModel::from(measure_starts.clone()),
+                            slint::VecModel::from(
+                                measure_starts
+                                    .iter()
+                                    .map(|measure| Z_MeasureStart {
+                                        beat: measure.beat,
+                                        number: measure.number,
+                                    })
+                                    .collect::<Vec<_>>(),
+                            ),
                         ));
                         last_arrangement_measure_starts = measure_starts;
                     }

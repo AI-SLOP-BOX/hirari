@@ -22,16 +22,9 @@ use ame_ui::CanvasTexture;
 use hirari_core_bridge::HirariCore;
 use vello::wgpu;
 
+use crate::ui::arrange_model::{parse_arrange_tracks, ArrangeTrack};
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
-
-/// One row of the native project layout, reduced to what the shell displays.
-#[derive(Clone, PartialEq)]
-struct TrackRow {
-    id: u32,
-    name: String,
-    kind: String,
-}
 
 pub struct HirariAmeApp {
     core: Option<Rc<HirariCore>>,
@@ -41,7 +34,7 @@ pub struct HirariAmeApp {
     playhead_beats: State<f64>,
     sample_rate: State<f64>,
     master_peak: State<f32>,
-    tracks: State<Vec<TrackRow>>,
+    tracks: State<Vec<ArrangeTrack>>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
@@ -62,7 +55,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         playhead_beats: context.state(0.0f64),
         sample_rate: context.state(0.0f64),
         master_peak: context.state(0.0f32),
-        tracks: context.state(Vec::<TrackRow>::new()),
+        tracks: context.state(Vec::<ArrangeTrack>::new()),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
@@ -101,30 +94,15 @@ impl HirariAmeApp {
         // second rather than on every 30 Hz tick.
         self.tick = self.tick.wrapping_add(1);
         if self.tick % 10 == 1 {
-            self.tracks
-                .set(parse_tracks(&core.get_project_layout_json()));
+            // The neutral arrange model is the one layout parser for both
+            // surfaces, so this shell and the Slint arranger reduce the
+            // same native layout to the same lanes.
+            self.tracks.set(parse_arrange_tracks(
+                &core.get_project_layout_json(),
+                |samples| core.samples_to_beats(samples),
+            ));
         }
     }
-}
-
-/// Reduce the native layout JSON to display rows; malformed input is empty.
-fn parse_tracks(layout_json: &str) -> Vec<TrackRow> {
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(layout_json) else {
-        return Vec::new();
-    };
-    let Some(array) = value.as_array() else {
-        return Vec::new();
-    };
-    array
-        .iter()
-        .filter_map(|track| {
-            Some(TrackRow {
-                id: track.get("id")?.as_u64()? as u32,
-                name: track.get("name")?.as_str()?.to_owned(),
-                kind: track.get("type")?.as_str()?.to_owned(),
-            })
-        })
-        .collect()
 }
 
 impl App for HirariAmeApp {
