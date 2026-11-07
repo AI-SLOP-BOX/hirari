@@ -40,7 +40,8 @@ pub struct ArrangeClip {
     pub reverse: bool,
 }
 
-/// One arrangement lane reduced to what the timeline draws.
+/// One arrangement lane reduced to what the timeline draws, plus the
+/// mixer state the AmeUI track strips edit.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrangeTrack {
     pub id: u32,
@@ -48,6 +49,11 @@ pub struct ArrangeTrack {
     pub kind: String,
     pub color: [u8; 3],
     pub clips: Vec<ArrangeClip>,
+    pub volume: f32,
+    pub pan: f32,
+    pub muted: bool,
+    pub solo: bool,
+    pub record_armed: bool,
 }
 
 /// A timeline marker. `color` is the engine's `#rrggbb` marker color as
@@ -271,6 +277,15 @@ struct TrackLayout {
     name: String,
     #[serde(rename = "type")]
     track_type: String,
+    // Required exactly as in the Slint track sync; the engine always
+    // publishes them, and a snapshot missing them is not a track list.
+    volume: f32,
+    pan: f32,
+    mute: bool,
+    #[serde(default)]
+    solo: bool,
+    #[serde(default)]
+    record_armed: bool,
     #[serde(default)]
     regions: Vec<RegionLayout>,
 }
@@ -337,6 +352,11 @@ pub fn parse_arrange_tracks(
                 kind: layout.track_type,
                 color: track_color(index),
                 clips,
+                volume: layout.volume,
+                pan: layout.pan,
+                muted: layout.mute,
+                solo: layout.solo,
+                record_armed: layout.record_armed,
             }
         })
         .collect()
@@ -639,7 +659,7 @@ mod tests {
 
     #[test]
     fn parses_tracks_and_regions_from_layout_json() {
-        let json = r#"[{"id":7,"name":"Drums","type":"Audio","regions":[
+        let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"regions":[
             {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3},
             {"id":2,"name":"Snare","start":96000,"len":48000,"reverse":true}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
@@ -656,6 +676,11 @@ mod tests {
         assert_eq!(tracks[0].clips[1].sync_group, 0);
         assert!(!tracks[0].clips[0].reverse);
         assert!(tracks[0].clips[1].reverse);
+        assert_eq!(tracks[0].volume, 0.5);
+        assert_eq!(tracks[0].pan, -0.25);
+        assert!(tracks[0].muted);
+        assert!(tracks[0].solo);
+        assert!(tracks[0].record_armed);
         // No base_length published: full-clip trim window.
         assert_eq!(tracks[0].clips[0].trim_start, 0.0);
         assert_eq!(tracks[0].clips[0].trim_end, 1.0);
@@ -761,6 +786,11 @@ mod tests {
             name: "A".into(),
             kind: "Audio".into(),
             color: [0, 0, 0],
+            volume: 1.0,
+            pan: 0.0,
+            muted: false,
+            solo: false,
+            record_armed: false,
             clips: vec![
                 ArrangeClip {
                     id: 1,
@@ -803,7 +833,7 @@ mod tests {
     #[test]
     fn parses_trim_window_from_layout() {
         // Halfway through a 96000-sample source, showing 48000 of it.
-        let json = r#"[{"id":7,"name":"T","type":"Audio","regions":[
+        let json = r#"[{"id":7,"name":"T","type":"Audio","volume":1.0,"pan":0.0,"mute":false,"regions":[
             {"id":1,"name":"R","start":0,"len":48000,"source_offset":24000,
              "base_source_offset":0,"base_length":96000,"source_length":48000}]}]"#;
         let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
@@ -845,6 +875,11 @@ mod tests {
                 name: "A".into(),
                 kind: "Audio".into(),
                 color: [0, 0, 0],
+                volume: 1.0,
+                pan: 0.0,
+                muted: false,
+                solo: false,
+                record_armed: false,
                 clips: vec![ArrangeClip {
                     id: 1,
                     name: "a".into(),
@@ -862,6 +897,11 @@ mod tests {
                 name: "B".into(),
                 kind: "Audio".into(),
                 color: [0, 0, 0],
+                volume: 1.0,
+                pan: 0.0,
+                muted: false,
+                solo: false,
+                record_armed: false,
                 clips: vec![ArrangeClip {
                     id: 2,
                     name: "b".into(),

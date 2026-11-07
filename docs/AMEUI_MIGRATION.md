@@ -53,14 +53,15 @@ Notes:
 | 8 | `12c36d8` | Clip edge-drag trim: Audio/Vocal clip edges trim with live preview, commit on release (`set_region_trim`, fraction-clamped like the Slint dock). `ArrangeClip` now carries the trim window. Edge zones come from `trim_edge_at`. |
 | 9 | `6a2d1eb` | Clip waveform peaks: async decode queue (8 in flight, generation-guarded, failure memo, revision-cached generation) feeding 128 trim/reverse-windowed peak pairs per clip, drawn like the Slint dock. `ArrangeClip` now carries `reverse`. |
 | 10 | `f3eb1c5` | Snap division picker: toolbar button cycles 1/1–1/32 (step = 4/division) for move/trim drags, replacing the hardcoded 1/16. |
-| 11 | (this work) | Edit lock: toolbar LOCK toggles Slint `is_locked` for the arrange surface — while on, clip drags select only (seek/pan unaffected). |
+| 11 | `d1ab781` | Edit lock: toolbar LOCK toggles Slint `is_locked` for the arrange surface — while on, clip drags select only (seek/pan unaffected). |
+| 12 | (this work) | Mixer strips: the track list becomes per-track fader/pan sliders plus mute/solo/arm toggles, wired to the same engine setters as the Slint mixer. `ArrangeTrack` now carries the mixer state. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
 Done: transport, master meter, waveform, track names/kinds/clip counts,
 lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
 ruler-drag panning, click clip selection, clip drag-move, edge-drag trim,
-clip waveform peaks.
+clip waveform peaks, mixer strips (fader/pan/mute/solo/arm), edit lock.
 
 Not yet (suggested order):
 
