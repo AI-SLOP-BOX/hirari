@@ -451,6 +451,29 @@ pub fn arrange_canvas_geometry(
     }
 }
 
+/// The clip under a canvas point, as `(track_id, clip_id)`. Returns `None`
+/// in the ruler band, below the last lane, or on empty lane space, so a
+/// click there keeps its seek meaning. This is the hit-test half of clip
+/// selection; the drag/trim mutations still belong to a later slice.
+pub fn clip_at(
+    tracks: &[ArrangeTrack],
+    geometry: &ArrangeCanvasGeometry,
+    x: f32,
+    y: f32,
+) -> Option<(u32, i32)> {
+    if geometry.lane_height <= 0.0 || y < geometry.ruler_height {
+        return None;
+    }
+    let lane = ((y - geometry.ruler_height) / geometry.lane_height) as usize;
+    let track = tracks.get(lane)?;
+    let beat = geometry.beat_for_x(x);
+    track
+        .clips
+        .iter()
+        .find(|clip| beat >= clip.start_beat && beat < clip.start_beat + clip.length_beats)
+        .map(|clip| (track.id, clip.id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,6 +668,44 @@ mod tests {
         // At fit zoom there is nothing to scroll.
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 1.0, 50.0);
         assert_eq!(geometry.scroll_beats, 0.0);
+    }
+
+    #[test]
+    fn clip_at_finds_clip_under_point() {
+        let tracks = vec![ArrangeTrack {
+            id: 7,
+            name: "A".into(),
+            kind: "Audio".into(),
+            color: [0, 0, 0],
+            clips: vec![
+                ArrangeClip {
+                    id: 1,
+                    name: "a".into(),
+                    start_beat: 0.0,
+                    length_beats: 4.0,
+                    midi: false,
+                },
+                ArrangeClip {
+                    id: 2,
+                    name: "b".into(),
+                    start_beat: 8.0,
+                    length_beats: 4.0,
+                    midi: false,
+                },
+            ],
+        }];
+        // 640px / 128 beats = 5 px/beat, ruler 24, lane 100.
+        let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 1.0, 0.0);
+        assert_eq!(clip_at(&tracks, &geometry, 10.0, 50.0), Some((7, 1)));
+        assert_eq!(clip_at(&tracks, &geometry, 45.0, 50.0), Some((7, 2)));
+        // Empty lane space, ruler band and below the lane miss.
+        assert_eq!(clip_at(&tracks, &geometry, 30.0, 50.0), None);
+        assert_eq!(clip_at(&tracks, &geometry, 10.0, 10.0), None);
+        assert_eq!(clip_at(&tracks, &geometry, 10.0, 200.0), None);
+        // Scrolled: beat 8 sits at x=0 when scrolled by 8 at zoom 1... use
+        // zoom 2 (10 px/beat) scrolled 8: clip b (8..12) starts at x=0.
+        let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 2.0, 8.0);
+        assert_eq!(clip_at(&tracks, &geometry, 5.0, 50.0), Some((7, 2)));
     }
 
     #[test]

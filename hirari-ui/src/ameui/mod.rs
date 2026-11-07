@@ -6,7 +6,8 @@
 //! arrangement Canvas: lanes, clips, measure ruler, markers and playhead
 //! drawn from the neutral arrange model. Slice 4 makes that canvas
 //! seekable (click/drag moves the playhead); slice 5 adds zoom (toolbar
-//! −/+/FIT) and ruler-drag panning. Audio playback is real; the Slint UI
+//! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection
+//! (a click selects, a drag seeks). Audio playback is real; the Slint UI
 //! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
@@ -30,9 +31,10 @@ use vello::peniko::{Color, Fill};
 use vello::wgpu;
 
 use crate::ui::arrange_model::{
-    arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, last_clip_end,
-    parse_arrange_tracks, parse_markers, valid_time_signatures, ArrangeCanvasGeometry,
-    ArrangeMarker, ArrangeTrack, MeasureStart, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
+    arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
+    last_clip_end, parse_arrange_tracks, parse_markers, valid_time_signatures,
+    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, MeasureStart, ARRANGE_ZOOM_MAX,
+    ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -51,6 +53,9 @@ pub struct HirariAmeApp {
     timeline_end_beats: State<f32>,
     arrange_zoom: State<f32>,
     arrange_scroll_beats: State<f32>,
+    /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
+    /// selection the later drag/trim slice will mutate through.
+    selected_clip: State<Option<(u32, i32)>>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
@@ -59,6 +64,9 @@ pub struct HirariAmeApp {
     seeking: bool,
     panning: bool,
     pan_last_x: f64,
+    down_x: f64,
+    down_y: f64,
+    down_clip: Option<(u32, i32)>,
     tick: u64,
 }
 
@@ -82,6 +90,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         timeline_end_beats: context.state(128.0f32),
         arrange_zoom: context.state(1.0f32),
         arrange_scroll_beats: context.state(0.0f32),
+        selected_clip: context.state(None),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
@@ -89,6 +98,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         seeking: false,
         panning: false,
         pan_last_x: 0.0,
+        down_x: 0.0,
+        down_y: 0.0,
+        down_clip: None,
         tick: 0,
     }
 }
@@ -145,6 +157,12 @@ impl HirariAmeApp {
         }
     }
 
+    /// Pointer travel since the lane press, in logical pixels. Clicks
+    /// within this distance select; beyond it the press becomes a seek drag.
+    fn click_distance(&self, event: &CanvasPointerEvent) -> f64 {
+        (event.x - self.down_x).hypot(event.y - self.down_y)
+    }
+
     /// Moves the engine playhead to the beat under a canvas x. Seek only:
     /// playback state is untouched, and the next poll republishes the new
     /// playhead position into `playhead_beats`.
@@ -177,6 +195,7 @@ impl HirariAmeApp {
             return;
         }
         let tracks = self.tracks.get();
+        let selected_clip = self.selected_clip.get();
         let markers = self.markers.get();
         let measure_starts = self.measure_starts.get();
         let timeline_end = self.timeline_end_beats.get();
@@ -194,6 +213,7 @@ impl HirariAmeApp {
         let px_per_beat = f64::from(geometry.px_per_beat);
         let x_for_beat = |beat: f32| x0 + f64::from(geometry.x_for_beat(beat));
         let grid = Stroke::new(1.0);
+        let selected_grid = Stroke::new(2.0);
 
         scene.fill(
             Fill::NonZero,
@@ -252,6 +272,7 @@ impl HirariAmeApp {
             );
             let clip_height = (lane_height - 4.0).clamp(2.0, 42.0);
             for clip in &track.clips {
+                let selected = selected_clip == Some((track.id, clip.id));
                 let clip_x = x_for_beat(clip.start_beat);
                 let clip_width = (f64::from(clip.length_beats) * px_per_beat).max(4.0) - 2.0;
                 let clip_y = top + (lane_height - clip_height) / 2.0;
@@ -262,17 +283,27 @@ impl HirariAmeApp {
                     clip_y + clip_height,
                     3.0,
                 );
+                // Slint selection: brighter fill and a 2px border.
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
-                    Color::from_rgba8(track.color[0], track.color[1], track.color[2], 115),
+                    Color::from_rgba8(
+                        track.color[0],
+                        track.color[1],
+                        track.color[2],
+                        if selected { 185 } else { 115 },
+                    ),
                     None,
                     &rect,
                 );
                 scene.stroke(
-                    &grid,
+                    if selected { &selected_grid } else { &grid },
                     Affine::IDENTITY,
-                    Color::from_rgb8(track.color[0], track.color[1], track.color[2]),
+                    if selected {
+                        Color::from_rgb8(235, 239, 244)
+                    } else {
+                        Color::from_rgb8(track.color[0], track.color[1], track.color[2])
+                    },
                     None,
                     &rect,
                 );
@@ -367,8 +398,18 @@ impl App for HirariAmeApp {
                     self.pan_last_x = event.x;
                     true
                 } else {
+                    // Provisional: a click (no drag) selects the clip under
+                    // the point, or seeks on empty lane space; a drag seeks.
                     self.seeking = true;
-                    self.seek_arrange(event.x)
+                    self.down_x = event.x;
+                    self.down_y = event.y;
+                    self.down_clip = clip_at(
+                        &self.tracks.get(),
+                        &self.arrange_geometry,
+                        event.x as f32,
+                        event.y as f32,
+                    );
+                    true
                 }
             }
             CanvasPointerPhase::Moved => {
@@ -383,14 +424,29 @@ impl App for HirariAmeApp {
                     self.pan_last_x = event.x;
                     true
                 } else if self.seeking {
-                    self.seek_arrange(event.x)
+                    if self.down_clip.is_some() && self.click_distance(&event) <= 4.0 {
+                        // Still a click candidate; do not seek yet.
+                        true
+                    } else {
+                        self.down_clip = None;
+                        self.seek_arrange(event.x)
+                    }
                 } else {
                     false
                 }
             }
             CanvasPointerPhase::Up | CanvasPointerPhase::Cancelled => {
+                if event.phase == CanvasPointerPhase::Up && self.seeking {
+                    if let Some(clip) = self.down_clip {
+                        self.selected_clip.set(Some(clip));
+                    } else if self.click_distance(&event) <= 4.0 {
+                        // Click on empty lane space seeks on release.
+                        self.seek_arrange(self.down_x);
+                    }
+                }
                 self.seeking = false;
                 self.panning = false;
+                self.down_clip = None;
                 true
             }
         }

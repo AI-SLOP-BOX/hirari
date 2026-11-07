@@ -47,13 +47,14 @@ Notes:
 | 2 | `9c9e821e` | Neutral `ui/arrange_model.rs` extracted from Slint paths (time signatures, timeline end, measure starts, MIDI span grouping, layout/marker parsing, lane colors). Fixed a timeline-end overshoot (was +4 bars). AmeUI track list now uses `parse_arrange_tracks`. |
 | 3 | `618da46` | Arrangement Canvas: ruler, beat grid, measure lines, lanes, clips, markers, playhead — fit-to-width from `arrange_canvas_geometry`. |
 | 4 | `618da46` | Click/drag on the arrange canvas seeks the playhead (`beat_for_x` + `beats_to_samples`/`set_playhead`; seek only, playback untouched). |
-| 5 | (this work) | Zoom (toolbar −/+/FIT, ×/÷1.25, 1–8×) and ruler-drag panning. `arrange_canvas_geometry` now takes zoom + scroll and clamps both. Wheel-zoom is still unavailable (see API gap below). |
+| 5 | `2181009` | Zoom (toolbar −/+/FIT, ×/÷1.25, 1–8×) and ruler-drag panning. `arrange_canvas_geometry` now takes zoom + scroll and clamps both. Wheel-zoom is still unavailable (see API gap below). |
+| 6 | (this work) | Click clip selection: a click (≤4px) selects via `clip_at`, a drag seeks. Selected clip draws brighter with a 2px border, matching Slint. Empty-lane clicks seek on release. Drag/trim mutations are still to come. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
 Done: transport, master meter, waveform, track names/kinds/clip counts,
-lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar) and
-ruler-drag panning.
+lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
+ruler-drag panning, click clip selection.
 
 Not yet (suggested order):
 
@@ -61,11 +62,11 @@ Not yet (suggested order):
    lane drags still seek). Remaining API gap: AmeUI's
    `AmeEvent::Scroll` is window-global (no canvas/position), so
    wheel-zoom over the canvas is still unavailable.
-2. **Clip selection and drag/trim** — Slint `clip-selected`,
-   `clip-move-commit`, `clip-trim-commit` with snap division. Route
-   through the existing engine commands used by the Slint callbacks
-   (`hirari-ui/src/ui/editor.rs`); MIDI clips (`clip.midi`) must stay
-   non-mutating, as in Slint.
+2. **Clip drag/trim** — selection landed in slice 6; the mutations are
+   still to come: Slint `clip-move-commit`, `clip-trim-commit` with snap
+   division. Route through the existing engine commands used by the
+   Slint callbacks (`hirari-ui/src/ui/editor.rs`); MIDI clips
+   (`clip.midi`) must stay non-mutating, as in Slint.
 3. **Waveform peaks on clips** — Slint draws 128 peak pairs per clip
    (`clip_data.points`). Peak extraction is queued by Slint telemetry;
    AmeUI needs the same queue or a read-only synchronous pass.
