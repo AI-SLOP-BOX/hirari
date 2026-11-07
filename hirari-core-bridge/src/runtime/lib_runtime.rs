@@ -674,8 +674,10 @@ mod telemetry_layout_regression {
     }
 }
 
+// pub(crate) so module-local tests that swap process-wide host tables can
+// share the one engine serialization lock instead of a private domain.
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     include!("lib_tests.rs");
 }
 

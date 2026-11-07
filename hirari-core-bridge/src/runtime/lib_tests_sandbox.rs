@@ -115,7 +115,7 @@ fn tempo_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn native_engine_test_guard() -> std::sync::MutexGuard<'static, ()> {
+pub(crate) fn native_engine_test_guard() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
     let guard = LOCK
         .get_or_init(|| Mutex::new(()))

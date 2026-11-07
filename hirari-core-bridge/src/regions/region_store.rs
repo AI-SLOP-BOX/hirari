@@ -1944,6 +1944,7 @@ mod tests {
 
     #[test]
     fn insert_normalizes_publishes_and_reads_back() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         let (key, track) = (0x7100 as *mut c_void, 71u32);
@@ -1971,6 +1972,7 @@ mod tests {
 
     #[test]
     fn table_reads_edits_and_snapshot_round_trip() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         let (key, track) = (0x7200 as *mut c_void, 72u32);
@@ -2053,6 +2055,7 @@ mod tests {
 
     #[test]
     fn tracks_with_the_same_id_stay_separate() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         // Two engines each hand out track id 1; the store must not let one
@@ -2077,6 +2080,7 @@ mod tests {
 
     #[test]
     fn edit_tables_are_stored_and_listed() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         let (key, track) = (0x7500 as *mut c_void, 73u32);
@@ -2126,6 +2130,7 @@ mod tests {
 
     #[test]
     fn a_draft_clip_batch_is_normalized_at_insert() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         AUDIO_FRAMES.store(8, Ordering::Relaxed);
@@ -2194,6 +2199,7 @@ mod tests {
 
     #[test]
     fn unknown_ids_and_ragged_blobs_are_refused() {
+        let _engine_guard = crate::tests::native_engine_test_guard();
         let _serial = serial();
         let _host_ops = setup();
         let (key, track) = (0x7600 as *mut c_void, 74u32);

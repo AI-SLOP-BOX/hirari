@@ -671,14 +671,28 @@ mod tests {
         EVENTS.with(|events| events.borrow_mut().push((event_type, track_id, value, label)));
     }
 
-    fn install() {
+    /// The host table is process-wide and the engine installs its own copy,
+    /// so these tests hand it back when they finish.
+    struct HostOpsGuard(Option<HirariPluginSandboxHostOps>);
+
+    impl Drop for HostOpsGuard {
+        fn drop(&mut self) {
+            match self.0.take() {
+                Some(ops) => unsafe { hirari_plugin_sandbox_maintenance_host_install(&ops) },
+                None => unsafe { hirari_plugin_sandbox_maintenance_host_install(ptr::null()) },
+            }
+        }
+    }
+
+    fn install() -> HostOpsGuard {
+        let previous = HostOpsGuard(host_ops());
         let ops = HirariPluginSandboxHostOps {
             statuses: Some(statuses),
             maintain: Some(maintain),
             publish_event: Some(publish_event),
-            ..HirariPluginSandboxHostOps::default()
         };
         unsafe { hirari_plugin_sandbox_maintenance_host_install(&ops) };
+        previous
     }
 
     fn status(alive: bool, failure: u8, dropped: u32) -> HirariPluginSandboxStatus {
@@ -694,7 +708,8 @@ mod tests {
 
     #[test]
     fn reports_failure_quarantine_and_dropped_midi_edges() {
-        install();
+        let _engine_guard = crate::tests::native_engine_test_guard();
+        let _host_ops = install();
         EVENTS.with(|events| events.borrow_mut().clear());
         SCRIPTS.with(|s| {
             s.borrow_mut().clear();
@@ -720,7 +735,8 @@ mod tests {
 
     #[test]
     fn reports_recovery_on_the_poll_after_restart() {
-        install();
+        let _engine_guard = crate::tests::native_engine_test_guard();
+        let _host_ops = install();
         EVENTS.with(|events| events.borrow_mut().clear());
         SCRIPTS.with(|s| {
             s.borrow_mut().clear();
@@ -746,7 +762,8 @@ mod tests {
 
     #[test]
     fn packs_statuses_for_the_ui_protocol() {
-        install();
+        let _engine_guard = crate::tests::native_engine_test_guard();
+        let _host_ops = install();
         SCRIPTS.with(|s| {
             s.borrow_mut().clear();
             s.borrow_mut().push((7, vec![status(true, 0, 3)]));

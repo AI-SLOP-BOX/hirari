@@ -1,14 +1,12 @@
-#[cfg(test)]
-mod tests {
-    use std::sync::{Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
-    use crate::engine_edit_ext::TrackEditExt;
-    use crate::hirari_wavetable_synth::HirariWavetableSynthEngine;
-    use crate::loudness_analyzer::LoudnessAnalyzerEngine;
-    use crate::passive_curing_eq::PassiveCuringEqEngine;
-    use crate::tape_machine::TapeMachineEngine;
-    use crate::true_peak_limiter::TruePeakLimiterEngine;
-    use crate::virtuoso_space::VirtuosoSpaceEngine;
+use crate::engine_edit_ext::TrackEditExt;
+use crate::hirari_wavetable_synth::HirariWavetableSynthEngine;
+use crate::loudness_analyzer::LoudnessAnalyzerEngine;
+use crate::passive_curing_eq::PassiveCuringEqEngine;
+use crate::tape_machine::TapeMachineEngine;
+use crate::true_peak_limiter::TruePeakLimiterEngine;
+use crate::virtuoso_space::VirtuosoSpaceEngine;
 
 include!("lib_tests_sandbox.rs");
 include!("lib_tests_composition.rs");
@@ -23,7 +21,6 @@ include!("lib_tests_track_freeze.rs");
 include!("lib_tests_analysis_reads.rs");
 include!("lib_tests_offline_bounce.rs");
 include!("lib_tests_project_load.rs");
-}
 
 #[test]
 fn engine_event_ops_contract() {
