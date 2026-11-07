@@ -63,10 +63,23 @@ Not yet (suggested order):
    `AmeEvent::Scroll` is window-global (no canvas/position), so
    wheel-zoom over the canvas is still unavailable.
 2. **Clip drag/trim** — selection landed in slice 6; the mutations are
-   still to come: Slint `clip-move-commit`, `clip-trim-commit` with snap
-   division. Route through the existing engine commands used by the
-   Slint callbacks (`hirari-ui/src/ui/editor.rs`); MIDI clips
-   (`clip.midi`) must stay non-mutating, as in Slint.
+   still to come. This is the first slice that mutates the project, so
+   trace the Slint path before writing code:
+   - Entry points: `on_clip_moved` / trim callbacks in
+     `hirari-ui/src/ui/editor.rs` (snap division table, undo
+     transaction via `begin_undo_transaction`/`abort`/`end`, then
+     `sync_tracks_from_engine`). The engine calls are
+     `core.move_region` / `core.move_region_sync_group` (and the trim
+     equivalents in the same file).
+   - Missing from the neutral model: `ArrangeClip` has no
+     `sync_group` (Slint moves sync-group members together) and no
+     snap-division state. Extend `parse_arrange_tracks` + tests first.
+   - MIDI clips (`clip.midi == true`, negative ids) must stay
+     non-mutating, as in the Slint dock.
+   - Gesture conflict to resolve: today a lane drag seeks (slice 4).
+     Slint seeks from the ruler and drags clips in lanes — consider
+     moving seek to ruler-only once clip drag exists, or drag the
+     selected clip only.
 3. **Waveform peaks on clips** — Slint draws 128 peak pairs per clip
    (`clip_data.points`). Peak extraction is queued by Slint telemetry;
    AmeUI needs the same queue or a read-only synchronous pass.
