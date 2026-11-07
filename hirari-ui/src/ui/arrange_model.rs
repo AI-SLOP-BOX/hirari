@@ -337,6 +337,89 @@ pub fn last_clip_end(tracks: &[ArrangeTrack]) -> f32 {
         .fold(0.0f32, f32::max)
 }
 
+/// Pixel layout of one arrangement canvas, fit-to-width with no scrolling.
+/// The Slint dock scrolls at a fixed 20 px/beat; the AmeUI canvas fits the
+/// whole timeline into its slot (the Slint FIT zoom), so `px_per_beat` is
+/// derived here and the draw step stays a pure function of this struct.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ArrangeCanvasGeometry {
+    /// Horizontal scale: canvas pixels per beat.
+    pub px_per_beat: f32,
+    /// Height of the measure/marker ruler band at the top.
+    pub ruler_height: f32,
+    /// Height of one track lane below the ruler.
+    pub lane_height: f32,
+    /// Beat step for the faint grid lines (Slint `visible-beat-step`).
+    pub beat_step: f32,
+}
+
+impl ArrangeCanvasGeometry {
+    /// Canvas x of a beat, in canvas-local pixels.
+    pub fn x_for_beat(&self, beat: f32) -> f32 {
+        beat.max(0.0) * self.px_per_beat
+    }
+
+    /// Beat at a canvas x (click-to-seek inverse of [`Self::x_for_beat`]).
+    /// A zero scale (never drawn / collapsed canvas) seeks to beat 0.
+    pub fn beat_for_x(&self, x: f32) -> f32 {
+        if self.px_per_beat > 0.0 && x.is_finite() {
+            (x / self.px_per_beat).max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Top y of a lane, in canvas-local pixels.
+    pub fn y_for_lane(&self, lane: usize) -> f32 {
+        self.ruler_height + lane as f32 * self.lane_height
+    }
+}
+
+/// Derives the canvas layout for a `width` x `height` slot showing
+/// `timeline_end_beats` beats across `lane_count` lanes. Degenerate sizes
+/// yield a zeroed layout rather than NaNs, so a collapsed window is safe.
+pub fn arrange_canvas_geometry(
+    width: f32,
+    height: f32,
+    timeline_end_beats: f32,
+    lane_count: usize,
+) -> ArrangeCanvasGeometry {
+    let width = if width.is_finite() {
+        width.max(0.0)
+    } else {
+        0.0
+    };
+    let height = if height.is_finite() {
+        height.max(0.0)
+    } else {
+        0.0
+    };
+    let timeline_end = if timeline_end_beats.is_finite() {
+        timeline_end_beats.max(1.0)
+    } else {
+        1.0
+    };
+    let px_per_beat = width / timeline_end;
+    let ruler_height = 24.0_f32.min(height);
+    let lane_height = if lane_count == 0 {
+        0.0
+    } else {
+        (height - ruler_height).max(0.0) / lane_count as f32
+    };
+    // Same adaptive step as the Slint dock: at least one beat, and never so
+    // many grid lines that they merge into a solid band.
+    let beat_step = (4.0 / px_per_beat.max(f32::EPSILON))
+        .max(timeline_end / 2048.0)
+        .max(1.0)
+        .ceil();
+    ArrangeCanvasGeometry {
+        px_per_beat,
+        ruler_height,
+        lane_height,
+        beat_step,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +542,51 @@ mod tests {
         assert_eq!(markers[0].color, [0x64, 0x72, 0xa8]);
         let markers = parse_markers(r#"[{"id":3,"label":"C","beat":2.0}]"#);
         assert_eq!(markers[0].color, [0x64, 0x72, 0xa8]);
+    }
+
+    #[test]
+    fn canvas_geometry_fits_timeline_to_width() {
+        // 128 beats across 640px is 5 px/beat; two lanes split the area
+        // below the 24px ruler.
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2);
+        assert_eq!(geometry.px_per_beat, 5.0);
+        assert_eq!(geometry.ruler_height, 24.0);
+        assert_eq!(geometry.lane_height, 100.0);
+        assert_eq!(geometry.x_for_beat(10.0), 50.0);
+        assert_eq!(geometry.x_for_beat(-1.0), 0.0);
+        assert_eq!(geometry.beat_for_x(50.0), 10.0);
+        assert_eq!(geometry.beat_for_x(-5.0), 0.0);
+        assert_eq!(
+            arrange_canvas_geometry(0.0, 0.0, 128.0, 0).beat_for_x(50.0),
+            0.0
+        );
+        assert_eq!(geometry.y_for_lane(1), 124.0);
+    }
+
+    #[test]
+    fn canvas_geometry_handles_degenerate_sizes() {
+        let geometry = arrange_canvas_geometry(0.0, 0.0, 128.0, 0);
+        assert_eq!(geometry.px_per_beat, 0.0);
+        assert_eq!(geometry.lane_height, 0.0);
+        assert!(geometry.beat_step.is_finite());
+        let geometry = arrange_canvas_geometry(f32::NAN, f32::INFINITY, f32::NAN, 3);
+        assert_eq!(geometry.px_per_beat, 0.0);
+        assert_eq!(geometry.lane_height, 0.0);
+    }
+
+    #[test]
+    fn canvas_grid_step_adapts_to_zoom() {
+        // At 20 px/beat the grid draws every beat; zoomed far out (below
+        // 4 px/beat) it steps by whole beats only when lines would merge.
+        assert_eq!(
+            arrange_canvas_geometry(2560.0, 100.0, 128.0, 1).beat_step,
+            1.0
+        );
+        // 128 beats in 128px is 1 px/beat, so the step is 4 beats.
+        assert_eq!(
+            arrange_canvas_geometry(128.0, 100.0, 128.0, 1).beat_step,
+            4.0
+        );
     }
 
     #[test]
