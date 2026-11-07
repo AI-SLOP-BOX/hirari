@@ -11,8 +11,8 @@
 //! engine undo transaction); slice 8 adds edge-drag trim (Audio/Vocal
 //! only, fraction-clamped like the Slint dock); slice 9 draws clip
 //! waveform peaks from the async decode queue; slice 10 adds the snap
-//! division picker. Audio playback is real; the Slint UI remains the
-//! default entry until the port reaches parity.
+//! division picker; slice 11 adds the edit lock. Audio playback is real;
+//! the Slint UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -78,6 +78,9 @@ pub struct HirariAmeApp {
     arrange_scroll_beats: State<f32>,
     /// Snap division denominator (Slint default 16); step is 4/division.
     arrange_snap_division: State<f32>,
+    /// Edit lock (Slint `is_locked`): while on, clip drags select only and
+    /// never move or trim. Seek and pan still work.
+    arrange_locked: State<bool>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -138,6 +141,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         arrange_zoom: context.state(1.0f32),
         arrange_scroll_beats: context.state(0.0f32),
         arrange_snap_division: context.state(16.0f32),
+        arrange_locked: context.state(false),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         status: context.state(status),
@@ -751,6 +755,9 @@ impl App for HirariAmeApp {
                                 .find(|track| track.id == track_id)
                                 .map(|track| track.kind.clone());
                             match clip {
+                                Some(_) if self.arrange_locked.get() => {
+                                    self.down_mode = LaneDrag::Hold
+                                }
                                 Some(clip) if clip.midi => self.down_mode = LaneDrag::Hold,
                                 Some(clip) => {
                                     // Edge zones trim (Audio/Vocal only, as
@@ -980,12 +987,21 @@ impl App for HirariAmeApp {
                     .unwrap_or(SNAP_DIVISIONS[0]);
                 snap_state.set(next);
             });
+        let lock_state = self.arrange_locked.clone();
+        let locked = self.arrange_locked.get();
+        let lock_button = ButtonView::new(if locked { "UNLOCK" } else { "LOCK" })
+            .action_id("arrange.lock_toggle")
+            .secondary()
+            .on_press(move |_| {
+                lock_state.set(!lock_state.get());
+            });
         let arrange_toolbar = View::Card(vec![View::HStack(vec![
             View::Text("ARRANGEMENT".to_owned()),
             zoom_out.into(),
             zoom_in.into(),
             zoom_fit.into(),
             snap_button.into(),
+            lock_button.into(),
             View::Caption(format!("ZOOM {}%", (zoom * 100.0).round() as u32)),
             View::Caption("ruler: pan · empty lane: seek · clip: move · edges: trim".to_owned()),
         ])]);

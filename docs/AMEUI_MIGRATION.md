@@ -52,7 +52,8 @@ Notes:
 | 7 | `ff7e2d6` | Clip drag-move: drag a (non-MIDI) clip to move it with a live preview, commit on release through the engine undo transaction (`move_region` / `move_region_sync_group`, 0.25-beat snap). `ArrangeClip` now carries `sync_group`. |
 | 8 | `12c36d8` | Clip edge-drag trim: Audio/Vocal clip edges trim with live preview, commit on release (`set_region_trim`, fraction-clamped like the Slint dock). `ArrangeClip` now carries the trim window. Edge zones come from `trim_edge_at`. |
 | 9 | `6a2d1eb` | Clip waveform peaks: async decode queue (8 in flight, generation-guarded, failure memo, revision-cached generation) feeding 128 trim/reverse-windowed peak pairs per clip, drawn like the Slint dock. `ArrangeClip` now carries `reverse`. |
-| 10 | (this work) | Snap division picker: toolbar button cycles 1/1–1/32 (step = 4/division) for move/trim drags, replacing the hardcoded 1/16. |
+| 10 | `f3eb1c5` | Snap division picker: toolbar button cycles 1/1–1/32 (step = 4/division) for move/trim drags, replacing the hardcoded 1/16. |
+| 11 | (this work) | Edit lock: toolbar LOCK toggles Slint `is_locked` for the arrange surface — while on, clip drags select only (seek/pan unaffected). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -76,7 +77,7 @@ Not yet (suggested order):
    shapes only; `draw_text` is crate-internal (`widgets/render.rs`), so
    host apps cannot draw text into a canvas scene. Until AmeUI exports
    a host text helper, the track list below the canvas carries the
-   names.
+   names. (The arrange dock's edit lock landed in slice 11.)
 4. **Slint deletion gate** — once the above reach parity, flip the
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
