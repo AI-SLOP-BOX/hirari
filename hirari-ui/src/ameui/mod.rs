@@ -10,8 +10,9 @@
 //! slice 7 adds clip drag-move (live preview, commit on release via the
 //! engine undo transaction); slice 8 adds edge-drag trim (Audio/Vocal
 //! only, fraction-clamped like the Slint dock); slice 9 draws clip
-//! waveform peaks from the async decode queue. Audio playback is real;
-//! the Slint UI remains the default entry until the port reaches parity.
+//! waveform peaks from the async decode queue; slice 10 adds the snap
+//! division picker. Audio playback is real; the Slint UI remains the
+//! default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -43,9 +44,9 @@ use crate::ui::arrange_model::{
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
 
-/// Clip-move snap in beats: the Slint default division (1/16 of a 4-beat
-/// bar). A snap picker is a later slice; the move itself already matches.
-const MOVE_SNAP_BEATS: f32 = 0.25;
+/// Snap divisions offered by the toolbar picker (Slint `snap_val`
+/// denominators; the step is 4 beats / division, so 1/16 snaps to 0.25).
+const SNAP_DIVISIONS: [f32; 6] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
 
 /// What a lane press turned into once it crossed the click threshold.
 #[derive(Clone, Copy, PartialEq)]
@@ -75,6 +76,8 @@ pub struct HirariAmeApp {
     timeline_end_beats: State<f32>,
     arrange_zoom: State<f32>,
     arrange_scroll_beats: State<f32>,
+    /// Snap division denominator (Slint default 16); step is 4/division.
+    arrange_snap_division: State<f32>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -134,6 +137,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         timeline_end_beats: context.state(128.0f32),
         arrange_zoom: context.state(1.0f32),
         arrange_scroll_beats: context.state(0.0f32),
+        arrange_snap_division: context.state(16.0f32),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         status: context.state(status),
@@ -812,7 +816,8 @@ impl App for HirariAmeApp {
                                 if px_per_beat > 0.0 {
                                     let raw =
                                         ((event.x - self.down_x) / f64::from(px_per_beat)) as f32;
-                                    let snapped = (raw / MOVE_SNAP_BEATS).round() * MOVE_SNAP_BEATS;
+                                    let step = 4.0 / self.arrange_snap_division.get().max(1.0);
+                                    let snapped = (raw / step).round() * step;
                                     // Clamp the preview delta through the
                                     // same fraction math the commit uses.
                                     self.trim_delta_beats = self.clamped_trim_delta(snapped);
@@ -828,7 +833,8 @@ impl App for HirariAmeApp {
                                 if px_per_beat > 0.0 {
                                     let raw =
                                         ((event.x - self.down_x) / f64::from(px_per_beat)) as f32;
-                                    let snapped = (raw / MOVE_SNAP_BEATS).round() * MOVE_SNAP_BEATS;
+                                    let step = 4.0 / self.arrange_snap_division.get().max(1.0);
+                                    let snapped = (raw / step).round() * step;
                                     self.move_delta_beats = snapped.max(-self.move_start_beat);
                                 }
                                 true
@@ -960,11 +966,26 @@ impl App for HirariAmeApp {
                 fit_zoom_state.set(1.0);
                 fit_scroll_state.set(0.0);
             });
+        let snap_state = self.arrange_snap_division.clone();
+        let snap_label = format!("SNAP 1/{}", self.arrange_snap_division.get() as u32);
+        let snap_button = ButtonView::new(snap_label)
+            .action_id("arrange.snap_cycle")
+            .secondary()
+            .on_press(move |_| {
+                let current = snap_state.get();
+                let next = SNAP_DIVISIONS
+                    .iter()
+                    .find(|division| **division > current)
+                    .copied()
+                    .unwrap_or(SNAP_DIVISIONS[0]);
+                snap_state.set(next);
+            });
         let arrange_toolbar = View::Card(vec![View::HStack(vec![
             View::Text("ARRANGEMENT".to_owned()),
             zoom_out.into(),
             zoom_in.into(),
             zoom_fit.into(),
+            snap_button.into(),
             View::Caption(format!("ZOOM {}%", (zoom * 100.0).round() as u32)),
             View::Caption("ruler: pan · empty lane: seek · clip: move · edges: trim".to_owned()),
         ])]);
