@@ -9,13 +9,15 @@
 //! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection;
 //! slice 7 adds clip drag-move (live preview, commit on release via the
 //! engine undo transaction); slice 8 adds edge-drag trim (Audio/Vocal
-//! only, fraction-clamped like the Slint dock). Audio playback is real;
+//! only, fraction-clamped like the Slint dock); slice 9 draws clip
+//! waveform peaks from the async decode queue. Audio playback is real;
 //! the Slint UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
 //! `AppMessage("tick")` through the event-loop proxy; `on_event` does the poll.
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -76,6 +78,9 @@ pub struct HirariAmeApp {
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
+    /// Decoded peak vectors per clip, keyed by `(track_id, clip_id)`.
+    /// Filled asynchronously; see `poll_waveforms`.
+    clip_peaks: State<HashMap<(u32, i32), Vec<f32>>>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
@@ -98,6 +103,14 @@ pub struct HirariAmeApp {
     trim_clip: Option<(u32, i32)>,
     trim_edge: TrimEdge,
     trim_delta_beats: f32,
+    /// In-flight waveform decodes: request id -> (track, clip, generation).
+    waveform_requests: HashMap<u64, (u32, u32, u64)>,
+    failed_waveforms: HashSet<(u64, u32, u32)>,
+    /// Cached project generation, recomputed only when the state revision
+    /// moves (serializing the project every tick stalls the UI thread).
+    gen_revision: u64,
+    gen_value: u64,
+    last_gen: u64,
     tick: u64,
 }
 
@@ -122,6 +135,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         arrange_zoom: context.state(1.0f32),
         arrange_scroll_beats: context.state(0.0f32),
         selected_clip: context.state(None),
+        clip_peaks: context.state(HashMap::new()),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
@@ -139,6 +153,11 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         trim_clip: None,
         trim_edge: TrimEdge::Left,
         trim_delta_beats: 0.0,
+        waveform_requests: HashMap::new(),
+        failed_waveforms: HashSet::new(),
+        gen_revision: u64::MAX,
+        gen_value: 0,
+        last_gen: u64::MAX,
         tick: 0,
     }
 }
@@ -175,6 +194,85 @@ impl HirariAmeApp {
         self.tick = self.tick.wrapping_add(1);
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
+            self.poll_waveforms(&core);
+        }
+    }
+
+    /// Consumes finished waveform decodes and queues missing clip peaks,
+    /// mirroring the Slint telemetry queue: at most 8 detached decodes in
+    /// flight, generation-guarded results, failures remembered per
+    /// generation. Runs on the layout cadence, never on the UI event path.
+    fn poll_waveforms(&mut self, core: &HirariCore) {
+        const MAX_REQUESTS: usize = 8;
+        let revision = core.project_state_revision();
+        let generation = if revision == self.gen_revision {
+            self.gen_value
+        } else {
+            let generation = core.project_generation();
+            self.gen_revision = revision;
+            self.gen_value = generation;
+            generation
+        };
+        if generation != self.last_gen {
+            self.last_gen = generation;
+            self.clip_peaks.set(HashMap::new());
+            self.failed_waveforms.clear();
+        }
+        let tracks = self.tracks.get();
+        let completed: Vec<(u64, u32, u32, u64)> = self
+            .waveform_requests
+            .iter()
+            .map(|(id, &(track, clip, generation))| (*id, track, clip, generation))
+            .collect();
+        for (request, track_id, clip_id, request_generation) in completed {
+            if core.region_waveform_pending(request) {
+                continue;
+            }
+            let waveform = core.poll_region_waveform(request);
+            if request_generation == generation && !waveform.is_empty() {
+                let still_exists = tracks.iter().any(|track| {
+                    track.id == track_id && track.clips.iter().any(|clip| clip.id == clip_id as i32)
+                });
+                if still_exists {
+                    let mut peaks = self.clip_peaks.get();
+                    peaks.insert((track_id, clip_id as i32), waveform);
+                    self.clip_peaks.set(peaks);
+                }
+            } else if request_generation == generation {
+                self.failed_waveforms
+                    .insert((generation, track_id, clip_id));
+            }
+            self.waveform_requests.remove(&request);
+        }
+        self.failed_waveforms
+            .retain(|(gen, _, _)| *gen == generation);
+        'queue: for track in &tracks {
+            for clip in &track.clips {
+                if clip.midi || clip.id <= 0 {
+                    continue;
+                }
+                let key = (generation, track.id, clip.id as u32);
+                if self.clip_peaks.get().contains_key(&(track.id, clip.id))
+                    || self.failed_waveforms.contains(&key)
+                    || self.waveform_requests.values().any(
+                        |&(queued_track, queued_clip, queued_gen)| {
+                            queued_gen == generation
+                                && queued_track == track.id
+                                && queued_clip == clip.id as u32
+                        },
+                    )
+                {
+                    continue;
+                }
+                if self.waveform_requests.len() >= MAX_REQUESTS {
+                    break 'queue;
+                }
+                let request = core.queue_region_waveform(track.id, clip.id as u32);
+                if request != 0 {
+                    self.waveform_requests
+                        .insert(request, (track.id, clip.id as u32, generation));
+                }
+            }
         }
     }
 
@@ -367,6 +465,7 @@ impl HirariAmeApp {
         }
         let tracks = self.tracks.get();
         let selected_clip = self.selected_clip.get();
+        let peaks = self.clip_peaks.get();
         let markers = self.markers.get();
         let measure_starts = self.measure_starts.get();
         let timeline_end = self.timeline_end_beats.get();
@@ -497,6 +596,42 @@ impl HirariAmeApp {
                     None,
                     &rect,
                 );
+                // Waveform peaks, as in the Slint dock: 128 pairs windowed
+                // by trim (and flipped when reversed), drawn only when the
+                // clip is wide enough to read (48px gate, as in Slint).
+                if let Some(points) = peaks.get(&(track.id, clip.id)) {
+                    if points.len() >= 256 && clip_width >= 48.0 {
+                        let span = clip.trim_end - clip.trim_start;
+                        let mid_y = clip_y + clip_height / 2.0;
+                        let amp = clip_height / 3.0;
+                        for pair in 0..128 {
+                            let fraction = (pair as f32 + 0.5) / 128.0;
+                            let source = if clip.reverse {
+                                ((clip.trim_end - fraction * span) * 128.0).floor()
+                            } else {
+                                ((clip.trim_start + fraction * span) * 128.0).floor()
+                            }
+                            .min(127.0) as usize;
+                            if points.len() < (source + 1) * 2 {
+                                continue;
+                            }
+                            let x = clip_x + 5.0 + pair as f64 * (clip_width - 10.0) / 128.0;
+                            let peak = f64::from(points[source * 2]);
+                            let height =
+                                f64::from(points[source * 2] - points[source * 2 + 1]) * amp;
+                            scene.stroke(
+                                &grid,
+                                Affine::IDENTITY,
+                                Color::from_rgba8(235, 239, 244, 143),
+                                None,
+                                &Line::new(
+                                    (x, mid_y - peak * amp),
+                                    (x, mid_y - peak * amp + height),
+                                ),
+                            );
+                        }
+                    }
+                }
             }
         }
 

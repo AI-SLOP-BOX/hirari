@@ -35,6 +35,9 @@ pub struct ArrangeClip {
     /// layout and consumed by `set_region_trim`. Full clip is 0..1.
     pub trim_start: f32,
     pub trim_end: f32,
+    /// Reversed playback; flips the waveform peak mapping like the Slint
+    /// dock, and gates trim handles to Audio/Vocal lanes at draw time.
+    pub reverse: bool,
 }
 
 /// One arrangement lane reduced to what the timeline draws.
@@ -258,6 +261,8 @@ struct RegionLayout {
     base_length: u64,
     #[serde(default)]
     source_length: u64,
+    #[serde(default)]
+    reverse: bool,
 }
 
 #[derive(Deserialize)]
@@ -322,6 +327,7 @@ pub fn parse_arrange_tracks(
                                 })) as f32
                                 / region.base_length as f32
                         },
+                        reverse: region.reverse,
                     }
                 })
                 .collect();
@@ -635,7 +641,7 @@ mod tests {
     fn parses_tracks_and_regions_from_layout_json() {
         let json = r#"[{"id":7,"name":"Drums","type":"Audio","regions":[
             {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3},
-            {"id":2,"name":"Snare","start":96000,"len":48000}]}]"#;
+            {"id":2,"name":"Snare","start":96000,"len":48000,"reverse":true}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
         let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
         assert_eq!(tracks.len(), 1);
@@ -648,6 +654,8 @@ mod tests {
         assert!(!tracks[0].clips[0].midi);
         assert_eq!(tracks[0].clips[0].sync_group, 3);
         assert_eq!(tracks[0].clips[1].sync_group, 0);
+        assert!(!tracks[0].clips[0].reverse);
+        assert!(tracks[0].clips[1].reverse);
         // No base_length published: full-clip trim window.
         assert_eq!(tracks[0].clips[0].trim_start, 0.0);
         assert_eq!(tracks[0].clips[0].trim_end, 1.0);
@@ -763,6 +771,7 @@ mod tests {
                     sync_group: 0,
                     trim_start: 0.0,
                     trim_end: 1.0,
+                    reverse: false,
                 },
                 ArrangeClip {
                     id: 2,
@@ -773,6 +782,7 @@ mod tests {
                     sync_group: 0,
                     trim_start: 0.0,
                     trim_end: 1.0,
+                    reverse: false,
                 },
             ],
         }];
@@ -814,6 +824,7 @@ mod tests {
             sync_group: 0,
             trim_start: 0.0,
             trim_end: 1.0,
+            reverse: false,
         };
         assert_eq!(trim_edge_at(&geometry, &clip, 3.0), Some(TrimEdge::Left));
         assert_eq!(trim_edge_at(&geometry, &clip, 17.0), Some(TrimEdge::Right));
@@ -843,6 +854,7 @@ mod tests {
                     sync_group: 0,
                     trim_start: 0.0,
                     trim_end: 1.0,
+                    reverse: false,
                 }],
             },
             ArrangeTrack {
@@ -859,6 +871,7 @@ mod tests {
                     sync_group: 0,
                     trim_start: 0.0,
                     trim_end: 1.0,
+                    reverse: false,
                 }],
             },
         ];

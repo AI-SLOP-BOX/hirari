@@ -50,13 +50,15 @@ Notes:
 | 5 | `2181009` | Zoom (toolbar −/+/FIT, ×/÷1.25, 1–8×) and ruler-drag panning. `arrange_canvas_geometry` now takes zoom + scroll and clamps both. Wheel-zoom is still unavailable (see API gap below). |
 | 6 | `f06a387` | Click clip selection: a click (≤4px) selects via `clip_at`, a drag seeks. Selected clip draws brighter with a 2px border, matching Slint. Empty-lane clicks seek on release. |
 | 7 | `ff7e2d6` | Clip drag-move: drag a (non-MIDI) clip to move it with a live preview, commit on release through the engine undo transaction (`move_region` / `move_region_sync_group`, 0.25-beat snap). `ArrangeClip` now carries `sync_group`. |
-| 8 | (this work) | Clip edge-drag trim: Audio/Vocal clip edges trim with live preview, commit on release (`set_region_trim`, fraction-clamped like the Slint dock). `ArrangeClip` now carries the trim window. Edge zones come from `trim_edge_at`. |
+| 8 | `12c36d8` | Clip edge-drag trim: Audio/Vocal clip edges trim with live preview, commit on release (`set_region_trim`, fraction-clamped like the Slint dock). `ArrangeClip` now carries the trim window. Edge zones come from `trim_edge_at`. |
+| 9 | (this work) | Clip waveform peaks: async decode queue (8 in flight, generation-guarded, failure memo, revision-cached generation) feeding 128 trim/reverse-windowed peak pairs per clip, drawn like the Slint dock. `ArrangeClip` now carries `reverse`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
 Done: transport, master meter, waveform, track names/kinds/clip counts,
 lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
-ruler-drag panning, click clip selection, clip drag-move, edge-drag trim.
+ruler-drag panning, click clip selection, clip drag-move, edge-drag trim,
+clip waveform peaks.
 
 Not yet (suggested order):
 
@@ -64,13 +66,11 @@ Not yet (suggested order):
    lane drags still seek). Remaining API gap: AmeUI's
    `AmeEvent::Scroll` is window-global (no canvas/position), so
    wheel-zoom over the canvas is still unavailable.
-2. **Waveform peaks on clips** — Slint draws 128 peak pairs per clip
-   (`clip_data.points`). Peak extraction is queued by Slint telemetry;
-   AmeUI needs the same queue or a read-only synchronous pass, windowed
-   by the `trim_start`/`trim_end` already in the neutral model (slice 8).
-   Still open from the trim area: a snap-division picker (slices 7–8
-   hardcode the Slint 1/16 default) and fade/gain editing, which Slint
-   does outside the arrange dock.
+2. ~~**Waveform peaks on clips**~~ — done in slice 9 (queue in
+   `poll_waveforms`, trim/reverse-windowed draw). Still open from the
+   edit area: a snap-division picker (slices 7–8 hardcode the Slint
+   1/16 default) and fade/gain editing, which Slint does outside the
+   arrange dock.
 3. **Text in the canvas** — lane headers and clip names. Needs a text
    path for host canvases (AmeUI widgets draw text internally; the host
    scene does not). Until then the track list below the canvas carries
