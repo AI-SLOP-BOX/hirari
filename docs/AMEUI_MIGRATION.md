@@ -86,6 +86,21 @@ Not yet (suggested order):
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
 
+## Next surface: piano roll
+
+The arrange dock + mixer + project + transport are at parity (text
+excepted). The next-largest surface is the piano roll. Entry points:
+
+- Data: `core.midi_notes_json()` (timeline-sorted; see
+  `hirari-core-bridge/src/runtime/hirari_core_arrangement_midi_editing.rs`)
+  and the note-editing engine calls in the same file.
+- Slint reference: `hirari-ui/ui/model/midi_model.slint`,
+  `hirari-ui/ui/hirari_studio_parts/editor_views.slint`; note grouping
+  semantics already live in `arrange_model::group_midi_spans`.
+- Suggested order inside the slice: neutral note parser + geometry in
+  `arrange_model.rs` (default-build tests), read-only canvas, then
+  click-to-add / drag gestures, then velocity editing.
+
 ## Slint references worth re-reading
 
 - Arrange surface + interactions: `hirari-ui/ui/arrange_dock.slint`
