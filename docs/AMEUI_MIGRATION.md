@@ -45,24 +45,22 @@ Notes:
 |---|---|---|
 | 1 | `087ec194` | AmeUI shell boots a real `HirariCore`: transport, master meter, waveform Canvas (reusable-texture bridge), track list. |
 | 2 | `9c9e821e` | Neutral `ui/arrange_model.rs` extracted from Slint paths (time signatures, timeline end, measure starts, MIDI span grouping, layout/marker parsing, lane colors). Fixed a timeline-end overshoot (was +4 bars). AmeUI track list now uses `parse_arrange_tracks`. |
-| 3 | (this work) | Arrangement Canvas: ruler, beat grid, measure lines, lanes, clips, markers, playhead — fit-to-width from `arrange_canvas_geometry`. |
-| 4 | (this work) | Click/drag on the arrange canvas seeks the playhead (`beat_for_x` + `beats_to_samples`/`set_playhead`; seek only, playback untouched). |
+| 3 | `618da46` | Arrangement Canvas: ruler, beat grid, measure lines, lanes, clips, markers, playhead — fit-to-width from `arrange_canvas_geometry`. |
+| 4 | `618da46` | Click/drag on the arrange canvas seeks the playhead (`beat_for_x` + `beats_to_samples`/`set_playhead`; seek only, playback untouched). |
+| 5 | (this work) | Zoom (toolbar −/+/FIT, ×/÷1.25, 1–8×) and ruler-drag panning. `arrange_canvas_geometry` now takes zoom + scroll and clamps both. Wheel-zoom is still unavailable (see API gap below). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
 Done: transport, master meter, waveform, track names/kinds/clip counts,
-lane/clip/marker/playhead geometry, click-to-seek.
+lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar) and
+ruler-drag panning.
 
 Not yet (suggested order):
 
-1. **Zoom/scroll** — Slint scrolls at 20 px/beat with zoom buttons and FIT
-   (`hirari-ui/ui/arrange_dock.slint`). `arrange_canvas_geometry` is
-   fit-to-width today; add a zoom + horizontal scroll offset to the
-   geometry. The adaptive grid step already matches Slint's. API gap:
-   AmeUI's `AmeEvent::Scroll` is window-global (no canvas/position), so
-   wheel-zoom over the canvas is not available; use toolbar zoom buttons
-   (the existing `ButtonView` pattern) and ruler-drag panning — keep lane
-   drags for seek (slice 4) so the two gestures do not collide.
+1. ~~**Zoom/scroll**~~ — done in slice 5 (toolbar −/+/FIT + ruler pan;
+   lane drags still seek). Remaining API gap: AmeUI's
+   `AmeEvent::Scroll` is window-global (no canvas/position), so
+   wheel-zoom over the canvas is still unavailable.
 2. **Clip selection and drag/trim** — Slint `clip-selected`,
    `clip-move-commit`, `clip-trim-commit` with snap division. Route
    through the existing engine commands used by the Slint callbacks

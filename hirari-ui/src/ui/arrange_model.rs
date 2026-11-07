@@ -337,10 +337,16 @@ pub fn last_clip_end(tracks: &[ArrangeTrack]) -> f32 {
         .fold(0.0f32, f32::max)
 }
 
-/// Pixel layout of one arrangement canvas, fit-to-width with no scrolling.
-/// The Slint dock scrolls at a fixed 20 px/beat; the AmeUI canvas fits the
-/// whole timeline into its slot (the Slint FIT zoom), so `px_per_beat` is
-/// derived here and the draw step stays a pure function of this struct.
+/// Zoom limits, mirroring the Slint dock buttons (×/÷1.25 per step).
+/// Fit-to-width is zoom 1.0; zooming out past fit would only leave empty
+/// space, so the floor is 1.0 rather than the Slint 0.25.
+pub const ARRANGE_ZOOM_MIN: f32 = 1.0;
+pub const ARRANGE_ZOOM_MAX: f32 = 8.0;
+
+/// Pixel layout of one arrangement canvas. Zoom 1.0 fits the whole
+/// timeline into the slot (the Slint FIT zoom); higher zoom shows a
+/// window of it scrolled by `scroll_beats`. The draw step stays a pure
+/// function of this struct.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArrangeCanvasGeometry {
     /// Horizontal scale: canvas pixels per beat.
@@ -351,19 +357,23 @@ pub struct ArrangeCanvasGeometry {
     pub lane_height: f32,
     /// Beat step for the faint grid lines (Slint `visible-beat-step`).
     pub beat_step: f32,
+    /// Left edge of the visible window, in beats (clamped).
+    pub scroll_beats: f32,
 }
 
 impl ArrangeCanvasGeometry {
-    /// Canvas x of a beat, in canvas-local pixels.
+    /// Canvas x of a beat, in canvas-local pixels. Beats outside the
+    /// visible window map off-canvas (negative or past the width) and are
+    /// clipped by the renderer; they are not clamped to the edges.
     pub fn x_for_beat(&self, beat: f32) -> f32 {
-        beat.max(0.0) * self.px_per_beat
+        (beat - self.scroll_beats) * self.px_per_beat
     }
 
     /// Beat at a canvas x (click-to-seek inverse of [`Self::x_for_beat`]).
     /// A zero scale (never drawn / collapsed canvas) seeks to beat 0.
     pub fn beat_for_x(&self, x: f32) -> f32 {
         if self.px_per_beat > 0.0 && x.is_finite() {
-            (x / self.px_per_beat).max(0.0)
+            (x / self.px_per_beat + self.scroll_beats).max(0.0)
         } else {
             0.0
         }
@@ -376,13 +386,17 @@ impl ArrangeCanvasGeometry {
 }
 
 /// Derives the canvas layout for a `width` x `height` slot showing
-/// `timeline_end_beats` beats across `lane_count` lanes. Degenerate sizes
-/// yield a zeroed layout rather than NaNs, so a collapsed window is safe.
+/// `timeline_end_beats` beats across `lane_count` lanes at `zoom`, scrolled
+/// to `scroll_beats`. Zoom and scroll are clamped to what the canvas can
+/// show; degenerate sizes yield a zeroed layout rather than NaNs, so a
+/// collapsed window is safe.
 pub fn arrange_canvas_geometry(
     width: f32,
     height: f32,
     timeline_end_beats: f32,
     lane_count: usize,
+    zoom: f32,
+    scroll_beats: f32,
 ) -> ArrangeCanvasGeometry {
     let width = if width.is_finite() {
         width.max(0.0)
@@ -399,7 +413,23 @@ pub fn arrange_canvas_geometry(
     } else {
         1.0
     };
-    let px_per_beat = width / timeline_end;
+    let zoom = if zoom.is_finite() {
+        zoom.clamp(ARRANGE_ZOOM_MIN, ARRANGE_ZOOM_MAX)
+    } else {
+        1.0
+    };
+    let px_per_beat = width / timeline_end * zoom;
+    let visible_beats = if px_per_beat > 0.0 {
+        width / px_per_beat
+    } else {
+        timeline_end
+    };
+    let max_scroll = (timeline_end - visible_beats).max(0.0);
+    let scroll_beats = if scroll_beats.is_finite() {
+        scroll_beats.clamp(0.0, max_scroll)
+    } else {
+        0.0
+    };
     let ruler_height = 24.0_f32.min(height);
     let lane_height = if lane_count == 0 {
         0.0
@@ -417,6 +447,7 @@ pub fn arrange_canvas_geometry(
         ruler_height,
         lane_height,
         beat_step,
+        scroll_beats,
     }
 }
 
@@ -548,16 +579,16 @@ mod tests {
     fn canvas_geometry_fits_timeline_to_width() {
         // 128 beats across 640px is 5 px/beat; two lanes split the area
         // below the 24px ruler.
-        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2);
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 1.0, 0.0);
         assert_eq!(geometry.px_per_beat, 5.0);
         assert_eq!(geometry.ruler_height, 24.0);
         assert_eq!(geometry.lane_height, 100.0);
         assert_eq!(geometry.x_for_beat(10.0), 50.0);
-        assert_eq!(geometry.x_for_beat(-1.0), 0.0);
+        assert_eq!(geometry.x_for_beat(-1.0), -5.0);
         assert_eq!(geometry.beat_for_x(50.0), 10.0);
         assert_eq!(geometry.beat_for_x(-5.0), 0.0);
         assert_eq!(
-            arrange_canvas_geometry(0.0, 0.0, 128.0, 0).beat_for_x(50.0),
+            arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0).beat_for_x(50.0),
             0.0
         );
         assert_eq!(geometry.y_for_lane(1), 124.0);
@@ -565,11 +596,11 @@ mod tests {
 
     #[test]
     fn canvas_geometry_handles_degenerate_sizes() {
-        let geometry = arrange_canvas_geometry(0.0, 0.0, 128.0, 0);
+        let geometry = arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0);
         assert_eq!(geometry.px_per_beat, 0.0);
         assert_eq!(geometry.lane_height, 0.0);
         assert!(geometry.beat_step.is_finite());
-        let geometry = arrange_canvas_geometry(f32::NAN, f32::INFINITY, f32::NAN, 3);
+        let geometry = arrange_canvas_geometry(f32::NAN, f32::INFINITY, f32::NAN, 3, 1.0, 0.0);
         assert_eq!(geometry.px_per_beat, 0.0);
         assert_eq!(geometry.lane_height, 0.0);
     }
@@ -579,14 +610,41 @@ mod tests {
         // At 20 px/beat the grid draws every beat; zoomed far out (below
         // 4 px/beat) it steps by whole beats only when lines would merge.
         assert_eq!(
-            arrange_canvas_geometry(2560.0, 100.0, 128.0, 1).beat_step,
+            arrange_canvas_geometry(2560.0, 100.0, 128.0, 1, 1.0, 0.0).beat_step,
             1.0
         );
         // 128 beats in 128px is 1 px/beat, so the step is 4 beats.
         assert_eq!(
-            arrange_canvas_geometry(128.0, 100.0, 128.0, 1).beat_step,
+            arrange_canvas_geometry(128.0, 100.0, 128.0, 1, 1.0, 0.0).beat_step,
             4.0
         );
+    }
+
+    #[test]
+    fn canvas_zoom_scales_and_scroll_shifts() {
+        // Fit is 5 px/beat; zoom 2 doubles it and scroll 10 moves the
+        // window so beat 10 sits at x=0 and beat 20 at x=100.
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 2.0, 10.0);
+        assert_eq!(geometry.px_per_beat, 10.0);
+        assert_eq!(geometry.scroll_beats, 10.0);
+        assert_eq!(geometry.x_for_beat(10.0), 0.0);
+        assert_eq!(geometry.x_for_beat(20.0), 100.0);
+        assert_eq!(geometry.beat_for_x(100.0), 20.0);
+    }
+
+    #[test]
+    fn canvas_zoom_and_scroll_are_clamped() {
+        // Zoom clamps to [1, 8]; at zoom 8 the 640px slot shows 16 beats,
+        // so scroll clamps to 128 - 16 = 112.
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 100.0, 999.0);
+        assert_eq!(geometry.px_per_beat, 40.0);
+        assert_eq!(geometry.scroll_beats, 112.0);
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 0.1, -5.0);
+        assert_eq!(geometry.px_per_beat, 5.0);
+        assert_eq!(geometry.scroll_beats, 0.0);
+        // At fit zoom there is nothing to scroll.
+        let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 1.0, 50.0);
+        assert_eq!(geometry.scroll_beats, 0.0);
     }
 
     #[test]

@@ -4,9 +4,10 @@
 //! (play/stop, tempo, playhead), a live master meter, the shared plot Canvas,
 //! and the track list read from the native project layout. Slice 3 adds the
 //! arrangement Canvas: lanes, clips, measure ruler, markers and playhead
-//! drawn from the neutral arrange model, fit-to-width. Slice 4 makes that
-//! canvas seekable (click/drag moves the playhead). Audio playback is real;
-//! the Slint UI remains the default entry until the port reaches parity.
+//! drawn from the neutral arrange model. Slice 4 makes that canvas
+//! seekable (click/drag moves the playhead); slice 5 adds zoom (toolbar
+//! −/+/FIT) and ruler-drag panning. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -31,7 +32,7 @@ use vello::wgpu;
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, last_clip_end,
     parse_arrange_tracks, parse_markers, valid_time_signatures, ArrangeCanvasGeometry,
-    ArrangeMarker, ArrangeTrack, MeasureStart,
+    ArrangeMarker, ArrangeTrack, MeasureStart, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -48,12 +49,16 @@ pub struct HirariAmeApp {
     markers: State<Vec<ArrangeMarker>>,
     measure_starts: State<Vec<MeasureStart>>,
     timeline_end_beats: State<f32>,
+    arrange_zoom: State<f32>,
+    arrange_scroll_beats: State<f32>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
     /// Last drawn arrange layout, used to map pointer x back to a beat.
     arrange_geometry: ArrangeCanvasGeometry,
     seeking: bool,
+    panning: bool,
+    pan_last_x: f64,
     tick: u64,
 }
 
@@ -75,11 +80,15 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         markers: context.state(Vec::<ArrangeMarker>::new()),
         measure_starts: context.state(Vec::<MeasureStart>::new()),
         timeline_end_beats: context.state(128.0f32),
+        arrange_zoom: context.state(1.0f32),
+        arrange_scroll_beats: context.state(0.0f32),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
-        arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0),
+        arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0),
         seeking: false,
+        panning: false,
+        pan_last_x: 0.0,
         tick: 0,
     }
 }
@@ -171,8 +180,14 @@ impl HirariAmeApp {
         let markers = self.markers.get();
         let measure_starts = self.measure_starts.get();
         let timeline_end = self.timeline_end_beats.get();
-        let geometry =
-            arrange_canvas_geometry(bounds.width, bounds.height, timeline_end, tracks.len());
+        let geometry = arrange_canvas_geometry(
+            bounds.width,
+            bounds.height,
+            timeline_end,
+            tracks.len(),
+            self.arrange_zoom.get(),
+            self.arrange_scroll_beats.get(),
+        );
         self.arrange_geometry = geometry;
         let ruler = f64::from(geometry.ruler_height);
         let lane_height = f64::from(geometry.lane_height);
@@ -346,11 +361,28 @@ impl App for HirariAmeApp {
         }
         match event.phase {
             CanvasPointerPhase::Down => {
-                self.seeking = true;
-                self.seek_arrange(event.x)
+                if (event.y as f32) < self.arrange_geometry.ruler_height {
+                    // Ruler drag pans; lane drags seek (slice 4).
+                    self.panning = true;
+                    self.pan_last_x = event.x;
+                    true
+                } else {
+                    self.seeking = true;
+                    self.seek_arrange(event.x)
+                }
             }
             CanvasPointerPhase::Moved => {
-                if self.seeking {
+                if self.panning {
+                    let px_per_beat = self.arrange_geometry.px_per_beat;
+                    if px_per_beat > 0.0 {
+                        let delta_beats =
+                            ((event.x - self.pan_last_x) / f64::from(px_per_beat)) as f32;
+                        self.arrange_scroll_beats
+                            .set((self.arrange_scroll_beats.get() - delta_beats).max(0.0));
+                    }
+                    self.pan_last_x = event.x;
+                    true
+                } else if self.seeking {
                     self.seek_arrange(event.x)
                 } else {
                     false
@@ -358,6 +390,7 @@ impl App for HirariAmeApp {
             }
             CanvasPointerPhase::Up | CanvasPointerPhase::Cancelled => {
                 self.seeking = false;
+                self.panning = false;
                 true
             }
         }
@@ -370,6 +403,7 @@ impl App for HirariAmeApp {
         let sample_rate = self.sample_rate.get();
         let peak = self.master_peak.get();
         let tracks = self.tracks.get();
+        let zoom = self.arrange_zoom.get();
         let status = self.status.get();
 
         let play_core = self.core.clone();
@@ -424,6 +458,40 @@ impl App for HirariAmeApp {
             View::Caption(status),
         ])]);
 
+        // Arrange toolbar (Slint dock header): zoom steps match the Slint
+        // ±1.25 buttons; FIT returns to fit-to-width. Ruler drag pans.
+        let zoom_out_state = self.arrange_zoom.clone();
+        let zoom_out = ButtonView::new("−")
+            .action_id("arrange.zoom_out")
+            .secondary()
+            .on_press(move |_| {
+                zoom_out_state.set((zoom_out_state.get() / 1.25).max(ARRANGE_ZOOM_MIN));
+            });
+        let zoom_in_state = self.arrange_zoom.clone();
+        let zoom_in = ButtonView::new("+")
+            .action_id("arrange.zoom_in")
+            .secondary()
+            .on_press(move |_| {
+                zoom_in_state.set((zoom_in_state.get() * 1.25).min(ARRANGE_ZOOM_MAX));
+            });
+        let fit_zoom_state = self.arrange_zoom.clone();
+        let fit_scroll_state = self.arrange_scroll_beats.clone();
+        let zoom_fit = ButtonView::new("FIT")
+            .action_id("arrange.zoom_fit")
+            .secondary()
+            .on_press(move |_| {
+                fit_zoom_state.set(1.0);
+                fit_scroll_state.set(0.0);
+            });
+        let arrange_toolbar = View::Card(vec![View::HStack(vec![
+            View::Text("ARRANGEMENT".to_owned()),
+            zoom_out.into(),
+            zoom_in.into(),
+            zoom_fit.into(),
+            View::Caption(format!("ZOOM {}%", (zoom * 100.0).round() as u32)),
+            View::Caption("drag ruler to pan · drag lanes to seek".to_owned()),
+        ])]);
+
         // The canvas draws geometry only (no text); the list below keeps
         // the lane names the Slint header shows, with clip counts.
         let track_list = View::ScrollView {
@@ -447,6 +515,7 @@ impl App for HirariAmeApp {
         View::VStack(vec![
             transport,
             meter,
+            arrange_toolbar,
             View::canvas("waveform").grow(1),
             View::canvas("arrange").grow(3),
             track_list,
