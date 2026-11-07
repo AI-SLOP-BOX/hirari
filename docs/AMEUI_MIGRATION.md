@@ -58,8 +58,11 @@ Not yet (suggested order):
 1. **Zoom/scroll** — Slint scrolls at 20 px/beat with zoom buttons and FIT
    (`hirari-ui/ui/arrange_dock.slint`). `arrange_canvas_geometry` is
    fit-to-width today; add a zoom + horizontal scroll offset to the
-   geometry and a wheel/drag-pan path. The adaptive grid step already
-   matches Slint's.
+   geometry. The adaptive grid step already matches Slint's. API gap:
+   AmeUI's `AmeEvent::Scroll` is window-global (no canvas/position), so
+   wheel-zoom over the canvas is not available; use toolbar zoom buttons
+   (the existing `ButtonView` pattern) and ruler-drag panning — keep lane
+   drags for seek (slice 4) so the two gestures do not collide.
 2. **Clip selection and drag/trim** — Slint `clip-selected`,
    `clip-move-commit`, `clip-trim-commit` with snap division. Route
    through the existing engine commands used by the Slint callbacks
