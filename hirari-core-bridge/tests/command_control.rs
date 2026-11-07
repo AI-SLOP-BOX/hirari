@@ -21,7 +21,8 @@ fn last_command_error(engine: &hirari_core_bridge::AudioEngine) -> u8 {
 /// The layout fingerprint the Rust admission stamps a command with: the gather
 /// runs on the engine's own address, the key its session bag is filed under.
 fn project_generation(engine: &hirari_core_bridge::AudioEngine) -> u64 {
-    let host = engine.get_core() as *const hirari_core_bridge::HirariUnifiedEngine as *mut std::ffi::c_void;
+    let host = engine.get_core() as *const hirari_core_bridge::HirariUnifiedEngine
+        as *mut std::ffi::c_void;
     // SAFETY: the engine outlives the call and only its own bag is read.
     unsafe { hirari_core_bridge::layout_gather::hirari_project_generation(host) }
 }

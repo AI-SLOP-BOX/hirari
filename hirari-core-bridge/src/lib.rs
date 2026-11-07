@@ -26,7 +26,6 @@ pub mod ara2_protocol;
 pub mod bridge_error;
 pub mod command_api;
 pub mod command_executor;
-pub mod custom_ui;
 pub mod generation_gate;
 pub mod job_system;
 pub mod production_events;
@@ -45,9 +44,11 @@ use engine_edit_ext::TrackEditExt;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 include!("module_exports_tail.rs");
-pub use engine_native::{get_unified_engine, new_audio_engine, new_audio_engine_offline, push_command};
-pub use engine_native::{AudioEngine, HirariUnifiedEngine};
 use crate::summing::{SummingConfig, SummingOrchestrator};
+pub use engine_native::{
+    get_unified_engine, new_audio_engine, new_audio_engine_offline, push_command,
+};
+pub use engine_native::{AudioEngine, HirariUnifiedEngine};
 use persistence::*;
 use project::ProjectDocument;
 
@@ -109,9 +110,6 @@ pub mod ffi {
     }
 
     extern "Rust" {
-
-
-
 
         type AudioEngine;
 
@@ -187,16 +185,8 @@ pub mod ffi {
         fn midi_clock_rate(self: &HirariUnifiedEngine) -> f64;
         fn set_midi_clock_rate(self: &HirariUnifiedEngine, bpm: f64);
         fn execute_auto_arrangement(self: &HirariUnifiedEngine) -> bool;
-        fn set_project_scale(
-            self: &HirariUnifiedEngine,
-            root: i32,
-            scale_type: i32,
-        ) -> bool;
-        fn set_articulation_map(
-            self: &HirariUnifiedEngine,
-            tid: u32,
-            map_hash: u32,
-        ) -> bool;
+        fn set_project_scale(self: &HirariUnifiedEngine, root: i32, scale_type: i32) -> bool;
+        fn set_articulation_map(self: &HirariUnifiedEngine, tid: u32, map_hash: u32) -> bool;
         // Rust analysis reads (engine_analysis_reads.rs) sample telemetry and
         // meter straight from these Rust-owned stores.
         fn engine_block_state(self: &HirariUnifiedEngine) -> usize;
