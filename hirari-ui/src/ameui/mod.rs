@@ -13,9 +13,9 @@
 //! waveform peaks from the async decode queue; slice 10 adds the snap
 //! division picker; slice 11 adds the edit lock; slice 12 turns the
 //! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
-//! project open/save/new; slice 14 adds loop/metronome toggles. Audio
-//! playback is real; the Slint UI remains the default entry until the
-//! port reaches parity.
+//! project open/save/new; slice 14 adds loop/metronome toggles; slice 15
+//! adds the read-only piano roll. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -41,9 +41,9 @@ use vello::wgpu;
 
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
-    last_clip_end, parse_arrange_tracks, parse_markers, trim_edge_at, valid_time_signatures,
-    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, MeasureStart, TrimEdge, ARRANGE_ZOOM_MAX,
-    ARRANGE_ZOOM_MIN,
+    last_clip_end, parse_arrange_tracks, parse_markers, parse_midi_notes, piano_roll_geometry,
+    trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack,
+    MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -93,11 +93,16 @@ pub struct HirariAmeApp {
     /// Decoded peak vectors per clip, keyed by `(track_id, clip_id)`.
     /// Filled asynchronously; see `poll_waveforms`.
     clip_peaks: State<HashMap<(u32, i32), Vec<f32>>>,
+    /// Piano roll track (0 = unset; defaults to the first track with
+    /// notes) and its parsed notes.
+    piano_track: State<u32>,
+    piano_notes: State<Vec<PianoNote>>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
     /// Last drawn arrange layout, used to map pointer x back to a beat.
     arrange_geometry: ArrangeCanvasGeometry,
+    piano_geometry: PianoRollGeometry,
     seeking: bool,
     panning: bool,
     pan_last_x: f64,
@@ -154,10 +159,13 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         arrange_locked: context.state(false),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
+        piano_track: context.state(0u32),
+        piano_notes: context.state(Vec::<PianoNote>::new()),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
         arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0),
+        piano_geometry: piano_roll_geometry(0.0, 0.0, 128.0, &[]),
         seeking: false,
         panning: false,
         pan_last_x: 0.0,
@@ -318,6 +326,17 @@ impl HirariAmeApp {
             timeline_end,
         ));
         self.timeline_end_beats.set(timeline_end);
+        let notes = parse_midi_notes(&core.midi_notes_json(), |samples| {
+            core.samples_to_beats(samples)
+        });
+        if self.piano_track.get() == 0 {
+            let default = notes
+                .first()
+                .map(|note| note.track_id)
+                .unwrap_or_else(|| tracks.first().map(|track| track.id).unwrap_or(0));
+            self.piano_track.set(default);
+        }
+        self.piano_notes.set(notes);
         self.tracks.set(tracks);
     }
 
@@ -469,6 +488,90 @@ impl HirariAmeApp {
             .min(self.timeline_end_beats.get());
         core.set_playhead(core.beats_to_samples(f64::from(beat)));
         true
+    }
+
+    /// Draws the selected track's notes fit-to-width, with beat grid and
+    /// playhead. Read-only for now (no add/move/resize yet); note
+    /// geometry comes from `piano_roll_geometry`.
+    /// Scene coordinates are absolute window pixels, offset by `bounds`.
+    fn draw_piano(&mut self, scene: &mut vello::Scene, bounds: CanvasBounds) {
+        let x0 = f64::from(bounds.x);
+        let y0 = f64::from(bounds.y);
+        let width = f64::from(bounds.width);
+        let height = f64::from(bounds.height);
+        if width <= 0.0 || height <= 0.0 {
+            return;
+        }
+        let track_id = self.piano_track.get();
+        let notes = self.piano_notes.get();
+        let visible: Vec<PianoNote> = notes
+            .iter()
+            .filter(|note| note.track_id == track_id)
+            .copied()
+            .collect();
+        let timeline_end = self.timeline_end_beats.get();
+        let geometry = piano_roll_geometry(bounds.width, bounds.height, timeline_end, &visible);
+        self.piano_geometry = geometry;
+        let grid = Stroke::new(1.0);
+        let x_for_beat = |beat: f32| x0 + f64::from(geometry.x_for_beat(beat));
+
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(15, 17, 19),
+            None,
+            &Rect::new(x0, y0, x0 + width, y0 + height),
+        );
+        let step = arrange_canvas_geometry(bounds.width, bounds.height, timeline_end, 1, 1.0, 0.0)
+            .beat_step;
+        let steps = (f64::from(timeline_end) / f64::from(step)).ceil() as u32;
+        for index in 0..=steps {
+            let x = x_for_beat(index as f32 * step);
+            scene.stroke(
+                &grid,
+                Affine::IDENTITY,
+                Color::from_rgba8(120, 128, 140, 40),
+                None,
+                &Line::new((x, y0), (x, y0 + height)),
+            );
+        }
+        for pitch in geometry.bottom_pitch..=geometry.top_pitch {
+            let y = y0 + f64::from(geometry.y_for_pitch(pitch));
+            let stronger = pitch % 12 == 0;
+            scene.stroke(
+                &grid,
+                Affine::IDENTITY,
+                Color::from_rgba8(120, 128, 140, if stronger { 90 } else { 35 }),
+                None,
+                &Line::new((x0, y), (x0 + width, y)),
+            );
+        }
+        for note in &visible {
+            let x = x_for_beat(note.start_beat);
+            let note_width =
+                (f64::from(note.length_beats) * f64::from(geometry.px_per_beat)).max(2.0);
+            let y = y0 + f64::from(geometry.y_for_pitch(note.pitch));
+            let row_height = f64::from(geometry.px_per_pitch);
+            let alpha = 90.0 + f64::from(note.velocity) * 80.0 / 127.0;
+            scene.fill(
+                Fill::NonZero,
+                Affine::IDENTITY,
+                Color::from_rgba8(139, 124, 255, alpha as u8),
+                None,
+                &RoundedRect::new(x, y + 1.0, x + note_width, y + row_height - 1.0, 2.0),
+            );
+        }
+        let playhead = self.playhead_beats.get();
+        if (0.0..=f64::from(timeline_end)).contains(&playhead) {
+            let x = x_for_beat(playhead as f32);
+            scene.stroke(
+                &Stroke::new(2.0),
+                Affine::IDENTITY,
+                Color::from_rgb8(48, 209, 88),
+                None,
+                &Line::new((x, y0), (x, y0 + height)),
+            );
+        }
     }
 
     /// Draws the arrangement (ruler, lanes, clips, markers, playhead) as
@@ -1227,6 +1330,24 @@ impl App for HirariAmeApp {
             )],
         };
 
+        // Piano roll (read-only for now): track picker + note canvas.
+        let piano_track = self.piano_track.get();
+        let mut piano_buttons: Vec<View> = vec![View::Text("PIANO ROLL".to_owned())];
+        for track in &tracks {
+            let selector_track = self.piano_track.clone();
+            let track_id = track.id;
+            let button = ButtonView::new(format!("T{}", track.id))
+                .action_id(format!("piano.track.{}", track.id))
+                .on_press(move |_| selector_track.set(track_id));
+            let button = if track_id == piano_track {
+                button.primary()
+            } else {
+                button.secondary()
+            };
+            piano_buttons.push(button.into());
+        }
+        let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
+
         View::VStack(vec![
             project_bar,
             transport,
@@ -1234,6 +1355,8 @@ impl App for HirariAmeApp {
             arrange_toolbar,
             View::canvas("waveform").grow(1),
             View::canvas("arrange").grow(3),
+            piano_selector,
+            View::canvas("piano").grow(2),
             track_list,
         ])
     }
@@ -1249,6 +1372,10 @@ impl App for HirariAmeApp {
     ) {
         if canvas_id == "arrange" {
             self.draw_arrange(scene, bounds);
+            return;
+        }
+        if canvas_id == "piano" {
+            self.draw_piano(scene, bounds);
             return;
         }
         if canvas_id != "waveform" {

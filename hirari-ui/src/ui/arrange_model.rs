@@ -571,6 +571,145 @@ pub fn trim_edge_at(
     }
 }
 
+/// One MIDI note reduced to what the piano roll draws. Metadata beyond
+/// pitch/velocity/position (lyric, articulation, vibrato) stays in the
+/// engine; per-note edits go through `set_midi_note`, which preserves it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PianoNote {
+    pub track_id: u32,
+    pub pitch: u8,
+    pub velocity: u8,
+    pub start_beat: f32,
+    pub length_beats: f32,
+}
+
+/// Parses the engine's canonical `midi_notes_json` into drawable notes,
+/// sanitized like the Slint piano roll (`sanitize_notes`): pitches and
+/// velocities clamped, lengths floored, sorted by track/start/pitch.
+/// Malformed input yields no notes.
+pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64) -> Vec<PianoNote> {
+    #[derive(Deserialize)]
+    struct NoteLayout {
+        track_id: u32,
+        pitch: u8,
+        velocity: u8,
+        start_sample: u64,
+        length_samples: u64,
+    }
+    let Ok(layouts) = serde_json::from_str::<Vec<NoteLayout>>(notes_json) else {
+        return Vec::new();
+    };
+    let mut notes = layouts
+        .into_iter()
+        .filter_map(|layout| {
+            let start_beat = samples_to_beats(layout.start_sample);
+            let end_beat =
+                samples_to_beats(layout.start_sample.saturating_add(layout.length_samples));
+            if !start_beat.is_finite() || !end_beat.is_finite() {
+                return None;
+            }
+            Some(PianoNote {
+                track_id: layout.track_id,
+                pitch: layout.pitch.min(127),
+                velocity: layout.velocity.clamp(1, 127),
+                start_beat: start_beat.max(0.0) as f32,
+                length_beats: ((end_beat - start_beat).max(0.015625)) as f32,
+            })
+        })
+        .collect::<Vec<_>>();
+    notes.sort_by(|a, b| {
+        a.track_id
+            .cmp(&b.track_id)
+            .then_with(|| a.start_beat.total_cmp(&b.start_beat))
+            .then_with(|| a.pitch.cmp(&b.pitch))
+    });
+    notes
+}
+
+/// Pixel layout of one piano-roll canvas, fit-to-width like the arrange
+/// canvas. The pitch window fits the visible notes (expanded by two
+/// semitones, clamped to 0..127); an empty roll shows a default octave.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PianoRollGeometry {
+    pub px_per_beat: f32,
+    pub px_per_pitch: f32,
+    pub top_pitch: u8,
+    pub bottom_pitch: u8,
+}
+
+impl PianoRollGeometry {
+    pub fn x_for_beat(&self, beat: f32) -> f32 {
+        beat.max(0.0) * self.px_per_beat
+    }
+
+    pub fn y_for_pitch(&self, pitch: u8) -> f32 {
+        (self.top_pitch.saturating_sub(pitch) as f32) * self.px_per_pitch
+    }
+
+    /// Beat at a canvas x (inverse of [`Self::x_for_beat`]).
+    pub fn beat_at_x(&self, x: f32) -> f32 {
+        if self.px_per_beat > 0.0 && x.is_finite() {
+            (x / self.px_per_beat).max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Pitch at a canvas y (inverse of [`Self::y_for_pitch`]), clamped to
+    /// the visible window.
+    pub fn pitch_at_y(&self, y: f32) -> u8 {
+        if self.px_per_pitch <= 0.0 || !y.is_finite() {
+            return self.top_pitch;
+        }
+        let row = (y / self.px_per_pitch).floor() as i32;
+        (i32::from(self.top_pitch) - row)
+            .clamp(i32::from(self.bottom_pitch), i32::from(self.top_pitch)) as u8
+    }
+}
+
+pub fn piano_roll_geometry(
+    width: f32,
+    height: f32,
+    timeline_end_beats: f32,
+    notes: &[PianoNote],
+) -> PianoRollGeometry {
+    let width = if width.is_finite() {
+        width.max(0.0)
+    } else {
+        0.0
+    };
+    let height = if height.is_finite() {
+        height.max(0.0)
+    } else {
+        0.0
+    };
+    let timeline_end = if timeline_end_beats.is_finite() {
+        timeline_end_beats.max(1.0)
+    } else {
+        1.0
+    };
+    let (top_pitch, bottom_pitch) = match (
+        notes.iter().map(|note| note.pitch).min(),
+        notes.iter().map(|note| note.pitch).max(),
+    ) {
+        (Some(low), Some(high)) => {
+            let top = high.saturating_add(2).min(127);
+            let bottom = low.saturating_sub(2);
+            // Always show at least an octave so a lone note has context.
+            let bottom = bottom.min(top.saturating_sub(12));
+            (top, bottom)
+        }
+        _ => (72, 60),
+    };
+    let rows = (top_pitch - bottom_pitch + 1).max(1) as f32;
+    PianoRollGeometry {
+        px_per_beat: width / timeline_end,
+        px_per_pitch: height / rows,
+        top_pitch,
+        bottom_pitch,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -865,6 +1004,58 @@ mod tests {
             ..clip
         };
         assert_eq!(trim_edge_at(&geometry, &narrow, 2.0), None);
+    }
+
+    #[test]
+    fn parses_midi_notes_sorted_and_sanitized() {
+        let json = r#"[
+            {"track_id":1,"pitch":72,"velocity":100,"start_sample":960,"length_samples":240},
+            {"track_id":1,"pitch":60,"velocity":0,"start_sample":0,"length_samples":0},
+            {"track_id":0,"pitch":200,"velocity":100,"start_sample":0,"length_samples":480}]"#;
+        // 480 samples == 1 beat in this fixture's conversion.
+        let notes = parse_midi_notes(json, |samples| samples as f64 / 480.0);
+        assert_eq!(notes.len(), 3);
+        // Sorted by track, then start: track 0 first.
+        assert_eq!(notes[0].track_id, 0);
+        assert_eq!(notes[0].pitch, 127);
+        assert_eq!(notes[1].velocity, 1);
+        assert_eq!(notes[1].length_beats, 0.015625);
+        assert_eq!(notes[2].start_beat, 2.0);
+        assert!(parse_midi_notes("nope", |_| 0.0).is_empty());
+    }
+
+    #[test]
+    fn piano_geometry_fits_notes_and_inverts() {
+        let notes = vec![
+            PianoNote {
+                track_id: 0,
+                pitch: 60,
+                velocity: 100,
+                start_beat: 0.0,
+                length_beats: 1.0,
+            },
+            PianoNote {
+                track_id: 0,
+                pitch: 72,
+                velocity: 90,
+                start_beat: 4.0,
+                length_beats: 2.0,
+            },
+        ];
+        // 640px / 128 beats = 5 px/beat; pitches 58..74 = 17 rows.
+        let geometry = piano_roll_geometry(640.0, 170.0, 128.0, &notes);
+        assert_eq!(geometry.px_per_beat, 5.0);
+        assert_eq!(geometry.top_pitch, 74);
+        assert_eq!(geometry.bottom_pitch, 58);
+        assert_eq!(geometry.px_per_pitch, 10.0);
+        assert_eq!(geometry.x_for_beat(4.0), 20.0);
+        assert_eq!(geometry.beat_at_x(20.0), 4.0);
+        assert_eq!(geometry.y_for_pitch(74), 0.0);
+        assert_eq!(geometry.pitch_at_y(0.0), 74);
+        assert_eq!(geometry.pitch_at_y(165.0), 58);
+        // Empty roll shows the default window.
+        let empty = piano_roll_geometry(640.0, 130.0, 128.0, &[]);
+        assert_eq!((empty.top_pitch, empty.bottom_pitch), (72, 60));
     }
 
     #[test]

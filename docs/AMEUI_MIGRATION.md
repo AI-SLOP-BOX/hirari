@@ -56,7 +56,8 @@ Notes:
 | 11 | `d1ab781` | Edit lock: toolbar LOCK toggles Slint `is_locked` for the arrange surface — while on, clip drags select only (seek/pan unaffected). |
 | 12 | `d605673` | Mixer strips: the track list becomes per-track fader/pan sliders plus mute/solo/arm toggles, wired to the same engine setters as the Slint mixer. `ArrangeTrack` now carries the mixer state. |
 | 13 | `3d5b596` | Project bar: Open/Save/New via `rfd` dialogs and `load_project`/`save_project`/`new_project`, with path memory and selection reset on project change. |
-| 14 | (this work) | Transport extras: Loop and metronome toggle buttons, polled from `is_loop_enabled`/`is_metronome_enabled`. Adds the missing `HirariCore` metronome forwarders in the bridge. |
+| 14 | `1f50643` | Transport extras: Loop and metronome toggle buttons, polled from `is_loop_enabled`/`is_metronome_enabled`. Adds the missing `HirariCore` metronome forwarders in the bridge. |
+| 15 | (this work) | Piano roll (read-only): neutral `parse_midi_notes` + `piano_roll_geometry`, track picker, note canvas with beat grid, velocity-shaded notes and playhead. Editing gestures are next. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -86,10 +87,11 @@ Not yet (suggested order):
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
 
-## Next surface: piano roll
+## Next surface: piano roll (editing)
 
 The arrange dock + mixer + project + transport are at parity (text
-excepted). The next-largest surface is the piano roll. Entry points:
+excepted), and the piano roll is read-only since slice 15. Remaining for
+the roll: add/move/resize/delete gestures. Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see
   `hirari-core-bridge/src/runtime/hirari_core_arrangement_midi_editing.rs`)
