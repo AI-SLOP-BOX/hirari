@@ -3,6 +3,9 @@ pub mod orchestrator;
 pub mod slint_ui;
 pub mod ui;
 
+#[cfg(feature = "ameui")]
+pub mod ameui;
+
 fn configure_plugin_worker() -> bool {
     let mut candidates = Vec::new();
     if let Ok(executable) = std::env::current_exe() {
@@ -144,6 +147,13 @@ fn main() {
         }
         return;
     }
-    eprintln!("HIRARI | TRANSITIONING TO SLINT UI...");
-    slint_ui::run();
+    #[cfg(feature = "ameui")]
+    {
+        ameui::run();
+    }
+    #[cfg(not(feature = "ameui"))]
+    {
+        eprintln!("HIRARI | TRANSITIONING TO SLINT UI...");
+        slint_ui::run();
+    }
 }

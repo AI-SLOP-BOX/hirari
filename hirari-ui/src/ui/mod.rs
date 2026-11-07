@@ -20,6 +20,8 @@ pub mod midi_input;
 pub mod misc;
 pub mod mixer;
 pub mod operation_gate;
+#[cfg(any(feature = "slint-wgpu", feature = "ameui"))]
+pub mod plot_raster;
 pub mod plugin;
 pub mod plugin_commands;
 pub mod plugin_polling;

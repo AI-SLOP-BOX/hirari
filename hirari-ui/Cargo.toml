@@ -30,6 +30,11 @@ rand = { version = "0.8.6", default-features = false, features = ["std", "std_rn
 
 [features]
 default = ["slint-wgpu"]
+# AmeUI migration target. Off by default: the Slint surface stays the shipped
+# UI until the AmeUI port reaches parity, at which point this becomes the only
+# entry and the Slint stack is deleted. The feature is migration scaffolding,
+# not a permanent compatibility switch.
+ameui = ["dep:ame-ui", "dep:vello"]
 # `slint/unstable-wgpu-29` is the requirement half: the UI selects the WGPU 29
 # backend at startup and feeds its plot imagery through the Slint WGPU
 # rendering notifier. `slint/renderer-femtovg-wgpu` is the capability half: a
@@ -60,6 +65,14 @@ optional = true
 
 [dependencies.egui-wgpu]
 version = "0.36.2"
+optional = true
+
+[dependencies.ame-ui]
+workspace = true
+optional = true
+
+[dependencies.vello]
+workspace = true
 optional = true
 
 [build-dependencies]
