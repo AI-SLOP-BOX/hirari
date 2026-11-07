@@ -50,6 +50,17 @@ impl HirariCore {
             .is_some_and(|engine| engine.is_loop_enabled())
     }
 
+    pub fn is_metronome_enabled(&self) -> bool {
+        self.engine_opt()
+            .is_some_and(|engine| engine.is_metronome_enabled())
+    }
+
+    pub fn set_metronome_enabled(&self, enabled: bool) {
+        if let Some(e) = self.engine_opt() {
+            e.set_metronome_enabled(enabled);
+        }
+    }
+
     pub fn cycle_start_sample(&self) -> u64 {
         self.engine_opt()
             .map_or(0, |engine| engine.cycle_start())

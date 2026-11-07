@@ -13,8 +13,9 @@
 //! waveform peaks from the async decode queue; slice 10 adds the snap
 //! division picker; slice 11 adds the edit lock; slice 12 turns the
 //! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
-//! project open/save/new. Audio playback is real; the Slint UI remains
-//! the default entry until the port reaches parity.
+//! project open/save/new; slice 14 adds loop/metronome toggles. Audio
+//! playback is real; the Slint UI remains the default entry until the
+//! port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -69,6 +70,8 @@ pub struct HirariAmeApp {
     core: Option<Rc<HirariCore>>,
     plots: PlotFrameStore,
     playing: State<bool>,
+    loop_enabled: State<bool>,
+    metronome_enabled: State<bool>,
     tempo: State<f32>,
     playhead_beats: State<f64>,
     sample_rate: State<f64>,
@@ -135,6 +138,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         core,
         plots: PlotFrameStore::default(),
         playing: context.state(false),
+        loop_enabled: context.state(false),
+        metronome_enabled: context.state(false),
         tempo: context.state(120.0f32),
         playhead_beats: context.state(0.0f64),
         sample_rate: context.state(0.0f64),
@@ -190,6 +195,8 @@ impl HirariAmeApp {
             return;
         };
         self.playing.set(core.is_playing());
+        self.loop_enabled.set(core.is_loop_enabled());
+        self.metronome_enabled.set(core.is_metronome_enabled());
         self.tempo.set(core.get_tempo());
         self.sample_rate.set(core.get_sample_rate());
         self.playhead_beats
@@ -1032,9 +1039,36 @@ impl App for HirariAmeApp {
                 tempo_state.set(value);
             });
 
+        let loop_core = self.core.clone();
+        let loop_state = self.loop_enabled.clone();
+        let loop_on = self.loop_enabled.get();
+        let loop_button = ButtonView::new(if loop_on { "Loop On" } else { "Loop" })
+            .action_id("transport.loop")
+            .secondary()
+            .on_press(move |_| {
+                if let Some(core) = &loop_core {
+                    core.set_loop(!loop_on);
+                }
+                loop_state.set(!loop_on);
+            });
+        let metro_core = self.core.clone();
+        let metro_state = self.metronome_enabled.clone();
+        let metro_on = self.metronome_enabled.get();
+        let metro_button = ButtonView::new(if metro_on { "Click On" } else { "Click" })
+            .action_id("transport.metronome")
+            .secondary()
+            .on_press(move |_| {
+                if let Some(core) = &metro_core {
+                    core.set_metronome_enabled(!metro_on);
+                }
+                metro_state.set(!metro_on);
+            });
+
         let transport = View::Card(vec![View::HStack(vec![
             play_button.into(),
             stop_button.into(),
+            loop_button.into(),
+            metro_button.into(),
             View::Text(format!("{beats:.2} beats")).font_size(18),
             View::Spacer,
             View::Text(format!("{tempo:.1} BPM")),

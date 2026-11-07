@@ -55,7 +55,8 @@ Notes:
 | 10 | `f3eb1c5` | Snap division picker: toolbar button cycles 1/1–1/32 (step = 4/division) for move/trim drags, replacing the hardcoded 1/16. |
 | 11 | `d1ab781` | Edit lock: toolbar LOCK toggles Slint `is_locked` for the arrange surface — while on, clip drags select only (seek/pan unaffected). |
 | 12 | `d605673` | Mixer strips: the track list becomes per-track fader/pan sliders plus mute/solo/arm toggles, wired to the same engine setters as the Slint mixer. `ArrangeTrack` now carries the mixer state. |
-| 13 | (this work) | Project bar: Open/Save/New via `rfd` dialogs and `load_project`/`save_project`/`new_project`, with path memory and selection reset on project change. |
+| 13 | `3d5b596` | Project bar: Open/Save/New via `rfd` dialogs and `load_project`/`save_project`/`new_project`, with path memory and selection reset on project change. |
+| 14 | (this work) | Transport extras: Loop and metronome toggle buttons, polled from `is_loop_enabled`/`is_metronome_enabled`. Adds the missing `HirariCore` metronome forwarders in the bridge. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -63,7 +64,7 @@ Done: transport, master meter, waveform, track names/kinds/clip counts,
 lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
 ruler-drag panning, click clip selection, clip drag-move, edge-drag trim,
 clip waveform peaks, mixer strips (fader/pan/mute/solo/arm), edit lock,
-project open/save/new.
+project open/save/new, loop/metronome toggles.
 
 Not yet (suggested order):
 
