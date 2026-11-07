@@ -22,22 +22,38 @@ pub use command_host::engine_last_command_error;
 pub use plugin_sandbox_maintenance::sandbox_statuses_packed;
 pub use runtime_views::runtime_health_vector;
 pub use waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
+#[path = "plugins/ara2_protocol.rs"]
 pub mod ara2_protocol;
+#[path = "support/bridge_error.rs"]
 pub mod bridge_error;
+#[path = "commands/command_api.rs"]
 pub mod command_api;
+#[path = "commands/command_executor.rs"]
 pub mod command_executor;
+#[path = "engine/generation_gate.rs"]
 pub mod generation_gate;
+#[path = "engine/job_system.rs"]
 pub mod job_system;
+#[path = "session/production_events.rs"]
 pub mod production_events;
+#[path = "session/production_session.rs"]
 pub mod production_session;
+#[path = "session/production_timeline.rs"]
 pub mod production_timeline;
+#[path = "regions/regions.rs"]
 pub mod regions;
+#[path = "regions/vari_audio.rs"]
 pub mod vari_audio;
 
+#[path = "routing/spatial_orchestrator.rs"]
 pub mod spatial_orchestrator;
+#[path = "ui_bridge/stable_api.rs"]
 pub mod stable_api;
+#[path = "ui_bridge/vfx_bindings.rs"]
 pub mod vfx_bindings;
+#[path = "ui_bridge/vfx_timeline_bridge.rs"]
 pub mod vfx_timeline_bridge;
+#[path = "analysis/vocal_quality.rs"]
 pub mod vocal_quality;
 use anyhow::Context;
 use engine_edit_ext::TrackEditExt;
@@ -537,4 +553,4 @@ pub use native_project::{
 pub use project_plugin_hydration::native_project_hydrate_plugins;
 pub use region_hydration::native_project_hydrate_regions;
 
-include!("lib_runtime.rs");
+include!("runtime/lib_runtime.rs");

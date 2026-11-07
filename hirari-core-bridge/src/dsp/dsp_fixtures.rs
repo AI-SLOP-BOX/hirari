@@ -11,7 +11,7 @@ pub(crate) struct FixtureReader<'a> {
 
 impl<'a> FixtureReader<'a> {
     pub(crate) fn open() -> Self {
-        let bytes = include_bytes!("../../tests/fixtures/cpp_dsp_reference.bin");
+        let bytes = include_bytes!("../../../tests/fixtures/cpp_dsp_reference.bin");
         assert_eq!(&bytes[..8], b"HIRAREF1", "fixture magic");
         Self { data: &bytes[8..] }
     }

@@ -37,7 +37,7 @@ fn main() {
 
     // The plugin sandbox host lives in its own cxx bridge so its generated
     // header is self-contained.
-    let mut sandbox_build = cxx_build::bridge("src/plugin_sandbox_host.rs");
+    let mut sandbox_build = cxx_build::bridge("src/plugins/plugin_sandbox_host.rs");
     sandbox_build
         .flag_if_supported("-std=c++20")
         .flag_if_supported("-fobjc-arc")
@@ -61,9 +61,9 @@ fn main() {
     build.compile("hirari-core-bridge");
 
     println!("cargo:rerun-if-changed=src/lib.rs");
-    println!("cargo:rerun-if-changed=src/plugin_sandbox_host.rs");
-    println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_audio_driver.rs");
-    println!("cargo:rerun-if-changed=hirari-core-bridge/src/mac_midi_host.rs");
+    println!("cargo:rerun-if-changed=src/plugins/plugin_sandbox_host.rs");
+    println!("cargo:rerun-if-changed=hirari-core-bridge/src/audio_io/mac_audio_driver.rs");
+    println!("cargo:rerun-if-changed=hirari-core-bridge/src/audio_io/mac_midi_host.rs");
 
     if target_os == "macos" {
         println!("cargo:rustc-link-lib=framework=Foundation");

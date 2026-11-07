@@ -1,4 +1,4 @@
-use super::audio_note_curve::{hirari_audio_note_curve_integral_at, HirariAudioNoteCurveView};
+use crate::audio_note_curve::{hirari_audio_note_curve_integral_at, HirariAudioNoteCurveView};
 use std::slice;
 
 /// Computes the bounded delay window from the pitch reference used by Track.

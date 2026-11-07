@@ -6,11 +6,11 @@ set -euo pipefail
 # the engine's block walk must be reviewed explicitly instead of silently
 # entering the RT path through a refactor.
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-chain_host_file="$root_dir/hirari-core-bridge/src/effect_chain_host.rs"
+chain_host_file="$root_dir/hirari-core-bridge/src/engine/effect_chain_host.rs"
 
 # The engine facade is one Rust module now (`engine_native.rs`); the old
 # *.inc C++ parts are gone.
-engine_parts=("$root_dir/hirari-core-bridge/src/engine_native.rs")
+engine_parts=("$root_dir/hirari-core-bridge/src/engine/engine_native.rs")
 
 if [ ! -f "${engine_parts[0]}" ]; then
     echo "realtime boundary check error: no unified engine sources found" >&2
@@ -109,7 +109,7 @@ assert_clean_body "$chain_process_body" "hirari_effect_chain_process (Rust)" "$r
 # The CoreAudio device callback is owned by Rust. Printing, formatting,
 # allocating, or locking there blocks the audio thread exactly like the
 # violations this script exists to catch.
-rust_driver="$root_dir/hirari-core-bridge/src/mac_audio_driver.rs"
+rust_driver="$root_dir/hirari-core-bridge/src/audio_io/mac_audio_driver.rs"
 rust_callback_body="$(extract_function 'fn audio_unit_render_callback(' "$rust_driver")"
 assert_clean_body "$rust_callback_body" "audio_unit_render_callback (Rust)" "$rust_forbidden"
 

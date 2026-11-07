@@ -1,8 +1,8 @@
-use super::audio_note_curve::{
+use crate::audio_note_curve::{
     hirari_audio_note_curve_at, hirari_audio_note_find_segment_ranges, HirariAudioNoteCurveView,
     HirariAudioNoteSegmentRange,
 };
-use super::region_warp::{hirari_region_source_position_at, HirariWarpMarker};
+use crate::region_warp::{hirari_region_source_position_at, HirariWarpMarker};
 use std::slice;
 
 const MAX_CORRELATION_POINTS: usize = 32;
