@@ -49,13 +49,14 @@ Notes:
 | 4 | `618da46` | Click/drag on the arrange canvas seeks the playhead (`beat_for_x` + `beats_to_samples`/`set_playhead`; seek only, playback untouched). |
 | 5 | `2181009` | Zoom (toolbar −/+/FIT, ×/÷1.25, 1–8×) and ruler-drag panning. `arrange_canvas_geometry` now takes zoom + scroll and clamps both. Wheel-zoom is still unavailable (see API gap below). |
 | 6 | `f06a387` | Click clip selection: a click (≤4px) selects via `clip_at`, a drag seeks. Selected clip draws brighter with a 2px border, matching Slint. Empty-lane clicks seek on release. |
-| 7 | (this work) | Clip drag-move: drag a (non-MIDI) clip to move it with a live preview, commit on release through the engine undo transaction (`move_region` / `move_region_sync_group`, 0.25-beat snap). `ArrangeClip` now carries `sync_group`. Trim is still to come. |
+| 7 | `ff7e2d6` | Clip drag-move: drag a (non-MIDI) clip to move it with a live preview, commit on release through the engine undo transaction (`move_region` / `move_region_sync_group`, 0.25-beat snap). `ArrangeClip` now carries `sync_group`. |
+| 8 | (this work) | Clip edge-drag trim: Audio/Vocal clip edges trim with live preview, commit on release (`set_region_trim`, fraction-clamped like the Slint dock). `ArrangeClip` now carries the trim window. Edge zones come from `trim_edge_at`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
 Done: transport, master meter, waveform, track names/kinds/clip counts,
 lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
-ruler-drag panning, click clip selection, clip drag-move.
+ruler-drag panning, click clip selection, clip drag-move, edge-drag trim.
 
 Not yet (suggested order):
 
@@ -63,26 +64,20 @@ Not yet (suggested order):
    lane drags still seek). Remaining API gap: AmeUI's
    `AmeEvent::Scroll` is window-global (no canvas/position), so
    wheel-zoom over the canvas is still unavailable.
-2. **Clip trim** — move landed in slice 7 (live preview + undo
-   transaction in `commit_clip_move`, 0.25-beat snap, MIDI clips held).
-   Remaining: edge-drag trim (`clip-trim-commit` in the Slint dock,
-   trim callbacks in `hirari-ui/src/ui/editor.rs`). The neutral model
-   also lacks trim data (`trim_start`/`trim_end`, fade, gain) — extend
-   `parse_arrange_tracks` + tests first. Gesture note: empty-lane drags
-   seek, clip drags move, ruler drags pan; trim will need edge hit-zones
-   inside the clip rect (a few px from each edge) taking precedence over
-   move. A snap-division picker is also still open (slice 7 hardcodes
-   the Slint 1/16 default).
-3. **Waveform peaks on clips** — Slint draws 128 peak pairs per clip
+2. **Waveform peaks on clips** — Slint draws 128 peak pairs per clip
    (`clip_data.points`). Peak extraction is queued by Slint telemetry;
-   AmeUI needs the same queue or a read-only synchronous pass.
-4. **Text in the canvas** — lane headers and clip names. Needs a text
+   AmeUI needs the same queue or a read-only synchronous pass, windowed
+   by the `trim_start`/`trim_end` already in the neutral model (slice 8).
+   Still open from the trim area: a snap-division picker (slices 7–8
+   hardcode the Slint 1/16 default) and fade/gain editing, which Slint
+   does outside the arrange dock.
+3. **Text in the canvas** — lane headers and clip names. Needs a text
    path for host canvases (AmeUI widgets draw text internally; the host
    scene does not). Until then the track list below the canvas carries
    the names.
-5. **Slint deletion gate** — once 1–4 reach parity, flip the default
-   entry in `hirari-ui/src/main.rs`, delete the Slint stack, and drop
-   the `slint-wgpu` feature wiring.
+4. **Slint deletion gate** — once the above reach parity, flip the
+   default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
+   and drop the `slint-wgpu` feature wiring.
 
 ## Slint references worth re-reading
 

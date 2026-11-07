@@ -31,6 +31,10 @@ pub struct ArrangeClip {
     /// Sync group the clip moves with; 0 means it moves alone. Drives the
     /// `move_region_sync_group` engine call, as in the Slint move path.
     pub sync_group: u32,
+    /// Trim window as fractions of the source (0..1), as published by the
+    /// layout and consumed by `set_region_trim`. Full clip is 0..1.
+    pub trim_start: f32,
+    pub trim_end: f32,
 }
 
 /// One arrangement lane reduced to what the timeline draws.
@@ -246,6 +250,14 @@ struct RegionLayout {
     len: u64,
     #[serde(default)]
     sync_group: u32,
+    #[serde(default)]
+    source_offset: u64,
+    #[serde(default)]
+    base_source_offset: u64,
+    #[serde(default)]
+    base_length: u64,
+    #[serde(default)]
+    source_length: u64,
 }
 
 #[derive(Deserialize)]
@@ -286,6 +298,30 @@ pub fn parse_arrange_tracks(
                         length_beats: (end_beat - start_beat).max(0.0) as f32,
                         midi: false,
                         sync_group: region.sync_group,
+                        // Same trim-fraction formulas as the Slint track
+                        // sync, so both surfaces trim the same window.
+                        trim_start: if region.base_length == 0 {
+                            0.0
+                        } else {
+                            region
+                                .source_offset
+                                .saturating_sub(region.base_source_offset)
+                                as f32
+                                / region.base_length as f32
+                        },
+                        trim_end: if region.base_length == 0 {
+                            1.0
+                        } else {
+                            (region
+                                .source_offset
+                                .saturating_sub(region.base_source_offset)
+                                .saturating_add(if region.source_length == 0 {
+                                    region.len
+                                } else {
+                                    region.source_length
+                                })) as f32
+                                / region.base_length as f32
+                        },
                     }
                 })
                 .collect();
@@ -480,6 +516,35 @@ pub fn clip_at(
         .map(|clip| (track.id, clip.id))
 }
 
+/// Which clip edge a canvas x is on, for trim drags. The Slint dock puts
+/// an 8px handle on each edge; here the zones are 6px and only exist when
+/// the clip is wide enough to hold both without overlapping.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TrimEdge {
+    Left,
+    Right,
+}
+
+pub fn trim_edge_at(
+    geometry: &ArrangeCanvasGeometry,
+    clip: &ArrangeClip,
+    x: f32,
+) -> Option<TrimEdge> {
+    const EDGE_PX: f32 = 6.0;
+    let left = geometry.x_for_beat(clip.start_beat);
+    let width = clip.length_beats * geometry.px_per_beat;
+    if width <= EDGE_PX * 2.0 {
+        return None;
+    }
+    if (x - left).abs() <= EDGE_PX {
+        Some(TrimEdge::Left)
+    } else if (x - (left + width)).abs() <= EDGE_PX {
+        Some(TrimEdge::Right)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -583,6 +648,9 @@ mod tests {
         assert!(!tracks[0].clips[0].midi);
         assert_eq!(tracks[0].clips[0].sync_group, 3);
         assert_eq!(tracks[0].clips[1].sync_group, 0);
+        // No base_length published: full-clip trim window.
+        assert_eq!(tracks[0].clips[0].trim_start, 0.0);
+        assert_eq!(tracks[0].clips[0].trim_end, 1.0);
     }
 
     #[test]
@@ -693,6 +761,8 @@ mod tests {
                     length_beats: 4.0,
                     midi: false,
                     sync_group: 0,
+                    trim_start: 0.0,
+                    trim_end: 1.0,
                 },
                 ArrangeClip {
                     id: 2,
@@ -701,6 +771,8 @@ mod tests {
                     length_beats: 4.0,
                     midi: false,
                     sync_group: 0,
+                    trim_start: 0.0,
+                    trim_end: 1.0,
                 },
             ],
         }];
@@ -719,6 +791,42 @@ mod tests {
     }
 
     #[test]
+    fn parses_trim_window_from_layout() {
+        // Halfway through a 96000-sample source, showing 48000 of it.
+        let json = r#"[{"id":7,"name":"T","type":"Audio","regions":[
+            {"id":1,"name":"R","start":0,"len":48000,"source_offset":24000,
+             "base_source_offset":0,"base_length":96000,"source_length":48000}]}]"#;
+        let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
+        assert_eq!(tracks[0].clips[0].trim_start, 0.25);
+        assert_eq!(tracks[0].clips[0].trim_end, 0.75);
+    }
+
+    #[test]
+    fn trim_edge_only_on_wide_clip_edges() {
+        // 5 px/beat: clip 0..4 beats spans x 0..20, edges are x<=6 / x>=14.
+        let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 1.0, 0.0);
+        let clip = ArrangeClip {
+            id: 1,
+            name: "a".into(),
+            start_beat: 0.0,
+            length_beats: 4.0,
+            midi: false,
+            sync_group: 0,
+            trim_start: 0.0,
+            trim_end: 1.0,
+        };
+        assert_eq!(trim_edge_at(&geometry, &clip, 3.0), Some(TrimEdge::Left));
+        assert_eq!(trim_edge_at(&geometry, &clip, 17.0), Some(TrimEdge::Right));
+        assert_eq!(trim_edge_at(&geometry, &clip, 10.0), None);
+        // A 1-beat clip is only 5px wide: no trim zones.
+        let narrow = ArrangeClip {
+            length_beats: 1.0,
+            ..clip
+        };
+        assert_eq!(trim_edge_at(&geometry, &narrow, 2.0), None);
+    }
+
+    #[test]
     fn last_clip_end_spans_all_lanes() {
         let tracks = vec![
             ArrangeTrack {
@@ -733,6 +841,8 @@ mod tests {
                     length_beats: 3.0,
                     midi: false,
                     sync_group: 0,
+                    trim_start: 0.0,
+                    trim_end: 1.0,
                 }],
             },
             ArrangeTrack {
@@ -747,6 +857,8 @@ mod tests {
                     length_beats: 4.0,
                     midi: false,
                     sync_group: 0,
+                    trim_start: 0.0,
+                    trim_end: 1.0,
                 }],
             },
         ];

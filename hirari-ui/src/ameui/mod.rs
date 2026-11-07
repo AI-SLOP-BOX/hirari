@@ -8,8 +8,9 @@
 //! seekable (click/drag moves the playhead); slice 5 adds zoom (toolbar
 //! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection;
 //! slice 7 adds clip drag-move (live preview, commit on release via the
-//! engine undo transaction). Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! engine undo transaction); slice 8 adds edge-drag trim (Audio/Vocal
+//! only, fraction-clamped like the Slint dock). Audio playback is real;
+//! the Slint UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -33,8 +34,8 @@ use vello::wgpu;
 
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
-    last_clip_end, parse_arrange_tracks, parse_markers, valid_time_signatures,
-    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, MeasureStart, ARRANGE_ZOOM_MAX,
+    last_clip_end, parse_arrange_tracks, parse_markers, trim_edge_at, valid_time_signatures,
+    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, MeasureStart, TrimEdge, ARRANGE_ZOOM_MAX,
     ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
@@ -51,6 +52,9 @@ enum LaneDrag {
     Seek,
     /// A non-MIDI clip: drag moves it, commit on release.
     Move,
+    /// An Audio/Vocal clip edge: drag trims it, commit on release.
+    TrimLeft,
+    TrimRight,
     /// A MIDI clip: select on press, drag does nothing (Slint parity).
     Hold,
 }
@@ -89,6 +93,11 @@ pub struct HirariAmeApp {
     move_clip: Option<(u32, i32)>,
     move_start_beat: f32,
     move_delta_beats: f32,
+    /// Clip being trimmed, its edge, and the snapped beat delta for the
+    /// live preview; committed on release like the move.
+    trim_clip: Option<(u32, i32)>,
+    trim_edge: TrimEdge,
+    trim_delta_beats: f32,
     tick: u64,
 }
 
@@ -127,6 +136,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         move_clip: None,
         move_start_beat: 0.0,
         move_delta_beats: 0.0,
+        trim_clip: None,
+        trim_edge: TrimEdge::Left,
+        trim_delta_beats: 0.0,
         tick: 0,
     }
 }
@@ -194,6 +206,94 @@ impl HirariAmeApp {
     /// within this distance select; beyond it the press becomes a seek drag.
     fn click_distance(&self, event: &CanvasPointerEvent) -> f64 {
         (event.x - self.down_x).hypot(event.y - self.down_y)
+    }
+
+    /// Clamps a trim beat delta through the Slint dock fraction math, so
+    /// the preview and the commit agree: fractions clamp to [0, 1] with a
+    /// positive span, then convert back to beats.
+    fn clamped_trim_delta(&self, snapped: f32) -> f32 {
+        let Some((track_id, clip_id)) = self.trim_clip else {
+            return 0.0;
+        };
+        let tracks = self.tracks.get();
+        let Some(clip) = tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == clip_id))
+        else {
+            return 0.0;
+        };
+        let span = clip.trim_end - clip.trim_start;
+        if span <= 0.0 || clip.length_beats <= 0.0 {
+            return 0.0;
+        }
+        let fraction_delta = snapped / clip.length_beats.max(0.0001) * span;
+        let next = match self.trim_edge {
+            TrimEdge::Left => (clip.trim_start + fraction_delta)
+                .max(0.0)
+                .min(clip.trim_end - 0.0001),
+            TrimEdge::Right => (clip.trim_end + fraction_delta)
+                .max(clip.trim_start + 0.0001)
+                .min(1.0),
+        };
+        let orig = match self.trim_edge {
+            TrimEdge::Left => clip.trim_start,
+            TrimEdge::Right => clip.trim_end,
+        };
+        (next - orig) / span * clip.length_beats
+    }
+
+    /// Commits the dragged clip trim through the engine, mirroring the
+    /// Slint `on_trim_clip` path: one undo transaction, abort on failure,
+    /// immediate layout refresh on success.
+    fn commit_clip_trim(&mut self) {
+        let Some((track_id, clip_id)) = self.trim_clip else {
+            return;
+        };
+        if self.trim_delta_beats.abs() <= 0.0001 {
+            return;
+        }
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        let tracks = self.tracks.get();
+        let Some(clip) = tracks
+            .iter()
+            .find(|track| track.id == track_id)
+            .and_then(|track| track.clips.iter().find(|clip| clip.id == clip_id))
+        else {
+            return;
+        };
+        let span = clip.trim_end - clip.trim_start;
+        if span <= 0.0 || clip.length_beats <= 0.0 {
+            return;
+        }
+        let fraction_delta = self.trim_delta_beats / clip.length_beats.max(0.0001) * span;
+        let (next_start, next_end) = match self.trim_edge {
+            TrimEdge::Left => (
+                (clip.trim_start + fraction_delta)
+                    .max(0.0)
+                    .min(clip.trim_end - 0.0001),
+                clip.trim_end,
+            ),
+            TrimEdge::Right => (
+                clip.trim_start,
+                (clip.trim_end + fraction_delta)
+                    .max(clip.trim_start + 0.0001)
+                    .min(1.0),
+            ),
+        };
+        if next_start >= next_end {
+            return;
+        }
+        core.begin_undo_transaction("Trim Selected Clips");
+        if !core.set_region_trim(track_id, clip_id as u32, next_start, next_end) {
+            let _ = core.abort_undo_transaction();
+            return;
+        }
+        if core.end_undo_transaction() {
+            self.refresh_arrange_state(&core);
+        }
     }
 
     /// Commits the dragged clip move through the engine, mirroring the
@@ -351,8 +451,20 @@ impl HirariAmeApp {
                 } else {
                     0.0
                 };
-                let clip_x = x_for_beat(clip.start_beat + drag_delta);
-                let clip_width = (f64::from(clip.length_beats) * px_per_beat).max(4.0) - 2.0;
+                let mut clip_x = x_for_beat(clip.start_beat + drag_delta);
+                let mut clip_width = (f64::from(clip.length_beats) * px_per_beat).max(4.0) - 2.0;
+                if self.trim_clip == Some((track.id, clip.id)) {
+                    match self.trim_edge {
+                        TrimEdge::Left => {
+                            clip_x += f64::from(self.trim_delta_beats) * px_per_beat;
+                            clip_width -= f64::from(self.trim_delta_beats) * px_per_beat;
+                        }
+                        TrimEdge::Right => {
+                            clip_width += f64::from(self.trim_delta_beats) * px_per_beat;
+                        }
+                    }
+                    clip_width = clip_width.max(2.0);
+                }
                 let clip_y = top + (lane_height - clip_height) / 2.0;
                 let rect = RoundedRect::new(
                     clip_x,
@@ -495,13 +607,45 @@ impl App for HirariAmeApp {
                             let clip = tracks.iter().find(|track| track.id == track_id).and_then(
                                 |track| track.clips.iter().find(|clip| clip.id == clip_id),
                             );
+                            let track_kind = tracks
+                                .iter()
+                                .find(|track| track.id == track_id)
+                                .map(|track| track.kind.clone());
                             match clip {
                                 Some(clip) if clip.midi => self.down_mode = LaneDrag::Hold,
                                 Some(clip) => {
-                                    self.down_mode = LaneDrag::Move;
-                                    self.move_clip = Some((track_id, clip_id));
-                                    self.move_start_beat = clip.start_beat;
-                                    self.move_delta_beats = 0.0;
+                                    // Edge zones trim (Audio/Vocal only, as
+                                    // in the Slint dock); the body moves.
+                                    let edge = track_kind
+                                        .as_deref()
+                                        .filter(|kind| *kind == "Audio" || *kind == "Vocal")
+                                        .and_then(|_| {
+                                            trim_edge_at(
+                                                &self.arrange_geometry,
+                                                clip,
+                                                event.x as f32,
+                                            )
+                                        });
+                                    match edge {
+                                        Some(TrimEdge::Left) => {
+                                            self.down_mode = LaneDrag::TrimLeft;
+                                            self.trim_clip = Some((track_id, clip_id));
+                                            self.trim_edge = TrimEdge::Left;
+                                            self.trim_delta_beats = 0.0;
+                                        }
+                                        Some(TrimEdge::Right) => {
+                                            self.down_mode = LaneDrag::TrimRight;
+                                            self.trim_clip = Some((track_id, clip_id));
+                                            self.trim_edge = TrimEdge::Right;
+                                            self.trim_delta_beats = 0.0;
+                                        }
+                                        None => {
+                                            self.down_mode = LaneDrag::Move;
+                                            self.move_clip = Some((track_id, clip_id));
+                                            self.move_start_beat = clip.start_beat;
+                                            self.move_delta_beats = 0.0;
+                                        }
+                                    }
                                 }
                                 None => self.down_mode = LaneDrag::Seek,
                             }
@@ -525,6 +669,22 @@ impl App for HirariAmeApp {
                 } else if self.seeking {
                     match self.down_mode {
                         LaneDrag::Hold => true,
+                        LaneDrag::TrimLeft | LaneDrag::TrimRight => {
+                            if self.click_distance(&event) <= 4.0 {
+                                true
+                            } else {
+                                let px_per_beat = self.arrange_geometry.px_per_beat;
+                                if px_per_beat > 0.0 {
+                                    let raw =
+                                        ((event.x - self.down_x) / f64::from(px_per_beat)) as f32;
+                                    let snapped = (raw / MOVE_SNAP_BEATS).round() * MOVE_SNAP_BEATS;
+                                    // Clamp the preview delta through the
+                                    // same fraction math the commit uses.
+                                    self.trim_delta_beats = self.clamped_trim_delta(snapped);
+                                }
+                                true
+                            }
+                        }
                         LaneDrag::Move => {
                             if self.click_distance(&event) <= 4.0 {
                                 true
@@ -556,6 +716,7 @@ impl App for HirariAmeApp {
                 if event.phase == CanvasPointerPhase::Up {
                     match self.down_mode {
                         LaneDrag::Move => self.commit_clip_move(),
+                        LaneDrag::TrimLeft | LaneDrag::TrimRight => self.commit_clip_trim(),
                         LaneDrag::Hold => {}
                         LaneDrag::Seek => {
                             if self.seeking && self.click_distance(&event) <= 4.0 {
@@ -570,6 +731,8 @@ impl App for HirariAmeApp {
                 self.down_clip = None;
                 self.move_clip = None;
                 self.move_delta_beats = 0.0;
+                self.trim_clip = None;
+                self.trim_delta_beats = 0.0;
                 true
             }
         }
@@ -668,7 +831,7 @@ impl App for HirariAmeApp {
             zoom_in.into(),
             zoom_fit.into(),
             View::Caption(format!("ZOOM {}%", (zoom * 100.0).round() as u32)),
-            View::Caption("ruler: pan · empty lane: seek · clip: move".to_owned()),
+            View::Caption("ruler: pan · empty lane: seek · clip: move · edges: trim".to_owned()),
         ])]);
 
         // The canvas draws geometry only (no text); the list below keeps
