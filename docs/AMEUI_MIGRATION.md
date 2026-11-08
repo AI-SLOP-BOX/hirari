@@ -82,7 +82,8 @@ Notes:
 | 37 | `8b79940` | Automation editing: AUTO mode turns lane gestures into point add/move (snap + value deltas) with DEL PT removal, committing via `set_automation_data` in an undo transaction. |
 | 38 | `ceafc30` | Audio settings: sample-rate/buffer cyclers, reconnect, device count and readiness readout, wired to `apply_audio_config`/`try_reconnect_audio_device`. |
 | 39 | `98a105f` | Device selection: catalog parsing plus cycle/select buttons applying `select_audio_device` at the current config values. |
-| 40 | (this work) | Plugin presets: SAVE/LOAD preset buttons using the native dialogs, executed on the poll via the pending-preset slot. |
+| 40 | `e3a5127` | Plugin presets: SAVE/LOAD preset buttons using the native dialogs, executed on the poll via the pending-preset slot. |
+| 41 | (this work) | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -127,8 +128,8 @@ excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
 Remaining for the roll: CC lanes (unwired vestiges in Slint too).
 Beyond the roll: library, sample editor, notation — each its own
-multi-slice surface. (Plugin presets landed in slice 40; device
-selection in slice 39.)
+multi-slice surface. (Master gain landed in slice 41; plugin presets
+in slice 40.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

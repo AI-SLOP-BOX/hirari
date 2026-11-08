@@ -32,8 +32,9 @@
 //! slice 35 adds drum mode; slice 36 adds read-only automation
 //! overlays; slice 37 adds automation editing (AUTO mode); slice 38
 //! adds audio settings; slice 39 adds device selection; slice 40
-//! adds plugin preset save/load. Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! adds plugin preset save/load; slice 41 adds the master gain
+//! slider. Audio playback is real; the Slint UI remains the default
+//! entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -219,6 +220,7 @@ pub struct HirariAmeApp {
     audio_devices: State<Vec<AudioDevice>>,
     device_index: State<u32>,
     master_peak: State<f32>,
+    master_gain: State<f32>,
     tracks: State<Vec<ArrangeTrack>>,
     markers: State<Vec<ArrangeMarker>>,
     measure_starts: State<Vec<MeasureStart>>,
@@ -342,6 +344,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         audio_devices: context.state(Vec::<AudioDevice>::new()),
         device_index: context.state(0u32),
         master_peak: context.state(0.0f32),
+        master_gain: context.state(1.0f32),
         tracks: context.state(Vec::<ArrangeTrack>::new()),
         markers: context.state(Vec::<ArrangeMarker>::new()),
         measure_starts: context.state(Vec::<MeasureStart>::new()),
@@ -438,6 +441,7 @@ impl HirariAmeApp {
             .max(10.0f32.powf(loudness.true_peak_r / 20.0))
             .clamp(0.0, 1.0);
         self.master_peak.set(peak);
+        self.master_gain.set(core.master_gain());
         self.plots.publish_meters(&[peak, peak]);
 
         // The layout walk is comparatively costly; refresh it a few times a
@@ -2223,10 +2227,23 @@ impl App for HirariAmeApp {
             View::Caption(format!("{sample_rate:.0} Hz")),
         ])]);
 
+        let master_gain_core = self.core.clone();
+        let master_gain_state = self.master_gain.clone();
+        let master_gain = SliderView::new(self.master_gain.get(), 0.0, 2.0)
+            .action_id("mixer.master_gain")
+            .on_change(move |value| {
+                if let Some(core) = &master_gain_core {
+                    if core.set_master_gain(value.clamp(0.0, 2.0)) {
+                        master_gain_state.set(value.clamp(0.0, 2.0));
+                    }
+                }
+            });
         let meter = View::Card(vec![View::HStack(vec![
             View::Text("Master".to_owned()),
             View::ProgressBar((peak * 100.0) as u8).grow(1),
             View::Caption(format!("{:.0}%", peak * 100.0)),
+            View::Caption("Gain".to_owned()),
+            master_gain.into(),
             View::Caption(status),
         ])]);
 
