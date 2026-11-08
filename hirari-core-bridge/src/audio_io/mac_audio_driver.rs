@@ -271,6 +271,10 @@ pub struct RealtimeState {
     input_sink: AtomicPtr<InputCaptureSink>,
     queue: Arc<AudioInputBlockQueue>,
     pub stats: Arc<CallbackStats>,
+    /// Measured input-path latency in seconds (f64 bits): device + unit
+    /// latency properties plus one callback buffer. Written once per
+    /// stream start; read by recording compensation and the UI.
+    io_latency_secs: AtomicU64,
 }
 
 // The realtime callback only touches atomics, immutable bytes owned by C++, and
@@ -296,7 +300,17 @@ impl RealtimeState {
             input_sink: AtomicPtr::new(ptr::null_mut()),
             queue: Arc::new(AudioInputBlockQueue::new()),
             stats: Arc::new(CallbackStats::default()),
+            io_latency_secs: AtomicU64::new(0.0f64.to_bits()),
         })
+    }
+
+    pub fn io_latency_secs(&self) -> f64 {
+        f64::from_bits(self.io_latency_secs.load(Ordering::Relaxed))
+    }
+
+    fn set_io_latency_secs(&self, secs: f64) {
+        self.io_latency_secs
+            .store(secs.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     fn set_process_callback(&self, callback: Option<ProcessCallback>, context: *mut c_void) {
@@ -347,6 +361,15 @@ pub trait AudioBackend: Send {
     fn default_output_device(&self) -> Result<u32, i32>;
     fn nominal_sample_rate(&self, device: u32) -> Option<f64>;
     fn buffer_frame_size(&self, device: u32) -> Option<u32>;
+    /// Measured input-path latency in seconds for a stream about to be
+    /// started (device + unit properties plus one callback buffer).
+    fn io_latency_seconds(
+        &self,
+        device: u32,
+        unit: sys::AudioUnit,
+        sample_rate: f64,
+        buffer_frames: u32,
+    ) -> f64;
     fn channel_counts(&self, device: u32) -> Result<(u32, u32), DriverError>;
     fn open(
         &mut self,
@@ -847,6 +870,10 @@ impl MacAudioHost {
 
     fn buffer_size(&self) -> u32 {
         self.lock_core().buffer_size()
+    }
+
+    fn io_latency_secs(&self) -> f64 {
+        self.realtime.io_latency_secs()
     }
 
     fn input_channel_count(&self) -> u32 {
@@ -1835,6 +1862,14 @@ impl CoreAudioBackend {
         }
         self.initialized = true;
 
+        let io_latency = self.io_latency_seconds(
+            device,
+            unit,
+            request.sample_rate,
+            request.buffer_size,
+        );
+        realtime.set_io_latency_secs(io_latency);
+
         let address = property_address(
             sys::kAudioDevicePropertyDeviceIsAlive,
             sys::kAudioObjectPropertyScopeGlobal,
@@ -1900,6 +1935,46 @@ impl Drop for CoreAudioBackend {
 }
 
 impl AudioBackend for CoreAudioBackend {
+    /// Measures the input-path latency in seconds: device + unit latency
+    /// properties plus one callback buffer of staging. Previously the
+    /// driver never queried either property, so recordings ran late by
+    /// the whole I/O round-trip with no compensation possible.
+    fn io_latency_seconds(
+        &self,
+        device: u32,
+        unit: sys::AudioUnit,
+        sample_rate: f64,
+        buffer_frames: u32,
+    ) -> f64 {
+        let device_seconds = unsafe {
+            read_property::<f64>(
+                device,
+                sys::kAudioDevicePropertyLatency,
+                sys::kAudioObjectPropertyScopeGlobal,
+                sys::kAudioObjectPropertyElementMain,
+            )
+            .unwrap_or(0.0)
+        };
+        let mut unit_seconds = 0.0f64;
+        let status = unsafe {
+            au_get(
+                unit,
+                sys::kAudioUnitProperty_Latency,
+                Scope::Global,
+                Element::Output,
+                &mut unit_seconds,
+            )
+        };
+        if status != 0 || !unit_seconds.is_finite() {
+            unit_seconds = 0.0;
+        }
+        let buffer_seconds = if sample_rate > 0.0 {
+            f64::from(buffer_frames) / sample_rate
+        } else {
+            0.0
+        };
+        (device_seconds.max(0.0) + unit_seconds.max(0.0) + buffer_seconds).clamp(0.0, 1.0)
+    }
     fn default_output_device(&self) -> Result<u32, i32> {
         unsafe {
             let mut device = 0u32;
@@ -2428,6 +2503,10 @@ pub fn view_callback_count(handle: usize) -> u64 {
     host_ref(handle as *mut c_void).map_or(0, MacAudioHost::callback_count)
 }
 
+pub fn view_io_latency_secs(handle: usize) -> f64 {
+    host_ref(handle as *mut c_void).map_or(0.0, MacAudioHost::io_latency_secs)
+}
+
 pub fn view_input_channel_count(handle: usize) -> u32 {
     host_ref(handle as *mut c_void).map_or(0, MacAudioHost::input_channel_count)
 }
@@ -2732,6 +2811,16 @@ mod tests {
 
         fn buffer_frame_size(&self, _device: u32) -> Option<u32> {
             self.buffer
+        }
+
+        fn io_latency_seconds(
+            &self,
+            _device: u32,
+            _unit: sys::AudioUnit,
+            _sample_rate: f64,
+            _buffer_frames: u32,
+        ) -> f64 {
+            0.0
         }
 
         fn channel_counts(&self, _device: u32) -> Result<(u32, u32), DriverError> {
@@ -3149,6 +3238,16 @@ mod tests {
 
         fn buffer_frame_size(&self, _device: u32) -> Option<u32> {
             Some(256)
+        }
+
+        fn io_latency_seconds(
+            &self,
+            _device: u32,
+            _unit: sys::AudioUnit,
+            _sample_rate: f64,
+            _buffer_frames: u32,
+        ) -> f64 {
+            0.0
         }
 
         fn channel_counts(&self, device: u32) -> Result<(u32, u32), DriverError> {

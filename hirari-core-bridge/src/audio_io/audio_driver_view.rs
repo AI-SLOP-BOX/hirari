@@ -67,6 +67,16 @@ pub(crate) fn callback_count(handle: usize) -> u64 {
     }
 }
 
+pub(crate) fn io_latency_seconds(handle: usize) -> f64 {
+    #[cfg(target_os = "macos")]
+    return crate::mac_audio_driver::view_io_latency_secs(handle);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = handle;
+        0.0
+    }
+}
+
 pub(crate) fn input_channel_count(handle: usize) -> u32 {
     #[cfg(target_os = "macos")]
     return crate::mac_audio_driver::view_input_channel_count(handle);

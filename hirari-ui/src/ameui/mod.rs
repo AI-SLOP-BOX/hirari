@@ -36,9 +36,10 @@
 //! save/load; slice 41 adds the master gain slider; slice 42 adopts
 //! slider release callbacks; slice 43 adopts position-aware cursors;
 //! slice 44 adds canvas accessibility regions; slice 45 fixes the
-//! waveform canvas height; slice 46 adds the audio library. Audio
-//! playback is real; the Slint UI remains the default entry until the
-//! port reaches parity.
+//! waveform canvas height; slice 46 adds the audio library;
+//! engine E2 adds the measured I/O latency readout. Audio playback is
+//! real; the Slint UI remains the default entry until the port reaches
+//! parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -161,13 +162,13 @@ fn elide_text(
     if max_width <= 0.0 {
         return String::new();
     }
-    if context.measure_text(text, font_size, bounds).0 <= max_width {
+    if context.measure_text(text, font_size, bounds, None).0 <= max_width {
         return text.to_owned();
     }
     let mut out = String::new();
     for ch in text.chars() {
         let trial = format!("{out}{ch}…");
-        if context.measure_text(&trial, font_size, bounds).0 > max_width {
+        if context.measure_text(&trial, font_size, bounds, None).0 > max_width {
             break;
         }
         out.push(ch);
@@ -221,6 +222,7 @@ pub struct HirariAmeApp {
     sample_rate: State<f64>,
     audio_buffer: State<u32>,
     audio_ready: State<bool>,
+    io_latency_ms: State<f32>,
     device_count: State<u32>,
     audio_devices: State<Vec<AudioDevice>>,
     device_index: State<u32>,
@@ -351,6 +353,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         sample_rate: context.state(0.0f64),
         audio_buffer: context.state(256u32),
         audio_ready: context.state(false),
+        io_latency_ms: context.state(0.0f32),
         device_count: context.state(0u32),
         audio_devices: context.state(Vec::<AudioDevice>::new()),
         device_index: context.state(0u32),
@@ -443,6 +446,8 @@ impl HirariAmeApp {
         };
         self.playing.set(core.is_playing());
         self.audio_ready.set(core.is_audio_device_ready());
+        self.io_latency_ms
+            .set((core.io_latency_seconds() * 1000.0) as f32);
         self.loop_enabled.set(core.is_loop_enabled());
         self.metronome_enabled.set(core.is_metronome_enabled());
         self.tempo.set(core.get_tempo());
@@ -2541,9 +2546,10 @@ impl App for HirariAmeApp {
             buffer_button.into(),
             reconnect_button.into(),
             View::Caption(format!(
-                "{} devices · {}",
+                "{} devices · {} · {:.1}ms",
                 audio_devices,
-                if audio_ready { "READY" } else { "NO DEVICE" }
+                if audio_ready { "READY" } else { "NO DEVICE" },
+                self.io_latency_ms.get()
             )),
         ])]);
 

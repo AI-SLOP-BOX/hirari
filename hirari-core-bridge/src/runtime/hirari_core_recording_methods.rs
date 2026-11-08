@@ -75,6 +75,7 @@ impl HirariCore {
         count_in_frames: u64,
     ) -> anyhow::Result<()> {
         self.discard_pending_recording_input();
+        let start_sample = start_sample.saturating_sub(self.input_latency_frames(sample_rate));
         let mut slot = self
             .recording_session
             .lock()
@@ -629,6 +630,18 @@ impl HirariCore {
     /// Starts a bounded preview recording session. Audio input blocks must be
     /// supplied by the platform driver through `append_recording_preview`.
     /// The UI must not mark recording active until this method succeeds.
+    /// Measured input latency in sample frames (device + unit properties
+    /// plus one callback buffer), or zero when unmeasured. Recordings
+    /// arriving through the input path are late by this much.
+    fn input_latency_frames(&self, sample_rate: f32) -> u64 {
+        let seconds = self.io_latency_seconds();
+        if seconds.is_finite() && sample_rate.is_finite() && sample_rate > 0.0 {
+            (seconds * f64::from(sample_rate)).round().max(0.0) as u64
+        } else {
+            0
+        }
+    }
+
     pub fn start_recording_preview(
         &self,
         sample_rate: f32,
@@ -637,6 +650,9 @@ impl HirariCore {
         start_sample: u64,
     ) -> anyhow::Result<()> {
         self.discard_pending_recording_input();
+        // Input audio arrives late by the measured I/O latency; start the
+        // session early so captured regions align with the playhead.
+        let start_sample = start_sample.saturating_sub(self.input_latency_frames(sample_rate));
         let mut slot = self
             .recording_session
             .lock()

@@ -230,6 +230,11 @@ impl HirariCore {
     pub fn get_audio_callback_count(&self) -> u64 {
         crate::audio_driver_view::callback_count(self.driver_handle())
     }
+    /// Measured input-path latency in seconds (device + unit properties
+    /// plus one callback buffer), for recording compensation and UI.
+    pub fn io_latency_seconds(&self) -> f64 {
+        crate::audio_driver_view::io_latency_seconds(self.driver_handle())
+    }
     pub fn get_dropped_input_blocks(&self) -> u64 {
         crate::audio_driver_view::dropped_input_blocks(self.driver_handle())
     }

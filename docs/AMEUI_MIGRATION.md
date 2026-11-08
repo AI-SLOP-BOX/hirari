@@ -88,7 +88,9 @@ Notes:
 | 43 | `3749990` | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
 | 44 | `6d658bf` | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
 | 45 | `f32d822` | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
-| 46 | (this work) | Audio library: folder scan, search filter, per-asset preview and import to the piano track, via `scan_preview_audio` and the queued import. |
+| 46 | `0815f1d` | Audio library: folder scan, search filter, per-asset preview and import to the piano track, via `scan_preview_audio` and the queued import. |
+| E1 | `fc04f16` | Engine: BS.1770 gated integrated loudness + LRA (`loudness_analyzer`). |
+| E2 | (this work) | Engine: I/O latency measurement (device+unit properties + buffer) stored per stream, exposed as `io_latency_seconds`, applied as recording-start compensation, and shown in the AmeUI audio card. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
