@@ -87,7 +87,8 @@ Notes:
 | 42 | `da12104` | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
 | 43 | `3749990` | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
 | 44 | `6d658bf` | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
-| 45 | (this work) | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
+| 45 | `f32d822` | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
+| 46 | (this work) | Audio library: folder scan, search filter, per-asset preview and import to the piano track, via `scan_preview_audio` and the queued import. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -131,9 +132,9 @@ The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
 Remaining for the roll: CC lanes (unwired vestiges in Slint too).
-Beyond the roll: library, sample editor, notation — each its own
-multi-slice surface. (Master gain landed in slice 41; plugin presets
-in slice 40.)
+Beyond the roll: sample editor, notation, synth panel, OpenUtau
+editor — each its own multi-slice surface. (Audio library landed in
+slice 46; master gain in slice 41.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

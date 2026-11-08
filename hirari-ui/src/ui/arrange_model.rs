@@ -724,6 +724,56 @@ pub fn parse_audio_devices(catalog_json: &str) -> Vec<AudioDevice> {
         .collect()
 }
 
+/// One audio-library asset from the preview-audio catalog.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LibraryAsset {
+    pub id: u64,
+    pub name: String,
+    pub path: String,
+    pub sample_rate: f64,
+    pub size_bytes: u64,
+}
+
+/// Parses `preview_audio_catalog_json`; malformed input yields no assets.
+pub fn parse_preview_catalog(catalog_json: &str) -> Vec<LibraryAsset> {
+    #[derive(Deserialize)]
+    struct AssetLayout {
+        #[serde(default)]
+        id: u64,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        path: String,
+        #[serde(default)]
+        sample_rate: f64,
+        #[serde(default)]
+        size: u64,
+    }
+    #[derive(Deserialize)]
+    struct CatalogLayout {
+        #[serde(default)]
+        assets: Vec<AssetLayout>,
+    }
+    let Ok(catalog) = serde_json::from_str::<CatalogLayout>(catalog_json) else {
+        return Vec::new();
+    };
+    catalog
+        .assets
+        .into_iter()
+        .map(|asset| LibraryAsset {
+            id: asset.id,
+            name: if asset.name.is_empty() {
+                "Audio".to_owned()
+            } else {
+                asset.name
+            },
+            path: asset.path,
+            sample_rate: asset.sample_rate,
+            size_bytes: asset.size,
+        })
+        .collect()
+}
+
 /// One MIDI note with its full authoring contract, so piano-roll edits
 /// can commit a lossless `replace_midi_note_contracts` (lyric,
 /// articulation, vibrato and curve metadata survive an edit, exactly as
@@ -1403,6 +1453,19 @@ mod tests {
         assert_eq!(devices[1].id, 13);
         assert_eq!(devices[1].name, "USB Mic");
         assert!(parse_audio_devices("nope").is_empty());
+    }
+
+    #[test]
+    fn parses_preview_catalog() {
+        let json = r#"{"ok":true,"assets":[
+            {"id":5,"name":"Kick","path":"/snd/kick.wav","sample_rate":48000,"size":12345},
+            {"id":6,"name":"","path":"/snd/snare.wav"}]}"#;
+        let assets = parse_preview_catalog(json);
+        assert_eq!(assets.len(), 2);
+        assert_eq!(assets[0].id, 5);
+        assert_eq!(assets[0].size_bytes, 12345);
+        assert_eq!(assets[1].name, "Audio");
+        assert!(parse_preview_catalog("nope").is_empty());
     }
 
     #[test]

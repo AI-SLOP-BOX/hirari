@@ -36,8 +36,9 @@
 //! save/load; slice 41 adds the master gain slider; slice 42 adopts
 //! slider release callbacks; slice 43 adopts position-aware cursors;
 //! slice 44 adds canvas accessibility regions; slice 45 fixes the
-//! waveform canvas height. Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! waveform canvas height; slice 46 adds the audio library. Audio
+//! playback is real; the Slint UI remains the default entry until the
+//! port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -64,9 +65,10 @@ use vello::wgpu;
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
     last_clip_end, note_at, parse_arrange_tracks, parse_audio_devices, parse_markers,
-    parse_midi_notes, piano_roll_geometry, plugin_name, trim_edge_at, valid_time_signatures,
-    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, AudioDevice, MeasureStart, PianoNote,
-    PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
+    parse_midi_notes, parse_preview_catalog, piano_roll_geometry, plugin_name, trim_edge_at,
+    valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, AudioDevice,
+    LibraryAsset, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX,
+    ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -310,6 +312,10 @@ pub struct HirariAmeApp {
     pending_save: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     /// Chosen preset file plus its target track/plugin for load/save.
     pending_preset: std::sync::Arc<std::sync::Mutex<Option<(std::path::PathBuf, bool, u32, u32)>>>,
+    /// Chosen library folder awaiting the UI-thread scan.
+    pending_library: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    library_assets: State<Vec<LibraryAsset>>,
+    library_query: State<String>,
     /// Last arrange canvas bounds, to map a file drop to lane/beat.
     arrange_bounds: (f32, f32, f32, f32),
     /// Last drawn inputs for the dirty-canvas check (see
@@ -323,6 +329,8 @@ pub struct HirariAmeApp {
     dirty_layout_seen: Cell<u64>,
     /// In-flight dropped-file audio import: (ticket, path, track).
     pending_import: Option<(u64, String, u32)>,
+    /// Library import ticket slot (dialog/async path shares the poll).
+    library_ticket: std::sync::Arc<std::sync::Mutex<Option<(u64, String, u32)>>>,
     tick: u64,
 }
 
@@ -403,7 +411,11 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         pending_open: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_preset: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_library: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        library_assets: context.state(Vec::<LibraryAsset>::new()),
+        library_query: context.state(String::new()),
         arrange_bounds: (0.0, 0.0, 0.0, 0.0),
+        library_ticket: std::sync::Arc::new(std::sync::Mutex::new(None)),
         dirty_playhead: Cell::new(f64::NAN),
         dirty_zoom: Cell::new(-1.0),
         dirty_scroll: Cell::new(-1.0),
@@ -457,6 +469,19 @@ impl HirariAmeApp {
             self.device_count.set(devices.len() as u32);
             self.audio_devices.set(devices);
         }
+        // Library imports complete asynchronously; same ticket poll.
+        if let Some(ticket) = self
+            .library_ticket
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            if self.pending_import.is_none() {
+                self.pending_import = Some(ticket);
+            } else {
+                let _ = core.complete_region_import(ticket.0);
+            }
+        }
         // Dropped-file imports complete asynchronously; poll the ticket
         // each tick like the Slint import poller.
         if let Some((ticket, path, imported_track)) = self.pending_import.take() {
@@ -474,6 +499,23 @@ impl HirariAmeApp {
                     self.refresh_arrange_state(&core);
                 }
                 _ => self.status.set("IMPORT FAILED".to_owned()),
+            }
+        }
+        // Library folder scans execute here (scan_preview_audio indexes
+        // the filesystem, so it runs on the poll, not the dialog thread).
+        if let Some(path) = self
+            .pending_library
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            match core.scan_preview_audio(&path.to_string_lossy()) {
+                Ok(count) => {
+                    self.library_assets
+                        .set(parse_preview_catalog(&core.preview_audio_catalog_json()));
+                    self.status.set(format!("LIBRARY SCANNED: {} items", count));
+                }
+                Err(_) => self.status.set("LIBRARY SCAN FAILED".to_owned()),
             }
         }
         // Preset dialog results (path + save flag + target) execute here.
@@ -3675,6 +3717,99 @@ impl App for HirariAmeApp {
             }
         }
         views.extend([piano_selector, View::canvas("piano").grow(2), track_list]);
+        // Audio library (Slint browser parity): folder scan, search
+        // filter, per-asset preview and import to the piano track.
+        let library_assets = self.library_assets.get();
+        let library_filter = self.library_query.get().to_lowercase();
+        let scan_pending = self.pending_library.clone();
+        let scan_button = ButtonView::new("SCAN")
+            .action_id("library.scan")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new();
+                let pending = scan_pending.clone();
+                dialog.pick_folder_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
+            });
+        let search_state = self.library_query.clone();
+        let library_search = TextFieldView::new(library_filter.clone(), "Search sounds")
+            .change_action_id("library.search")
+            .submit_action_id("library.search")
+            .on_change(move |value| {
+                search_state.set(value);
+            });
+        let mut library_rows: Vec<View> = Vec::new();
+        for asset in library_assets.iter().filter(|asset| {
+            library_filter.is_empty() || asset.name.to_lowercase().contains(&library_filter)
+        }) {
+            let play_core = self.core.clone();
+            let play_path = asset.path.clone();
+            let play_button = ButtonView::new("PLAY")
+                .action_id(format!("library.preview.{}", asset.id))
+                .secondary()
+                .on_press(move |_| {
+                    if let Some(core) = &play_core {
+                        let _ = core.register_preview_audio(&play_path);
+                    }
+                });
+            let import_core = self.core.clone();
+            let import_path = asset.path.clone();
+            let import_track = self.piano_track.clone();
+            let import_playhead = self.playhead_beats.clone();
+            let import_status = self.status.clone();
+            let import_ticket_slot = self.library_ticket.clone();
+            let import_button = ButtonView::new("IMPORT")
+                .action_id(format!("library.import.{}", asset.id))
+                .secondary()
+                .on_press(move |_| {
+                    if let Some(core) = &import_core {
+                        let track_id = import_track.get();
+                        if track_id == 0 {
+                            return;
+                        }
+                        let ticket = core.queue_region_import_at_beat(
+                            track_id,
+                            &import_path,
+                            import_playhead.get(),
+                        );
+                        if ticket == 0 {
+                            import_status.set("IMPORT FAILED".to_owned());
+                        } else {
+                            if let Ok(mut slot) = import_ticket_slot.lock() {
+                                *slot = Some((ticket, import_path.clone(), track_id));
+                            }
+                            import_status.set("IMPORTING: Audio".to_owned());
+                        }
+                    }
+                });
+            library_rows.push(View::HStack(vec![
+                View::Text(asset.name.clone()),
+                View::Caption(format!(
+                    "{} Hz · {} bytes",
+                    asset.sample_rate as u32, asset.size_bytes
+                )),
+                play_button.into(),
+                import_button.into(),
+            ]));
+        }
+        views.push(View::Card(vec![
+            View::HStack(vec![
+                View::Text("AUDIO LIBRARY".to_owned()),
+                scan_button.into(),
+                library_search.into(),
+            ]),
+            View::ScrollView {
+                height: 140,
+                follow_bottom: false,
+                scroll_to: None,
+                children: vec![View::VStack(library_rows)],
+            },
+        ]));
         View::VStack(views)
     }
 
