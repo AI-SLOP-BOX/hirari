@@ -27,8 +27,9 @@
 //! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
 //! the native file dialog (async, delivered on the poll); slice 30
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
-//! redraw. Audio playback is real; the Slint UI remains the default
-//! entry until the port reaches parity.
+//! redraw; slice 32 adopts pinch/pan gestures. Audio playback is
+//! real; the Slint UI remains the default entry until the port reaches
+//! parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -40,8 +41,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ame_ui::app::{
-    App, AppEventSender, CanvasBounds, CanvasContext, CanvasPointerEvent, CanvasPointerPhase,
-    CanvasScrollEvent, State, StateContext, Viewport, WindowConfig,
+    App, AppEventSender, CanvasBounds, CanvasContext, CanvasGestureEvent, CanvasGestureKind,
+    CanvasPointerEvent, CanvasPointerPhase, CanvasScrollEvent, State, StateContext, Viewport,
+    WindowConfig,
 };
 use ame_ui::event::{AmeEvent, KeyModifiers};
 use ame_ui::theme::Theme;
@@ -1361,6 +1363,45 @@ impl HirariAmeApp {
         ));
         self.pending_import = Some((ticket, path.to_owned(), track_id));
     }
+    /// Zooms the arrange canvas by `factor`, anchored at canvas x so the
+    /// beat under the pointer stays put (wheel and pinch share this).
+    fn zoom_arrange_at(&self, x: f32, factor: f32) {
+        let geometry = self.arrange_geometry;
+        if geometry.px_per_beat <= 0.0 || !factor.is_finite() || factor <= 0.0 {
+            return;
+        }
+        let zoom_old = self.arrange_zoom.get();
+        let zoom_new = (zoom_old * factor).clamp(ARRANGE_ZOOM_MIN, ARRANGE_ZOOM_MAX);
+        let timeline_end = self.timeline_end_beats.get();
+        let timeline_width = geometry.px_per_beat * timeline_end / zoom_old;
+        let px_new = timeline_width / timeline_end * zoom_new;
+        let beat = geometry.beat_for_x(x);
+        let scroll_new = beat - (x - geometry.header_width) / px_new;
+        self.arrange_zoom.set(zoom_new);
+        self.arrange_scroll_beats.set(scroll_new.max(0.0));
+    }
+
+    fn on_canvas_gesture(&mut self, canvas_id: &str, event: CanvasGestureEvent) -> bool {
+        if canvas_id != "arrange" {
+            return false;
+        }
+        match event.gesture {
+            CanvasGestureKind::Pinch { delta, .. } => {
+                self.zoom_arrange_at(event.x as f32, (1.0 + delta) as f32);
+                true
+            }
+            CanvasGestureKind::Pan { delta_x, .. } => {
+                let px_per_beat = self.arrange_geometry.px_per_beat;
+                if px_per_beat > 0.0 {
+                    let delta_beats = (delta_x / f64::from(px_per_beat)) as f32;
+                    self.arrange_scroll_beats
+                        .set((self.arrange_scroll_beats.get() - delta_beats).max(0.0));
+                }
+                true
+            }
+            CanvasGestureKind::Rotate { .. } => false,
+        }
+    }
 }
 
 impl App for HirariAmeApp {
@@ -1448,22 +1489,13 @@ impl App for HirariAmeApp {
             return false;
         }
         if event.modifiers.control || event.modifiers.super_key {
-            // Zoom, anchored at the pointer beat: reconstruct the timeline
-            // width from the current scale, then re-anchor under the cursor.
-            let zoom_old = self.arrange_zoom.get();
+            // Zoom, anchored at the pointer beat.
             let factor = if event.delta_y > 0.0 {
                 1.25
             } else {
                 1.0 / 1.25
             };
-            let zoom_new = (zoom_old * factor).clamp(ARRANGE_ZOOM_MIN, ARRANGE_ZOOM_MAX);
-            let timeline_end = self.timeline_end_beats.get();
-            let timeline_width = geometry.px_per_beat * timeline_end / zoom_old;
-            let px_new = timeline_width / timeline_end * zoom_new;
-            let beat = geometry.beat_for_x(event.x as f32);
-            let scroll_new = beat - (event.x as f32 - geometry.header_width) / px_new as f32;
-            self.arrange_zoom.set(zoom_new);
-            self.arrange_scroll_beats.set(scroll_new.max(0.0));
+            self.zoom_arrange_at(event.x as f32, factor);
         } else {
             // Plain wheel scrolls the timeline (DAW convention).
             let delta_beats =
