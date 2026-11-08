@@ -252,7 +252,12 @@ fn project_end_freeze_uses_the_larger_of_last_region_and_two_blocks() {
             44_100,
         )
     });
-    assert_eq!(fixture.total_samples(), region_end);
+    // A non-empty project also captures the processor tail beyond the last
+    // region so releases are flushed into the frozen snapshot.
+    assert_eq!(
+        fixture.total_samples(),
+        region_end + 44_100 * crate::track_freeze_host::FREEZE_TAIL_SECONDS
+    );
 }
 
 #[test]

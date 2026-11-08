@@ -94,7 +94,8 @@ Notes:
 | E3 | `4f6426f` | Engine: dedicated recording poll worker with a single-consumer input queue and captured drop errors. |
 | E4 | `40e3314` | Engine: true-peak detection in the native brickwall limiter using Catmull-Rom interpolation. |
 | E5 | `3218953` | Engine: 2× oversampling in the tube saturator using the existing all-pass oversampler. |
-| E6 | (this work) | Engine: LUFS-target normalization for queued offline exports — the orchestrator now measures gated integrated LUFS and applies the delivery gain (peak-capped) instead of plain peak normalization when `normalize` is set. |
+| E6 | `e89148d` | Engine: LUFS-target normalization for queued offline exports — the orchestrator now measures gated integrated LUFS and applies the delivery gain (peak-capped) instead of plain peak normalization when `normalize` is set. |
+| E7 | (this work) | Engine: project-end freeze now renders a 2 s processor tail beyond the last region, and unfreezing resets the live processors so stale delay/reverb state cannot leak back. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 

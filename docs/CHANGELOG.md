@@ -17,6 +17,9 @@ production support.
   orchestrator now measures gated integrated loudness and applies the
   delivery gain under a full-scale ceiling when a job requests
   normalization, instead of always applying plain peak normalization.
+- Project-end track freeze now captures a 2 s processor tail beyond the
+  last region, and unfreezing resets the live processors so stale
+  delay/reverb state cannot leak into unfrozen playback.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

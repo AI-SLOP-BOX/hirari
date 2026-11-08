@@ -39,6 +39,11 @@ use crate::wav_decoder_compat::hirari_track_freeze_read_float32;
 /// this limit are about 512 MiB.
 pub const MAX_FREEZE_SAMPLES: u64 = 64 * 1024 * 1024;
 
+/// Processor tail captured beyond the last region when freezing to project
+/// end, so reverb/delay releases are flushed into the snapshot instead of
+/// being cut at the region boundary.
+pub const FREEZE_TAIL_SECONDS: u64 = 2;
+
 /// Frames per offline render block, so one freeze needs no more scratch than a
 /// single block at a time.
 const RENDER_BLOCK_FRAMES: u32 = 1024;
@@ -372,9 +377,15 @@ fn freeze_to_project_end_impl(
         return false;
     }
     // The end of the last region wins, but a track with no regions still needs
-    // a full block round trip so the frozen snapshot is not empty.
+    // a full block round trip so the frozen snapshot is not empty. A non-empty
+    // project also renders a processor tail beyond the last region so the
+    // freeze does not cut reverb/delay releases at the region boundary.
     let fallback = u64::from(unsafe { block_size(host) }.max(1)) * 2;
-    let total_samples = project_end_samples.max(fallback);
+    let mut total_samples = project_end_samples.max(fallback);
+    if project_end_samples > 0 {
+        total_samples = total_samples
+            .saturating_add(u64::from(sample_rate).saturating_mul(FREEZE_TAIL_SECONDS));
+    }
     if total_samples > MAX_FREEZE_SAMPLES {
         return false;
     }
@@ -473,6 +484,10 @@ fn unfreeze_impl(ops: &HirariTrackFreezeHostOps, host: *mut c_void, track_id: u3
         return false;
     };
     unsafe { hirari_track_frozen_store_clear(session.frozen()) };
+    // The offline freeze render left the live processors at their end state.
+    // Flush that tail before the live graph resumes so stale delay/reverb
+    // state cannot leak into the unfrozen playback.
+    unsafe { hirari_track_runtime_reset_for_offline_render(session.runtime()) };
     session.mark_layout();
     true
 }
