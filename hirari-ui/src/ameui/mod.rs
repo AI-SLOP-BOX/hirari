@@ -1805,7 +1805,7 @@ impl App for HirariAmeApp {
     /// Position-aware cursor: resize over Audio/Vocal trim edges, pointer
     /// over clips/notes, default elsewhere. Uses the landed per-region
     /// cursor API (previously a static per-slot icon).
-    fn canvas_cursor(&self, canvas_id: &str, x: f64, y: f64) -> Option<winit::window::CursorIcon> {
+    fn canvas_cursor(&self, canvas_id: &str, x: f64, y: f64) -> Option<ame_ui::CursorIcon> {
         match canvas_id {
             "arrange" => {
                 let geometry = self.arrange_geometry;
@@ -1821,14 +1821,14 @@ impl App for HirariAmeApp {
                 };
                 let clip = track.clips.iter().find(|clip| clip.id == clip_id)?;
                 if clip.midi {
-                    return Some(winit::window::CursorIcon::Pointer);
+                    return Some(ame_ui::CursorIcon::Pointer);
                 }
                 if (track.kind == "Audio" || track.kind == "Vocal")
                     && trim_edge_at(&geometry, clip, x as f32).is_some()
                 {
-                    return Some(winit::window::CursorIcon::EwResize);
+                    return Some(ame_ui::CursorIcon::EwResize);
                 }
-                Some(winit::window::CursorIcon::Pointer)
+                Some(ame_ui::CursorIcon::Pointer)
             }
             "piano" => {
                 let geometry = self.piano_geometry;
@@ -1843,7 +1843,7 @@ impl App for HirariAmeApp {
                     .cloned()
                     .collect();
                 if note_at(&visible, &geometry, x as f32, y as f32).is_some() {
-                    Some(winit::window::CursorIcon::Pointer)
+                    Some(ame_ui::CursorIcon::Pointer)
                 } else {
                     None
                 }
