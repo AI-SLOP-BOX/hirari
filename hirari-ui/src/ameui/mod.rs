@@ -60,10 +60,10 @@ use vello::wgpu;
 
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
-    last_clip_end, note_at, parse_arrange_tracks, parse_markers, parse_midi_notes,
-    piano_roll_geometry, plugin_name, trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry,
-    ArrangeMarker, ArrangeTrack, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge,
-    ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
+    last_clip_end, note_at, parse_arrange_tracks, parse_audio_devices, parse_markers,
+    parse_midi_notes, piano_roll_geometry, plugin_name, trim_edge_at, valid_time_signatures,
+    ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack, AudioDevice, MeasureStart, PianoNote,
+    PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -217,6 +217,8 @@ pub struct HirariAmeApp {
     audio_buffer: State<u32>,
     audio_ready: State<bool>,
     device_count: State<u32>,
+    audio_devices: State<Vec<AudioDevice>>,
+    device_index: State<u32>,
     master_peak: State<f32>,
     tracks: State<Vec<ArrangeTrack>>,
     markers: State<Vec<ArrangeMarker>>,
@@ -336,6 +338,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         audio_buffer: context.state(256u32),
         audio_ready: context.state(false),
         device_count: context.state(0u32),
+        audio_devices: context.state(Vec::<AudioDevice>::new()),
+        device_index: context.state(0u32),
         master_peak: context.state(0.0f32),
         tracks: context.state(Vec::<ArrangeTrack>::new()),
         markers: context.state(Vec::<ArrangeMarker>::new()),
@@ -440,11 +444,9 @@ impl HirariAmeApp {
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
             self.poll_waveforms(&core);
-            let count = serde_json::from_str::<serde_json::Value>(&core.list_audio_devices_json())
-                .ok()
-                .and_then(|value| value.as_array().map(|array| array.len() as u32))
-                .unwrap_or(0);
-            self.device_count.set(count);
+            let devices = parse_audio_devices(&core.list_audio_devices_json());
+            self.device_count.set(devices.len() as u32);
+            self.audio_devices.set(devices);
         }
         // Dropped-file imports complete asynchronously; poll the ticket
         // each tick like the Slint import poller.
@@ -2261,8 +2263,63 @@ impl App for HirariAmeApp {
                     core.try_reconnect_audio_device();
                 }
             });
+        // Device cycle + select (Slint on_select_device): the cycle picks
+        // a pending index, USE applies it at the current config values.
+        let device_list = self.audio_devices.get();
+        let pending_index = self
+            .device_index
+            .get()
+            .min(device_list.len().saturating_sub(1) as u32);
+        let device_name = device_list
+            .get(pending_index as usize)
+            .map(|device| device.name.clone())
+            .unwrap_or_else(|| "no device".to_owned());
+        let cycle_state = self.device_index.clone();
+        let device_count_for_cycle = device_list.len() as u32;
+        let device_button = ButtonView::new(format!("DEVICE: {device_name}"))
+            .action_id("audio.device_cycle")
+            .secondary()
+            .on_press(move |_| {
+                if device_count_for_cycle > 0 {
+                    cycle_state.set((cycle_state.get() + 1) % device_count_for_cycle);
+                }
+            });
+        let use_core = self.core.clone();
+        let use_devices = self.audio_devices.clone();
+        let use_index = self.device_index.clone();
+        let use_buffer = self.audio_buffer.clone();
+        let use_sample_rate = self.sample_rate.clone();
+        let use_status = self.status.clone();
+        let use_button = ButtonView::new("USE")
+            .action_id("audio.device_select")
+            .secondary()
+            .on_press(move |_| {
+                let Some(core) = &use_core else { return };
+                let devices = use_devices.get();
+                let index = use_index.get().min(devices.len().saturating_sub(1) as u32) as usize;
+                let Some(device) = devices.get(index) else {
+                    return;
+                };
+                let sample_rate = match use_sample_rate.get().round() as u32 {
+                    44_100 | 48_000 | 88_200 | 96_000 | 192_000 => {
+                        use_sample_rate.get().round() as u32
+                    }
+                    _ => 48_000,
+                };
+                let buffer_size = match use_buffer.get() {
+                    32 | 64 | 128 | 256 | 512 | 1024 | 2048 => use_buffer.get(),
+                    _ => 256,
+                };
+                if core.select_audio_device(device.id, sample_rate, buffer_size) {
+                    use_status.set(format!("AUDIO DEVICE SELECTED: {}", device.name));
+                } else {
+                    use_status.set("DEVICE SELECTION FAILED".to_owned());
+                }
+            });
         let audio_card = View::Card(vec![View::HStack(vec![
             View::Text("AUDIO".to_owned()),
+            device_button.into(),
+            use_button.into(),
             rate_button.into(),
             buffer_button.into(),
             reconnect_button.into(),

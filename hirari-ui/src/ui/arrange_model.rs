@@ -696,6 +696,34 @@ pub fn trim_edge_at(
     }
 }
 
+/// One audio device from the engine's device catalog, as the settings
+/// UI lists it. `id` is the `select_audio_device` handle.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AudioDevice {
+    pub id: u32,
+    pub name: String,
+}
+
+/// Parses `list_audio_devices_json`; malformed input yields no devices.
+pub fn parse_audio_devices(catalog_json: &str) -> Vec<AudioDevice> {
+    #[derive(Deserialize)]
+    struct DeviceLayout {
+        id: u32,
+        #[serde(default)]
+        name: String,
+    }
+    let Ok(devices) = serde_json::from_str::<Vec<DeviceLayout>>(catalog_json) else {
+        return Vec::new();
+    };
+    devices
+        .into_iter()
+        .map(|device| AudioDevice {
+            id: device.id,
+            name: device.name,
+        })
+        .collect()
+}
+
 /// One MIDI note with its full authoring contract, so piano-roll edits
 /// can commit a lossless `replace_midi_note_contracts` (lyric,
 /// articulation, vibrato and curve metadata survive an edit, exactly as
@@ -1365,6 +1393,16 @@ mod tests {
         assert_eq!(tracks[0].volume_automation[1].value, 2.0);
         assert_eq!(tracks[0].pan_automation.len(), 1);
         assert_eq!(tracks[0].pan_automation[0].value, -1.0);
+    }
+
+    #[test]
+    fn parses_audio_devices() {
+        let json = r#"[{"id":12,"name":"Built-in Output"},{"id":13,"name":"USB Mic"}]"#;
+        let devices = parse_audio_devices(json);
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[1].id, 13);
+        assert_eq!(devices[1].name, "USB Mic");
+        assert!(parse_audio_devices("nope").is_empty());
     }
 
     #[test]
