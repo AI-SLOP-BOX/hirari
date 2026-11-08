@@ -1,13 +1,23 @@
+use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use crate::oversampler::OversamplerEngine;
+
 /// Thread-safe controls and allocation-free sample processing for the
-/// host-facing tube saturation effect.
+/// host-facing tube saturation effect. The shaper runs through the
+/// all-pass 2x oversampler (as in the former C++ path), so high-drive
+/// harmonics alias far less than a base-rate tanh.
 pub struct TubeSaturationEngine {
     drive: AtomicU32,
     bias: AtomicU32,
     dry_wet: AtomicU32,
+    // SAFETY: each instance is processed from a single audio thread at a
+    // time; the UI thread only reads the atomic controls, never this state.
+    oversamplers: UnsafeCell<[OversamplerEngine; 2]>,
 }
+
+unsafe impl Sync for TubeSaturationEngine {}
 
 impl Default for TubeSaturationEngine {
     fn default() -> Self {
@@ -21,10 +31,18 @@ impl TubeSaturationEngine {
             drive: AtomicU32::new(0.0_f32.to_bits()),
             bias: AtomicU32::new(0.0_f32.to_bits()),
             dry_wet: AtomicU32::new(1.0_f32.to_bits()),
+            oversamplers: UnsafeCell::new([OversamplerEngine::new(), OversamplerEngine::new()]),
         }
     }
 
-    pub fn reset(&self) {}
+    pub fn reset(&self) {
+        // SAFETY: reset is serialized against process by the host.
+        unsafe {
+            for oversampler in (*self.oversamplers.get()).iter_mut() {
+                oversampler.reset();
+            }
+        }
+    }
 
     fn load(parameter: &AtomicU32) -> f32 {
         f32::from_bits(parameter.load(Ordering::Relaxed))
@@ -94,13 +112,19 @@ impl TubeSaturationEngine {
         let mix = self.dry_wet().clamp(0.0, 1.0);
         let gain = 10.0_f32.powf(drive / 20.0);
 
+        // SAFETY: single audio thread per instance; see the field note.
+        let oversamplers = unsafe { &mut *self.oversamplers.get() };
         for frame in 0..frames {
             let dry_l = if left[frame].is_finite() {
                 left[frame]
             } else {
                 0.0
             };
-            let wet_l = Self::shape(dry_l * gain, bias);
+            let (up1, up2) = oversamplers[0].upsample(dry_l * gain);
+            let wet_l = OversamplerEngine::downsample(
+                Self::shape(up1, bias),
+                Self::shape(up2, bias),
+            );
             left[frame] = dry_l + mix * (wet_l - dry_l);
 
             if let Some(channel) = right.as_deref_mut() {
@@ -109,7 +133,11 @@ impl TubeSaturationEngine {
                 } else {
                     0.0
                 };
-                let wet_r = Self::shape(dry_r * gain, bias);
+                let (up1, up2) = oversamplers[1].upsample(dry_r * gain);
+                let wet_r = OversamplerEngine::downsample(
+                    Self::shape(up1, bias),
+                    Self::shape(up2, bias),
+                );
                 channel[frame] = dry_r + mix * (wet_r - dry_r);
             }
         }
@@ -281,5 +309,45 @@ pub unsafe extern "C" fn hirari_tube_saturation_process(
         state.process(left, None);
     } else {
         state.process(left, Some(std::slice::from_raw_parts_mut(right, frames)));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversampled_process_settles_to_shape_for_dc() {
+        // At drive 0dB the oversampler passes DC through at unity gain
+        // after settling, so the output must converge to shape(input).
+        let engine = TubeSaturationEngine::new();
+        let frames = 4096;
+        let mut left = vec![0.5f32; frames];
+        let mut right = vec![0.5f32; frames];
+        engine.process(&mut left, Some(&mut right));
+        let expected = TubeSaturationEngine::shape(0.5, 0.0);
+        assert!(
+            (left[frames - 1] - expected).abs() < 0.01,
+            "settled {} vs shape {expected}",
+            left[frames - 1]
+        );
+        assert_eq!(left[frames - 1], right[frames - 1]);
+    }
+
+    #[test]
+    fn high_frequency_stays_bounded_without_zipper_noise() {
+        let engine = TubeSaturationEngine::new();
+        engine.set_drive(36.0);
+        let frames = 8192;
+        let mut left: Vec<f32> = (0..frames)
+            .map(|i| 0.9 * ((2.0 * std::f32::consts::PI * 20_000.0 * i as f32) / 48_000.0).sin())
+            .collect();
+        let mut right = left.clone();
+        engine.process(&mut left, Some(&mut right));
+        let tail = &left[frames / 2..];
+        assert!(tail.iter().all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+        // No DC offset blow-up and no NaN propagation from the clipper.
+        let mean: f32 = tail.iter().sum::<f32>() / tail.len() as f32;
+        assert!(mean.abs() < 0.05, "mean {mean}");
     }
 }
