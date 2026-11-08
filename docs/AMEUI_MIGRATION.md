@@ -76,7 +76,8 @@ Notes:
 | 31 | `dc178c7` | Dirty-canvas redraw: arrange/piano canvases replay cached scenes when idle (playhead/zoom/scroll/selection/layout tracked); the waveform always animates. |
 | 32 | `9cf12ae` | Canvas gestures: pinch zooms (pointer-anchored) and trackpad pan scrolls the arrange canvas via the landed `on_canvas_gesture`. |
 | 33 | `b1e48c4` | Theme colors: arrange/piano canvas fills and grid strokes follow the landed `CanvasContext::theme()` instead of hard-coded RGB. |
-| 34 | (this work) | Plugin parameters: a params strip (first 32) for the selected plugin with normalized sliders, wired to `get/set_plugin_parameter`. |
+| 34 | `45484f6` | Plugin parameters: a params strip (first 32) for the selected plugin with normalized sliders, wired to `get/set_plugin_parameter`. |
+| 35 | (this work) | Drum mode: DRUM/PIANO toggle filtering the roll to GM drum lanes (35–81) with `drum_lane_label` row labels. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -119,10 +120,10 @@ hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
-Remaining for the roll: drum mode (canvas text now landed; adoption
-pending) and CC lanes (unwired vestiges in Slint too). Beyond the roll:
-automation lanes, plugin preset/UI, settings/device, library — each
-its own multi-slice surface.
+Remaining for the roll: CC lanes (unwired vestiges in Slint too).
+Beyond the roll: automation lanes, plugin preset/UI, settings/device,
+library — each its own multi-slice surface. (Drum mode landed in
+slice 35.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

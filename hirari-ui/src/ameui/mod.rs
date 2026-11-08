@@ -28,7 +28,8 @@
 //! the native file dialog (async, delivered on the poll); slice 30
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
 //! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
-//! colors in the canvases; slice 34 adds the plugin parameter strip.
+//! colors in the canvases; slice 34 adds the plugin parameter
+//! strip; slice 35 adds drum mode. Audio playback is real; the
 //! Audio playback is real; the Slint UI remains the default entry until the
 //! port reaches parity.
 //!
@@ -219,6 +220,8 @@ pub struct HirariAmeApp {
     /// notes) and its parsed notes.
     piano_track: State<u32>,
     piano_notes: State<Vec<PianoNote>>,
+    /// Drum mode: the roll shows GM drum lanes instead of pitch rows.
+    drum_mode: State<bool>,
     /// Chord-insert settings (Slint piano roll chord controls).
     chord_root: State<u32>,
     chord_quality: State<u32>,
@@ -315,6 +318,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
         piano_notes: context.state(Vec::<PianoNote>::new()),
+        drum_mode: context.state(false),
         chord_root: context.state(60u32),
         chord_quality: context.state(0u32),
         chord_length: context.state(4.0f32),
@@ -812,9 +816,10 @@ impl HirariAmeApp {
         }
         let track_id = self.piano_track.get();
         let notes = self.piano_notes.get();
+        let drum = self.drum_mode.get();
         let visible: Vec<PianoNote> = notes
             .iter()
-            .filter(|note| note.track_id == track_id)
+            .filter(|note| note.track_id == track_id && !(drum && !(35..=81).contains(&note.pitch)))
             .cloned()
             .collect();
         let timeline_end = self.timeline_end_beats.get();
@@ -859,7 +864,18 @@ impl HirariAmeApp {
                 None,
                 &Line::new((x0, y), (x0 + width, y)),
             );
-            if stronger {
+            if drum {
+                context.draw_text(
+                    scene,
+                    &bounds,
+                    hirari_core_bridge::piano_roll_editor::drum_lane_label(pitch),
+                    x0 + 2.0,
+                    y + 1.0,
+                    9.0,
+                    context.theme().secondary_text,
+                    None,
+                );
+            } else if stronger {
                 let label = format!("{}{}", PITCH_NAMES[(pitch % 12) as usize], pitch / 12 - 1);
                 context.draw_text(
                     scene,
@@ -892,7 +908,7 @@ impl HirariAmeApp {
             );
         };
         for (global_index, note) in notes.iter().enumerate() {
-            if note.track_id != track_id {
+            if note.track_id != track_id || (drum && !(35..=81).contains(&note.pitch)) {
                 continue;
             }
             let mut pitch = note.pitch;
@@ -1249,10 +1265,13 @@ impl HirariAmeApp {
         match event.phase {
             CanvasPointerPhase::Down => {
                 let notes = self.piano_notes.get();
+                let drum = self.drum_mode.get();
                 let visible: Vec<(usize, PianoNote)> = notes
                     .iter()
                     .enumerate()
-                    .filter(|(_, note)| note.track_id == track_id)
+                    .filter(|(_, note)| {
+                        note.track_id == track_id && !(drum && !(35..=81).contains(&note.pitch))
+                    })
                     .map(|(index, note)| (index, note.clone()))
                     .collect();
                 let visible_notes: Vec<PianoNote> =
@@ -2291,6 +2310,15 @@ impl App for HirariAmeApp {
                 delete_selected.set(None);
             });
         piano_buttons.push(delete_button.into());
+        let drum_state = self.drum_mode.clone();
+        let drum_on = self.drum_mode.get();
+        let drum_button = ButtonView::new(if drum_on { "PIANO" } else { "DRUM" })
+            .action_id("piano.drum_mode")
+            .secondary()
+            .on_press(move |_| {
+                drum_state.set(!drum_on);
+            });
+        piano_buttons.push(drum_button.into());
         let quantize_core = self.core.clone();
         let quantize_notes = self.piano_notes.clone();
         let quantize_track = self.piano_track.clone();
