@@ -14,8 +14,10 @@
 //! division picker; slice 11 adds the edit lock; slice 12 turns the
 //! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
 //! project open/save/new; slice 14 adds loop/metronome toggles; slice 15
-//! adds the read-only piano roll. Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! adds the read-only piano roll; slice 16 adds its edit gestures
+//! (add/move/resize/delete via a full note-list replace). Audio
+//! playback is real; the Slint UI remains the default entry until the
+//! port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -41,12 +43,14 @@ use vello::wgpu;
 
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
-    last_clip_end, parse_arrange_tracks, parse_markers, parse_midi_notes, piano_roll_geometry,
-    trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack,
-    MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
+    last_clip_end, note_at, parse_arrange_tracks, parse_markers, parse_midi_notes,
+    piano_roll_geometry, trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker,
+    ArrangeTrack, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX,
+    ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
+use hirari_core_bridge::project_contracts::MidiNoteContract;
 
 /// Snap divisions offered by the toolbar picker (Slint `snap_val`
 /// denominators; the step is 4 beats / division, so 1/16 snaps to 0.25).
@@ -64,6 +68,62 @@ enum LaneDrag {
     TrimRight,
     /// A MIDI clip: select on press, drag does nothing (Slint parity).
     Hold,
+}
+
+/// In-progress piano-roll gesture; previewed in the canvas and committed
+/// to the engine as one full note-list replace on release.
+enum PianoEditKind {
+    Add,
+    Move,
+    Resize,
+}
+
+struct PianoEdit {
+    kind: PianoEditKind,
+    /// Index into the full `piano_notes` list; `None` for an added note.
+    note_index: Option<usize>,
+    down_x: f64,
+    down_y: f64,
+    orig_pitch: u8,
+    orig_start: f32,
+    orig_length: f32,
+    delta_beats: f32,
+    delta_pitches: i32,
+}
+
+/// Converts the parsed notes back to engine contracts for a full-list
+/// replace, with the same field clamping as the Slint commit path.
+fn notes_to_contracts(core: &HirariCore, notes: &[PianoNote]) -> Vec<MidiNoteContract> {
+    notes
+        .iter()
+        .map(|note| {
+            let start = core.beats_to_samples(f64::from(note.start_beat.max(0.0)));
+            let end = core.beats_to_samples(f64::from(
+                note.start_beat.max(0.0) + note.length_beats.max(0.015625),
+            ));
+            let length = end.saturating_sub(start).max(1);
+            MidiNoteContract {
+                track_id: note.track_id,
+                region_id: note.region_id,
+                pitch: note.pitch.clamp(0, 127),
+                midi_channel: note.midi_channel.clamp(0, 15),
+                articulation: note.articulation.clamp(0, 127),
+                velocity: note.velocity.clamp(1, 127),
+                start_sample: start,
+                length_samples: length,
+                lyric: note.lyric.clone(),
+                phoneme: note.phoneme.clone(),
+                pitch_curve_cents: note.pitch_curve_cents.clone(),
+                vibrato_depth_cents: note.vibrato_depth_cents,
+                vibrato_rate_millihz: note.vibrato_rate_millihz.clamp(500, 20_000),
+                portamento_samples: note
+                    .portamento_samples
+                    .min(length.min(u64::from(u32::MAX)) as u32),
+                probability: note.probability.clamp(0, 100),
+                repeat_count: note.repeat_count.max(1),
+            }
+        })
+        .collect()
 }
 
 pub struct HirariAmeApp {
@@ -97,12 +157,15 @@ pub struct HirariAmeApp {
     /// notes) and its parsed notes.
     piano_track: State<u32>,
     piano_notes: State<Vec<PianoNote>>,
+    /// Selected note index into `piano_notes` (for delete).
+    selected_note: State<Option<usize>>,
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
     /// Last drawn arrange layout, used to map pointer x back to a beat.
     arrange_geometry: ArrangeCanvasGeometry,
     piano_geometry: PianoRollGeometry,
+    piano_edit: Option<PianoEdit>,
     seeking: bool,
     panning: bool,
     pan_last_x: f64,
@@ -161,11 +224,13 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
         piano_notes: context.state(Vec::<PianoNote>::new()),
+        selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
         arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0),
         piano_geometry: piano_roll_geometry(0.0, 0.0, 128.0, &[]),
+        piano_edit: None,
         seeking: false,
         panning: false,
         pan_last_x: 0.0,
@@ -434,6 +499,82 @@ impl HirariAmeApp {
         }
     }
 
+    /// Commits the piano-roll gesture as one full note-list replace,
+    /// mirroring the Slint `sync_midi_notes_to_core` path: every note
+    /// keeps its authoring contract, the replace is one undo
+    /// transaction, and the roll republishes from the engine after.
+    fn commit_piano_edit(&mut self) {
+        let Some(edit) = self.piano_edit.take() else {
+            return;
+        };
+        if self.core.is_none() {
+            return;
+        }
+        let track_id = self.piano_track.get();
+        let step = 4.0 / self.arrange_snap_division.get().max(1.0);
+        let mut notes = self.piano_notes.get();
+        match edit.kind {
+            PianoEditKind::Add => {
+                let start = (edit.orig_start / step).round() * step;
+                let length = edit.delta_beats.max(step);
+                notes.push(PianoNote {
+                    track_id,
+                    region_id: 0,
+                    pitch: edit.orig_pitch,
+                    midi_channel: 0,
+                    articulation: 0,
+                    velocity: 100,
+                    start_beat: start.max(0.0),
+                    length_beats: length,
+                    lyric: String::new(),
+                    phoneme: String::new(),
+                    pitch_curve_cents: Vec::new(),
+                    vibrato_depth_cents: 0,
+                    vibrato_rate_millihz: 5_000,
+                    portamento_samples: 0,
+                    probability: 100,
+                    repeat_count: 1,
+                });
+            }
+            PianoEditKind::Move => {
+                if let Some(note) = edit.note_index.and_then(|index| notes.get_mut(index)) {
+                    note.start_beat = (edit.orig_start + edit.delta_beats).max(0.0);
+                    note.pitch =
+                        (i32::from(edit.orig_pitch) + edit.delta_pitches).clamp(0, 127) as u8;
+                } else {
+                    return;
+                }
+            }
+            PianoEditKind::Resize => {
+                if let Some(note) = edit.note_index.and_then(|index| notes.get_mut(index)) {
+                    note.length_beats = (edit.orig_length + edit.delta_beats).max(step);
+                } else {
+                    return;
+                }
+            }
+        }
+        self.replace_notes(notes);
+        self.selected_note.set(None);
+    }
+
+    /// Full note-list replace in one undo transaction, then republish
+    /// from the engine (mirrors `sync_midi_notes_to_core`).
+    fn replace_notes(&self, notes: Vec<PianoNote>) {
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        core.begin_undo_transaction("Edit MIDI Notes");
+        if core.replace_midi_note_contracts(notes_to_contracts(&core, &notes), true) {
+            let _ = core.end_undo_transaction();
+        } else {
+            let _ = core.abort_undo_transaction();
+        }
+        self.piano_notes
+            .set(parse_midi_notes(&core.midi_notes_json(), |samples| {
+                core.samples_to_beats(samples)
+            }));
+    }
+
     /// Commits the dragged clip move through the engine, mirroring the
     /// Slint `on_clip_moved` path: one undo transaction, sync-group aware,
     /// abort on failure, immediate layout refresh on success.
@@ -507,7 +648,7 @@ impl HirariAmeApp {
         let visible: Vec<PianoNote> = notes
             .iter()
             .filter(|note| note.track_id == track_id)
-            .copied()
+            .cloned()
             .collect();
         let timeline_end = self.timeline_end_beats.get();
         let geometry = piano_roll_geometry(bounds.width, bounds.height, timeline_end, &visible);
@@ -546,13 +687,16 @@ impl HirariAmeApp {
                 &Line::new((x0, y), (x0 + width, y)),
             );
         }
-        for note in &visible {
-            let x = x_for_beat(note.start_beat);
-            let note_width =
-                (f64::from(note.length_beats) * f64::from(geometry.px_per_beat)).max(2.0);
-            let y = y0 + f64::from(geometry.y_for_pitch(note.pitch));
+        // Notes are drawn from the full list so the edit preview can
+        // find its note by global index; the preview (move/resize/add)
+        // replaces the committed geometry until release.
+        let step = 4.0 / self.arrange_snap_division.get().max(1.0);
+        let mut draw_note = |pitch: u8, start_beat: f32, length_beats: f32, velocity: u8| {
+            let x = x_for_beat(start_beat);
+            let note_width = (f64::from(length_beats) * f64::from(geometry.px_per_beat)).max(2.0);
+            let y = y0 + f64::from(geometry.y_for_pitch(pitch));
             let row_height = f64::from(geometry.px_per_pitch);
-            let alpha = 90.0 + f64::from(note.velocity) * 80.0 / 127.0;
+            let alpha = 90.0 + f64::from(velocity) * 80.0 / 127.0;
             scene.fill(
                 Fill::NonZero,
                 Affine::IDENTITY,
@@ -560,6 +704,41 @@ impl HirariAmeApp {
                 None,
                 &RoundedRect::new(x, y + 1.0, x + note_width, y + row_height - 1.0, 2.0),
             );
+        };
+        for (global_index, note) in notes.iter().enumerate() {
+            if note.track_id != track_id {
+                continue;
+            }
+            let mut pitch = note.pitch;
+            let mut start_beat = note.start_beat;
+            let mut length_beats = note.length_beats;
+            if let Some(edit) = &self.piano_edit {
+                if edit.note_index == Some(global_index) {
+                    match edit.kind {
+                        PianoEditKind::Move => {
+                            start_beat = (edit.orig_start + edit.delta_beats).max(0.0);
+                            pitch = (i32::from(edit.orig_pitch) + edit.delta_pitches).clamp(0, 127)
+                                as u8;
+                        }
+                        PianoEditKind::Resize => {
+                            length_beats = (edit.orig_length + edit.delta_beats).max(step);
+                        }
+                        PianoEditKind::Add => {}
+                    }
+                }
+            }
+            draw_note(pitch, start_beat, length_beats, note.velocity);
+        }
+        if let Some(edit) = &self.piano_edit {
+            if matches!(edit.kind, PianoEditKind::Add) {
+                let start = (edit.orig_start / step).round() * step;
+                draw_note(
+                    edit.orig_pitch,
+                    start.max(0.0),
+                    edit.delta_beats.max(step),
+                    100,
+                );
+            }
         }
         let playhead = self.playhead_beats.get();
         if (0.0..=f64::from(timeline_end)).contains(&playhead) {
@@ -791,6 +970,98 @@ impl HirariAmeApp {
             );
         }
     }
+    /// Piano-roll gestures: press a note to move it (right edge resizes),
+    /// press empty space to add one, drag to preview, release to commit.
+    /// The arrange edit lock holds edits here too (selection only).
+    fn on_piano_pointer(&mut self, event: CanvasPointerEvent) -> bool {
+        let track_id = self.piano_track.get();
+        let geometry = self.piano_geometry;
+        match event.phase {
+            CanvasPointerPhase::Down => {
+                let notes = self.piano_notes.get();
+                let visible: Vec<(usize, PianoNote)> = notes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, note)| note.track_id == track_id)
+                    .map(|(index, note)| (index, note.clone()))
+                    .collect();
+                let visible_notes: Vec<PianoNote> =
+                    visible.iter().map(|(_, note)| note.clone()).collect();
+                let hit = note_at(&visible_notes, &geometry, event.x as f32, event.y as f32);
+                match hit {
+                    Some(visible_index) => {
+                        let (global_index, note) = visible[visible_index].clone();
+                        self.selected_note.set(Some(global_index));
+                        if self.arrange_locked.get() {
+                            return true;
+                        }
+                        let right_edge = geometry.x_for_beat(note.start_beat + note.length_beats);
+                        let kind = if (event.x as f32 - right_edge).abs() <= 6.0 {
+                            PianoEditKind::Resize
+                        } else {
+                            PianoEditKind::Move
+                        };
+                        self.piano_edit = Some(PianoEdit {
+                            kind,
+                            note_index: Some(global_index),
+                            down_x: event.x,
+                            down_y: event.y,
+                            orig_pitch: note.pitch,
+                            orig_start: note.start_beat,
+                            orig_length: note.length_beats,
+                            delta_beats: 0.0,
+                            delta_pitches: 0,
+                        });
+                        true
+                    }
+                    None => {
+                        if self.arrange_locked.get() {
+                            return false;
+                        }
+                        self.piano_edit = Some(PianoEdit {
+                            kind: PianoEditKind::Add,
+                            note_index: None,
+                            down_x: event.x,
+                            down_y: event.y,
+                            orig_pitch: geometry.pitch_at_y(event.y as f32),
+                            orig_start: geometry.beat_at_x(event.x as f32),
+                            orig_length: 0.0,
+                            delta_beats: 0.0,
+                            delta_pitches: 0,
+                        });
+                        true
+                    }
+                }
+            }
+            CanvasPointerPhase::Moved => {
+                let Some(edit) = self.piano_edit.as_mut() else {
+                    return false;
+                };
+                let step = 4.0 / self.arrange_snap_division.get().max(1.0);
+                let raw_beats = if geometry.px_per_beat > 0.0 {
+                    ((event.x - edit.down_x) / f64::from(geometry.px_per_beat)) as f32
+                } else {
+                    0.0
+                };
+                edit.delta_beats = (raw_beats / step).round() * step;
+                if geometry.px_per_pitch > 0.0 {
+                    edit.delta_pitches =
+                        ((edit.down_y - event.y) / f64::from(geometry.px_per_pitch)).round() as i32;
+                }
+                true
+            }
+            CanvasPointerPhase::Up => {
+                if self.piano_edit.is_some() {
+                    self.commit_piano_edit();
+                }
+                true
+            }
+            CanvasPointerPhase::Cancelled => {
+                self.piano_edit = None;
+                true
+            }
+        }
+    }
 }
 
 impl App for HirariAmeApp {
@@ -836,6 +1107,9 @@ impl App for HirariAmeApp {
     }
 
     fn on_canvas_pointer_event(&mut self, canvas_id: &str, event: CanvasPointerEvent) -> bool {
+        if canvas_id == "piano" {
+            return self.on_piano_pointer(event);
+        }
         if canvas_id != "arrange" {
             return false;
         }
@@ -1346,6 +1620,38 @@ impl App for HirariAmeApp {
             };
             piano_buttons.push(button.into());
         }
+        let delete_core = self.core.clone();
+        let delete_notes = self.piano_notes.clone();
+        let delete_selected = self.selected_note.clone();
+        let delete_button = ButtonView::new("DELETE")
+            .action_id("piano.delete_note")
+            .secondary()
+            .on_press(move |_| {
+                if delete_core.is_none() {
+                    return;
+                }
+                let Some(index) = delete_selected.get() else {
+                    return;
+                };
+                let mut notes = delete_notes.get();
+                if index < notes.len() {
+                    notes.remove(index);
+                    if let Some(core) = &delete_core {
+                        core.begin_undo_transaction("Edit MIDI Notes");
+                        if core.replace_midi_note_contracts(notes_to_contracts(core, &notes), true)
+                        {
+                            let _ = core.end_undo_transaction();
+                        } else {
+                            let _ = core.abort_undo_transaction();
+                        }
+                        delete_notes.set(parse_midi_notes(&core.midi_notes_json(), |samples| {
+                            core.samples_to_beats(samples)
+                        }));
+                    }
+                }
+                delete_selected.set(None);
+            });
+        piano_buttons.push(delete_button.into());
         let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
 
         View::VStack(vec![

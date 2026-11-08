@@ -571,23 +571,44 @@ pub fn trim_edge_at(
     }
 }
 
-/// One MIDI note reduced to what the piano roll draws. Metadata beyond
-/// pitch/velocity/position (lyric, articulation, vibrato) stays in the
-/// engine; per-note edits go through `set_midi_note`, which preserves it.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// One MIDI note with its full authoring contract, so piano-roll edits
+/// can commit a lossless `replace_midi_note_contracts` (lyric,
+/// articulation, vibrato and curve metadata survive an edit, exactly as
+/// the Slint roll preserves them through its UI model).
+#[derive(Debug, Clone, PartialEq)]
 pub struct PianoNote {
     pub track_id: u32,
+    pub region_id: u32,
     pub pitch: u8,
+    pub midi_channel: u8,
+    pub articulation: u8,
     pub velocity: u8,
     pub start_beat: f32,
     pub length_beats: f32,
+    pub lyric: String,
+    pub phoneme: String,
+    pub pitch_curve_cents: Vec<i16>,
+    pub vibrato_depth_cents: u16,
+    pub vibrato_rate_millihz: u16,
+    pub portamento_samples: u32,
+    pub probability: u8,
+    pub repeat_count: u16,
 }
 
-/// Parses the engine's canonical `midi_notes_json` into drawable notes,
-/// sanitized like the Slint piano roll (`sanitize_notes`): pitches and
-/// velocities clamped, lengths floored, sorted by track/start/pitch.
-/// Malformed input yields no notes.
+/// Parses the engine's canonical `midi_notes_json` into notes, sanitized
+/// like the Slint piano roll (`sanitize_notes`): pitches and velocities
+/// clamped, lengths floored, sorted by track/start/pitch. Malformed
+/// input yields no notes.
 pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64) -> Vec<PianoNote> {
+    fn default_vibrato_rate() -> u16 {
+        5_000
+    }
+    fn default_probability() -> u8 {
+        100
+    }
+    fn default_repeat_count() -> u16 {
+        1
+    }
     #[derive(Deserialize)]
     struct NoteLayout {
         track_id: u32,
@@ -595,6 +616,28 @@ pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64)
         velocity: u8,
         start_sample: u64,
         length_samples: u64,
+        #[serde(default)]
+        region_id: u32,
+        #[serde(default)]
+        midi_channel: u8,
+        #[serde(default)]
+        articulation: u8,
+        #[serde(default)]
+        lyric: String,
+        #[serde(default)]
+        phoneme: String,
+        #[serde(default)]
+        pitch_curve_cents: Vec<i16>,
+        #[serde(default)]
+        vibrato_depth_cents: u16,
+        #[serde(default = "default_vibrato_rate")]
+        vibrato_rate_millihz: u16,
+        #[serde(default)]
+        portamento_samples: u32,
+        #[serde(default = "default_probability")]
+        probability: u8,
+        #[serde(default = "default_repeat_count")]
+        repeat_count: u16,
     }
     let Ok(layouts) = serde_json::from_str::<Vec<NoteLayout>>(notes_json) else {
         return Vec::new();
@@ -610,10 +653,21 @@ pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64)
             }
             Some(PianoNote {
                 track_id: layout.track_id,
+                region_id: layout.region_id,
                 pitch: layout.pitch.min(127),
+                midi_channel: layout.midi_channel.min(15),
+                articulation: layout.articulation.min(127),
                 velocity: layout.velocity.clamp(1, 127),
                 start_beat: start_beat.max(0.0) as f32,
                 length_beats: ((end_beat - start_beat).max(0.015625)) as f32,
+                lyric: layout.lyric,
+                phoneme: layout.phoneme,
+                pitch_curve_cents: layout.pitch_curve_cents,
+                vibrato_depth_cents: layout.vibrato_depth_cents,
+                vibrato_rate_millihz: layout.vibrato_rate_millihz.clamp(500, 20_000),
+                portamento_samples: layout.portamento_samples,
+                probability: layout.probability.min(100),
+                repeat_count: layout.repeat_count.max(1),
             })
         })
         .collect::<Vec<_>>();
@@ -624,6 +678,15 @@ pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64)
             .then_with(|| a.pitch.cmp(&b.pitch))
     });
     notes
+}
+
+/// Index (into `notes`) of the note under a canvas point, if any.
+pub fn note_at(notes: &[PianoNote], geometry: &PianoRollGeometry, x: f32, y: f32) -> Option<usize> {
+    let pitch = geometry.pitch_at_y(y);
+    let beat = geometry.beat_at_x(x);
+    notes.iter().position(|note| {
+        note.pitch == pitch && beat >= note.start_beat && beat < note.start_beat + note.length_beats
+    })
 }
 
 /// Pixel layout of one piano-roll canvas, fit-to-width like the arrange
@@ -1021,6 +1084,8 @@ mod tests {
         assert_eq!(notes[1].velocity, 1);
         assert_eq!(notes[1].length_beats, 0.015625);
         assert_eq!(notes[2].start_beat, 2.0);
+        assert_eq!(notes[2].probability, 100);
+        assert_eq!(notes[2].repeat_count, 1);
         assert!(parse_midi_notes("nope", |_| 0.0).is_empty());
     }
 
@@ -1033,6 +1098,17 @@ mod tests {
                 velocity: 100,
                 start_beat: 0.0,
                 length_beats: 1.0,
+                region_id: 0,
+                midi_channel: 0,
+                articulation: 0,
+                lyric: String::new(),
+                phoneme: String::new(),
+                pitch_curve_cents: Vec::new(),
+                vibrato_depth_cents: 0,
+                vibrato_rate_millihz: 5_000,
+                portamento_samples: 0,
+                probability: 100,
+                repeat_count: 1,
             },
             PianoNote {
                 track_id: 0,
@@ -1040,6 +1116,17 @@ mod tests {
                 velocity: 90,
                 start_beat: 4.0,
                 length_beats: 2.0,
+                region_id: 0,
+                midi_channel: 0,
+                articulation: 0,
+                lyric: String::new(),
+                phoneme: String::new(),
+                pitch_curve_cents: Vec::new(),
+                vibrato_depth_cents: 0,
+                vibrato_rate_millihz: 5_000,
+                portamento_samples: 0,
+                probability: 100,
+                repeat_count: 1,
             },
         ];
         // 640px / 128 beats = 5 px/beat; pitches 58..74 = 17 rows.
@@ -1056,6 +1143,53 @@ mod tests {
         // Empty roll shows the default window.
         let empty = piano_roll_geometry(640.0, 130.0, 128.0, &[]);
         assert_eq!((empty.top_pitch, empty.bottom_pitch), (72, 60));
+    }
+
+    #[test]
+    fn note_at_hits_pitch_and_beat() {
+        let notes = vec![
+            PianoNote {
+                track_id: 0,
+                region_id: 0,
+                pitch: 60,
+                midi_channel: 0,
+                articulation: 0,
+                velocity: 100,
+                start_beat: 0.0,
+                length_beats: 1.0,
+                lyric: String::new(),
+                phoneme: String::new(),
+                pitch_curve_cents: Vec::new(),
+                vibrato_depth_cents: 0,
+                vibrato_rate_millihz: 5_000,
+                portamento_samples: 0,
+                probability: 100,
+                repeat_count: 1,
+            },
+            PianoNote {
+                track_id: 0,
+                region_id: 0,
+                pitch: 72,
+                midi_channel: 0,
+                articulation: 0,
+                velocity: 90,
+                start_beat: 4.0,
+                length_beats: 2.0,
+                lyric: String::new(),
+                phoneme: String::new(),
+                pitch_curve_cents: Vec::new(),
+                vibrato_depth_cents: 0,
+                vibrato_rate_millihz: 5_000,
+                portamento_samples: 0,
+                probability: 100,
+                repeat_count: 1,
+            },
+        ];
+        let geometry = piano_roll_geometry(640.0, 170.0, 128.0, &notes);
+        // Pitch 72 is the top row's 3rd line down (74,73,72): y=25 hits it
+        // at beat 5 (x=25).
+        assert_eq!(note_at(&notes, &geometry, 25.0, 25.0), Some(1));
+        assert_eq!(note_at(&notes, &geometry, 25.0, 5.0), None);
     }
 
     #[test]

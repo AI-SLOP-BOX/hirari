@@ -57,7 +57,8 @@ Notes:
 | 12 | `d605673` | Mixer strips: the track list becomes per-track fader/pan sliders plus mute/solo/arm toggles, wired to the same engine setters as the Slint mixer. `ArrangeTrack` now carries the mixer state. |
 | 13 | `3d5b596` | Project bar: Open/Save/New via `rfd` dialogs and `load_project`/`save_project`/`new_project`, with path memory and selection reset on project change. |
 | 14 | `1f50643` | Transport extras: Loop and metronome toggle buttons, polled from `is_loop_enabled`/`is_metronome_enabled`. Adds the missing `HirariCore` metronome forwarders in the bridge. |
-| 15 | (this work) | Piano roll (read-only): neutral `parse_midi_notes` + `piano_roll_geometry`, track picker, note canvas with beat grid, velocity-shaded notes and playhead. Editing gestures are next. |
+| 15 | `d2cd6cb` | Piano roll (read-only): neutral `parse_midi_notes` + `piano_roll_geometry`, track picker, note canvas with beat grid, velocity-shaded notes and playhead. |
+| 16 | (this work) | Piano roll editing: press a note to move it (right edge resizes), press empty space to add one, DELETE removes the selection; commits as one full note-list replace in an undo transaction. `PianoNote` now carries the full authoring contract (lyric/articulation/vibrato survive edits). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -99,11 +100,12 @@ same-window drop, window title syncing, close-request and shortcut
 hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 (add/move/resize/delete via full note-list replace).
 
-## Next surface: piano roll (editing)
+## Next surface: piano roll (extras)
 
 The arrange dock + mixer + project + transport are at parity (text
-excepted), and the piano roll is read-only since slice 15. Remaining for
-the roll: add/move/resize/delete gestures. Entry points:
+excepted), and the piano roll edits since slice 16. Remaining for the
+roll: velocity/articulation/lyric editing, quantize, chord/progression
+tools, drum mode, CC lanes. Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see
   `hirari-core-bridge/src/runtime/hirari_core_arrangement_midi_editing.rs`)
