@@ -28,17 +28,16 @@
 //! the native file dialog (async, delivered on the poll); slice 30
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
 //! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
-//! colors in the canvases; slice 34 adds the plugin parameter
-//! strip; slice 35 adds drum mode; slice 36 adds read-only
-//! automation overlays; slice 37 adds automation editing (AUTO mode:
-//! add/move/delete points); slice 38 adds audio settings. Audio
-//! playback is real; the Slint UI remains the default entry until the port
-//! reaches parity.
+//! colors in the canvases; slice 34 adds the plugin parameter strip;
+//! slice 35 adds drum mode; slice 36 adds read-only automation
+//! overlays; slice 37 adds automation editing (AUTO mode); slice 38
+//! adds audio settings; slice 39 adds device selection; slice 40
+//! adds plugin preset save/load. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
 //! `AppMessage("tick")` through the event-loop proxy; `on_event` does the poll.
-
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
@@ -304,6 +303,8 @@ pub struct HirariAmeApp {
     /// by the poll (the engine is not `Send`, so dialogs never touch it).
     pending_open: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     pending_save: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    /// Chosen preset file plus its target track/plugin for load/save.
+    pending_preset: std::sync::Arc<std::sync::Mutex<Option<(std::path::PathBuf, bool, u32, u32)>>>,
     /// Last arrange canvas bounds, to map a file drop to lane/beat.
     arrange_bounds: (f32, f32, f32, f32),
     /// Last drawn inputs for the dirty-canvas check (see
@@ -395,6 +396,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         project_path: Rc::new(RefCell::new(None)),
         pending_open: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_preset: std::sync::Arc::new(std::sync::Mutex::new(None)),
         arrange_bounds: (0.0, 0.0, 0.0, 0.0),
         dirty_playhead: Cell::new(f64::NAN),
         dirty_zoom: Cell::new(-1.0),
@@ -466,6 +468,30 @@ impl HirariAmeApp {
                 }
                 _ => self.status.set("IMPORT FAILED".to_owned()),
             }
+        }
+        // Preset dialog results (path + save flag + target) execute here.
+        if let Some((path, save, track_id, plugin_index)) = self
+            .pending_preset
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            let accepted = if save {
+                core.save_plugin_preset(track_id, plugin_index, &path.to_string_lossy())
+            } else {
+                core.load_plugin_preset(track_id, plugin_index, &path.to_string_lossy())
+            };
+            self.status.set(if accepted {
+                format!(
+                    "PRESET {}",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default()
+                )
+            } else {
+                "PRESET REJECTED".to_owned()
+            });
         }
         // File-dialog results arrive from the async native dialog on a
         // background thread; the engine work happens here on the UI thread.
@@ -3446,6 +3472,53 @@ impl App for HirariAmeApp {
                                 });
                             param_rows
                                 .push(View::HStack(vec![View::Caption(label), slider.into()]));
+                        }
+                        // Preset save/load for this plugin (Slint
+                        // on_save_preset/on_load_preset via native dialogs).
+                        let preset_pending = self.pending_preset.clone();
+                        let preset_track = params_track_id;
+                        let preset_plugin = plugin_index;
+                        for (label, is_save) in [("SAVE PRESET", true), ("LOAD PRESET", false)] {
+                            let pending = preset_pending.clone();
+                            let preset_button = ButtonView::new(label)
+                                .action_id(format!(
+                                    "plugin.preset.{}",
+                                    if is_save { "save" } else { "load" }
+                                ))
+                                .secondary()
+                                .on_press(move |_| {
+                                    let dialog = ame_ui::platform::NativeFileDialog::new()
+                                        .add_filter("Hirari Plugin Preset", &["aupreset"]);
+                                    let pending = pending.clone();
+                                    if is_save {
+                                        dialog.save_file_async(move |path| {
+                                            if let Some(path) = path {
+                                                if let Ok(mut slot) = pending.lock() {
+                                                    *slot = Some((
+                                                        path,
+                                                        true,
+                                                        preset_track,
+                                                        preset_plugin,
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        dialog.pick_file_async(move |path| {
+                                            if let Some(path) = path {
+                                                if let Ok(mut slot) = pending.lock() {
+                                                    *slot = Some((
+                                                        path,
+                                                        false,
+                                                        preset_track,
+                                                        preset_plugin,
+                                                    ));
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                            param_rows.push(preset_button.into());
                         }
                         views.push(View::Card(vec![View::VStack(param_rows)]));
                     }
