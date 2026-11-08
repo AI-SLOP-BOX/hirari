@@ -8,6 +8,11 @@ production support.
 
 ### Added
 
+- Rust VST3 hosting in the isolated plugin worker, gated by `HIRARI_VST3_SDK`.
+  The SDK-built adapter handles load/process/reset, MIDI and normalized
+  parameter delivery, component/controller state, and output MIDI; without the
+  SDK, VST3 requests remain fail-closed. A Surge XT smoke test covers the
+  load/process/state cycle.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

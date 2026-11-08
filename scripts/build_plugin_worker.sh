@@ -11,6 +11,8 @@ case "$TARGET_DIR" in /*) ;; *) TARGET_DIR="$ROOT_DIR/$TARGET_DIR" ;; esac
 # limits, mapping, adapter selection, the control loop and teardown all live in
 # hirari-plugin-protocol, and the macOS AudioUnit surface links its own
 # frameworks through the crate's `#[link]` attributes.
+# Set HIRARI_VST3_SDK to an official Steinberg VST3 SDK checkout to compile the
+# VST3 adapter into the worker; without it, VST3 requests fail closed.
 cargo build --manifest-path "$ROOT_DIR/Cargo.toml" -p hirari-plugin-protocol \
     --release --features worker-runtime --bin hirari-plugin-host-worker
 BUILT="$TARGET_DIR/release/hirari-plugin-host-worker"

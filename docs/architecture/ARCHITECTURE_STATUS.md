@@ -91,7 +91,7 @@ worker no longer implements the format, so loading one fails closed:
 | App bundle and native worker | Yes | Yes |
 | CLAP worker handshake/process/recovery | Yes | Yes |
 | AU real-device smoke | No | Yes on macOS AU jobs |
-| VST3 hosting | No | Not implemented; the worker reports the format unavailable |
+| VST3 hosting | Conditional | Implemented in the Rust worker via an optional official-SDK adapter; without `HIRARI_VST3_SDK` it remains fail-closed |
 
 The build target `hirari-verify-release` is the strict entry point. It builds
 the app, builds the CLAP fixture, runs the full test gate, and then verifies

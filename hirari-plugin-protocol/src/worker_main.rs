@@ -2,9 +2,9 @@
 //!
 //! The CLAP loader, AudioUnit host, mailbox mapping and control loop all live
 //! in this crate, and the mailbox layout itself is in `mailbox`, so the worker
-//! process is Rust from `main` down. VST3 was retired together with the
-//! official-SDK adapter, so a VST3 request fails closed here rather than
-//! reaching a format adapter.
+//! process is Rust from `main` down. VST3 is compiled from the official SDK
+//! adapter only when `HIRARI_VST3_SDK` is set; without it, a VST3 request
+//! fails closed here rather than reaching a format adapter.
 
 use core::ffi::{c_char, c_void, CStr};
 use core::sync::atomic::Ordering;
@@ -17,6 +17,29 @@ use crate::au_host::{
     hirari_au_instance_destroy, hirari_au_instance_load, hirari_au_instance_reset,
     hirari_au_process_block, hirari_au_state_block,
 };
+#[cfg(vst3_sdk)]
+extern "C" {
+    fn hirari_worker_vst3_load(
+        path: *const c_char,
+        sample_rate: f64,
+        max_frames: u32,
+        midi_instrument: *mut bool,
+    ) -> *mut c_void;
+    fn hirari_worker_vst3_destroy(instance: *mut c_void);
+    fn hirari_worker_vst3_reset(
+        instance: *mut c_void,
+        sample_rate: f64,
+        min_frames: u32,
+        max_frames: u32,
+    ) -> bool;
+    fn hirari_worker_vst3_process(
+        instance: *mut c_void,
+        opaque: *mut c_void,
+        channels: u32,
+        frames: u32,
+    ) -> bool;
+    fn hirari_worker_vst3_state(instance: *mut c_void, opaque: *mut c_void, mode: u8) -> u16;
+}
 use crate::clap_events::{
     hirari_clap_input_context_create, hirari_clap_input_context_destroy, hirari_clap_process_block,
     hirari_clap_state_block,
@@ -49,6 +72,7 @@ const _: () = assert!(MAX_FRAMES as usize == mailbox::MAX_FRAMES);
 const FORMAT_NONE: u8 = 0;
 const FORMAT_CLAP: u8 = 1;
 const FORMAT_AUDIO_UNIT: u8 = 2;
+const FORMAT_VST3: u8 = 3;
 
 unsafe extern "C" {
     fn write(fd: i32, buffer: *const c_void, count: usize) -> isize;
@@ -73,7 +97,13 @@ unsafe fn send_status(fd: i32, byte: u8) -> bool {
 }
 
 fn capabilities_json() -> &'static str {
-    if cfg!(target_os = "macos") {
+    if cfg!(vst3_sdk) {
+        if cfg!(target_os = "macos") {
+            "{\"clap\":true,\"au\":true,\"vst3\":true}\n"
+        } else {
+            "{\"clap\":true,\"au\":false,\"vst3\":true}\n"
+        }
+    } else if cfg!(target_os = "macos") {
         "{\"clap\":true,\"au\":true,\"vst3\":false}\n"
     } else {
         "{\"clap\":true,\"au\":false,\"vst3\":false}\n"
@@ -88,6 +118,7 @@ struct WorkerContext {
     clap_state: *const c_void,
     clap_input: *mut c_void,
     au_instance: *mut c_void,
+    vst3_instance: *mut c_void,
     sample_rate: f64,
     min_frames: u32,
     max_frames: u32,
@@ -121,6 +152,17 @@ extern "C" fn backend_reset(opaque: *mut c_void) -> bool {
         reset_ok = unsafe {
             hirari_au_instance_reset(
                 context.au_instance,
+                context.sample_rate,
+                context.min_frames,
+                context.max_frames,
+            )
+        } && reset_ok;
+    }
+    #[cfg(vst3_sdk)]
+    if !context.vst3_instance.is_null() {
+        reset_ok = unsafe {
+            hirari_worker_vst3_reset(
+                context.vst3_instance,
                 context.sample_rate,
                 context.min_frames,
                 context.max_frames,
@@ -166,6 +208,12 @@ extern "C" fn backend_state(opaque: *mut c_void, mode: u8) -> u16 {
                 core::ptr::from_mut(&mut block.state_version).cast::<c_void>(),
                 core::ptr::from_mut(&mut block.state_checksum).cast::<c_void>(),
             )
+        };
+    }
+    #[cfg(vst3_sdk)]
+    if !context.vst3_instance.is_null() {
+        return unsafe {
+            hirari_worker_vst3_state(context.vst3_instance, block as *mut _ as *mut c_void, mode)
         };
     }
     u16::from(STATE_ERROR_PLUGIN) << 8
@@ -231,6 +279,15 @@ extern "C" fn backend_process(
             }
             processed
         }
+        #[cfg(vst3_sdk)]
+        FORMAT_VST3 => unsafe {
+            hirari_worker_vst3_process(
+                context.vst3_instance,
+                context.mailbox as *mut c_void,
+                channels,
+                frames,
+            )
+        },
         _ => true,
     }
 }
@@ -328,6 +385,7 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
         clap_state: core::ptr::null(),
         clap_input: core::ptr::null_mut(),
         au_instance: core::ptr::null_mut(),
+        vst3_instance: core::ptr::null_mut(),
         sample_rate,
         min_frames,
         max_frames,
@@ -343,17 +401,30 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
         return 12;
     }
     let is_clap = formats & 1 != 0;
+    let is_vst3 = formats & 2 != 0;
     let is_audio_unit = formats & 4 != 0;
     let builtin_passthrough = options.builtin_passthrough != 0;
 
-    // VST3 hosting left with the official SDK adapter, so a VST3 request never
-    // reaches a format adapter: it fails closed with the same status byte the
-    // unsupported-SDK path reported.
+    // VST3 hosting needs the SDK-built adapter; without it a VST3 request
+    // fails closed with the same status byte the unsupported-SDK path
+    // reported.
+    #[cfg(not(vst3_sdk))]
     if formats & 2 != 0 {
         debug_log("VST3 hosting is not available in this worker");
         unsafe { send_status(status_fd, ERROR_UNSUPPORTED) };
         unsafe { hirari_plugin_worker_unmap_shared(shared, shared_bytes) };
         return 12;
+    }
+    #[cfg(vst3_sdk)]
+    if formats & 2 != 0 {
+        context.vst3_instance = unsafe {
+            hirari_worker_vst3_load(plugin_path, sample_rate, max_frames, &mut midi_instrument)
+        };
+        if context.vst3_instance.is_null() {
+            unsafe { send_status(status_fd, ERROR_INSTANCE) };
+            unsafe { hirari_plugin_worker_unmap_shared(shared, shared_bytes) };
+            return 10;
+        }
     }
     if is_audio_unit {
         #[cfg(target_os = "macos")]
@@ -390,7 +461,7 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
     } else {
         "plugin image resolved"
     });
-    if !(builtin_passthrough || is_audio_unit || is_clap) {
+    if !(builtin_passthrough || is_audio_unit || is_clap || is_vst3) {
         #[cfg(unix)]
         {
             let image_ptr = if image.as_bytes().is_empty() {
@@ -412,10 +483,9 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
         return 6;
     }
     #[cfg(unix)]
-    if !(builtin_passthrough || is_audio_unit || is_clap) {
-        // No Rust-owned adapter claims this binary, and the VST3 factory symbol
-        // that used to be the one accepted entry point is gone with the
-        // adapter, so an unknown image is always an ABI failure.
+    if !(builtin_passthrough || is_audio_unit || is_clap || is_vst3) {
+        // No Rust-owned adapter claims this binary outside the SDK-built
+        // VST3 path, so an unknown image is always an ABI failure.
         unsafe { send_status(status_fd, ERROR_ABI) };
         unsafe {
             dlclose(plugin_handle);
@@ -474,6 +544,8 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
         FORMAT_CLAP
     } else if !context.au_instance.is_null() {
         FORMAT_AUDIO_UNIT
+    } else if !context.vst3_instance.is_null() {
+        FORMAT_VST3
     } else {
         FORMAT_NONE
     };
@@ -525,6 +597,11 @@ unsafe fn destroy_worker_resources(context: &mut WorkerContext, plugin_handle: *
             hirari_au_instance_destroy(context.au_instance);
             context.au_instance = core::ptr::null_mut();
         }
+        #[cfg(vst3_sdk)]
+        if !context.vst3_instance.is_null() {
+            hirari_worker_vst3_destroy(context.vst3_instance);
+            context.vst3_instance = core::ptr::null_mut();
+        }
         #[cfg(unix)]
         if !plugin_handle.is_null() && plugin_handle != 1_usize as *mut c_void {
             dlclose(plugin_handle);
@@ -541,6 +618,9 @@ mod tests {
         let json = capabilities_json();
         assert!(json.starts_with("{\"clap\":true"));
         assert!(json.ends_with("}\n"));
+        #[cfg(vst3_sdk)]
+        assert!(json.contains("\"vst3\":true"));
+        #[cfg(not(vst3_sdk))]
         assert!(json.contains("\"vst3\":false"));
     }
 
@@ -553,6 +633,7 @@ mod tests {
             clap_state: core::ptr::null(),
             clap_input: core::ptr::null_mut(),
             au_instance: core::ptr::null_mut(),
+            vst3_instance: core::ptr::null_mut(),
             sample_rate: 48_000.0,
             min_frames: 1,
             max_frames: MAX_FRAMES,

@@ -2614,6 +2614,7 @@ dependencies = [
 name = "hirari-plugin-protocol"
 version = "0.1.0"
 dependencies = [
+ "cc",
  "coreaudio-sys",
 ]
 
