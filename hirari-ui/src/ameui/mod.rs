@@ -19,8 +19,9 @@
 //! quantize and velocity stepping; slice 18 adds chord insert and
 //! delete-all; slice 19 adds note lyric editing; slice 20 adds the
 //! articulation stepper; slice 21 adds keyboard shortcuts (Space
-//! plays, L loops). Audio playback is real; the Slint UI remains the
-//! default entry until the port reaches parity.
+//! plays, L loops); slice 22 adds progression insert. Audio playback
+//! is real; the Slint UI remains the default entry until the port
+//! reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -180,6 +181,7 @@ pub struct HirariAmeApp {
     chord_quality: State<u32>,
     chord_length: State<f32>,
     chord_inversion: State<u32>,
+    progression_preset: State<u32>,
     /// Selected note index into `piano_notes` (for delete).
     selected_note: State<Option<usize>>,
     status: State<String>,
@@ -251,6 +253,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         chord_quality: context.state(0u32),
         chord_length: context.state(4.0f32),
         chord_inversion: context.state(0u32),
+        progression_preset: context.state(0u32),
         selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
@@ -1897,6 +1900,112 @@ impl App for HirariAmeApp {
             chord_button.into(),
             clear_button.into(),
         ]);
+        // Progression insert (Slint insert-progression): four chords
+        // from the preset tables at the playhead, each a chord-length
+        // apart, with the engine chord-symbol events.
+        let preset_state = self.progression_preset.clone();
+        let preset_button = ButtonView::new(format!("P{}", self.progression_preset.get() + 1))
+            .action_id("piano.progression_preset")
+            .secondary()
+            .on_press(move |_| {
+                preset_state.set((preset_state.get() + 1) % 3);
+            });
+        let prog_core = self.core.clone();
+        let prog_notes = self.piano_notes.clone();
+        let prog_track = self.piano_track.clone();
+        let prog_root = self.chord_root.clone();
+        let prog_length = self.chord_length.clone();
+        let prog_inversion = self.chord_inversion.clone();
+        let prog_preset = self.progression_preset.clone();
+        let prog_locked = self.arrange_locked.clone();
+        let prog_playhead = self.playhead_beats.clone();
+        let prog_button = ButtonView::new("PROG")
+            .action_id("piano.progression_insert")
+            .secondary()
+            .on_press(move |_| {
+                if prog_locked.get() {
+                    return;
+                }
+                let Some(core) = &prog_core else { return };
+                let root = prog_root.get() as i32;
+                let length = prog_length.get();
+                let inversion = prog_inversion.get();
+                let preset = prog_preset.get();
+                if !(0..=127).contains(&root)
+                    || !(0.0625..=64.0).contains(&length)
+                    || preset > 2
+                    || inversion > 2
+                {
+                    return;
+                }
+                let progressions: [[i32; 4]; 3] = [[0, 7, 9, 5], [9, 5, 0, 7], [0, 9, 5, 7]];
+                let qualities: [[i32; 4]; 3] = [[0, 0, 1, 0], [1, 0, 0, 0], [0, 1, 0, 0]];
+                let track_id = prog_track.get();
+                let beat = prog_playhead.get().max(0.0) as f32;
+                let mut notes = prog_notes.get();
+                for chord_index in 0..4 {
+                    let chord_root = root + progressions[preset as usize][chord_index];
+                    let chord_quality = qualities[preset as usize][chord_index];
+                    let base_intervals: &[i32] = if chord_quality == 0 {
+                        &[0, 4, 7]
+                    } else {
+                        &[0, 3, 7]
+                    };
+                    let mut intervals = base_intervals.to_vec();
+                    let rotation = (inversion as usize).min(intervals.len().saturating_sub(1));
+                    for _ in 0..rotation {
+                        let first = intervals.remove(0) + 12;
+                        intervals.push(first);
+                    }
+                    let chord_beat = beat + chord_index as f32 * length;
+                    for interval in &intervals {
+                        let pitch = chord_root + *interval;
+                        if !(0..=127).contains(&pitch) {
+                            continue;
+                        }
+                        let pitch = pitch as u8;
+                        if notes.iter().any(|note| {
+                            note.track_id == track_id
+                                && note.pitch == pitch
+                                && (note.start_beat - chord_beat).abs() < 0.01
+                        }) {
+                            continue;
+                        }
+                        notes.push(PianoNote {
+                            track_id,
+                            region_id: 0,
+                            pitch,
+                            midi_channel: 0,
+                            articulation: 0,
+                            velocity: 100,
+                            start_beat: chord_beat,
+                            length_beats: length,
+                            lyric: String::new(),
+                            phoneme: String::new(),
+                            pitch_curve_cents: Vec::new(),
+                            vibrato_depth_cents: 0,
+                            vibrato_rate_millihz: 5_000,
+                            portamento_samples: 0,
+                            probability: 100,
+                            repeat_count: 1,
+                        });
+                    }
+                    if (0..=127).contains(&chord_root) {
+                        let _ = core.add_chord_event(
+                            (f64::from(chord_beat.max(0.0)) * 480.0).round() as u64,
+                            chord_root as u8,
+                            intervals
+                                .iter()
+                                .map(|interval| (*interval).clamp(0, 127) as u8)
+                                .collect(),
+                            if chord_quality == 0 { "major" } else { "minor" },
+                        );
+                    }
+                }
+                replace_notes(core, &prog_notes, notes);
+            });
+        piano_buttons.push(preset_button.into());
+        piano_buttons.push(prog_button.into());
         // Lyric editor for the selected note; commits on submit, like the
         // Slint lyric field. The text buffer is shared between the change
         // and submit closures so Enter commits the typed value.
