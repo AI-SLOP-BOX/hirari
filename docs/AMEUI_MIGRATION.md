@@ -80,9 +80,12 @@ Not yet (suggested order):
 3. **Text in the canvas** — lane headers and clip names. Blocked on the
    framework: AmeUI's host canvas API exposes textures and vector
    shapes only; `draw_text` is crate-internal (`widgets/render.rs`), so
-   host apps cannot draw text into a canvas scene. Until AmeUI exports
-   a host text helper, the track list below the canvas carries the
-   names. (The arrange dock's edit lock landed in slice 11.)
+   host apps cannot draw text into a canvas scene. Filed as the first
+   item of the Hirari section in AmeUI's `REQUESTS.md` (2026-11-08, plus
+   follow-ups: cursor, double-click, hover spec, theme, a11y, file
+   drop, canvas sizing). Until AmeUI exports a host text helper, the
+   track list below the canvas carries the names. (The arrange dock's
+   edit lock landed in slice 11.)
 4. **Slint deletion gate** — once the above reach parity, flip the
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
