@@ -52,7 +52,7 @@ use std::time::Duration;
 use ame_ui::app::{
     App, AppEventSender, CanvasAccessibilityItem, CanvasBounds, CanvasContext, CanvasGestureEvent,
     CanvasGestureKind, CanvasItemRole, CanvasPointerEvent, CanvasPointerPhase, CanvasScrollEvent,
-    State, StateContext, Viewport, WindowConfig,
+    CanvasTextVAlign, State, StateContext, Viewport, WindowConfig,
 };
 use ame_ui::event::{AmeEvent, KeyModifiers};
 use ame_ui::theme::Theme;
@@ -1262,22 +1262,20 @@ impl HirariAmeApp {
                     &rect,
                 );
                 if clip_width >= 24.0 {
-                    let label = context.elide_text(
-                        &clip.name,
-                        (clip_width - 8.0) as f32,
-                        10.0,
-                        &bounds,
-                        None,
-                    );
-                    context.draw_text(
+                    // Elision and vertical centering come from the landed
+                    // draw_text_in_rect; no local label math needed.
+                    context.draw_text_in_rect(
                         scene,
                         &bounds,
-                        &label,
+                        &clip.name,
                         clip_x + 4.0,
-                        clip_y + (clip_height - 10.0) / 2.0,
+                        clip_y,
+                        clip_width - 8.0,
+                        clip_height,
                         10.0,
                         theme_text,
                         None,
+                        CanvasTextVAlign::Center,
                     );
                 }
                 // Waveform peaks, as in the Slint dock: 128 pairs windowed
