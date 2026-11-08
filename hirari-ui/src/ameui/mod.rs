@@ -3749,7 +3749,7 @@ impl App for HirariAmeApp {
             .on_change(move |value| {
                 search_state.set(value);
             });
-        let mut library_rows: Vec<View> = Vec::new();
+        let mut library_rows: Vec<(ame_ui::view::StableKey, View)> = Vec::new();
         for asset in library_assets.iter().filter(|asset| {
             library_filter.is_empty() || asset.name.to_lowercase().contains(&library_filter)
         }) {
@@ -3793,15 +3793,18 @@ impl App for HirariAmeApp {
                         }
                     }
                 });
-            library_rows.push(View::HStack(vec![
-                View::Text(asset.name.clone()),
-                View::Caption(format!(
-                    "{} Hz · {} bytes",
-                    asset.sample_rate as u32, asset.size_bytes
-                )),
-                play_button.into(),
-                import_button.into(),
-            ]));
+            library_rows.push((
+                ame_ui::view::StableKey::from(asset.id),
+                View::HStack(vec![
+                    View::Text(asset.name.clone()),
+                    View::Caption(format!(
+                        "{} Hz · {} bytes",
+                        asset.sample_rate as u32, asset.size_bytes
+                    )),
+                    play_button.into(),
+                    import_button.into(),
+                ]),
+            ));
         }
         views.push(View::Card(vec![
             View::HStack(vec![
@@ -3809,12 +3812,9 @@ impl App for HirariAmeApp {
                 scan_button.into(),
                 library_search.into(),
             ]),
-            View::ScrollView {
-                height: 140,
-                follow_bottom: false,
-                scroll_to: None,
-                children: vec![View::VStack(library_rows)],
-            },
+            // Variable-height virtual list: large sound folders stay
+            // scrollable without laying out every row up front.
+            View::virtual_list_variable_height(140, 32, 4, library_rows),
         ]));
         View::VStack(views)
     }
