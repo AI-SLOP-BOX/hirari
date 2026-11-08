@@ -79,7 +79,8 @@ Notes:
 | 34 | `45484f6` | Plugin parameters: a params strip (first 32) for the selected plugin with normalized sliders, wired to `get/set_plugin_parameter`. |
 | 35 | `142bf3d` | Drum mode: DRUM/PIANO toggle filtering the roll to GM drum lanes (35–81) with `drum_lane_label` row labels. |
 | 36 | `4c92f58` | Automation overlays (read-only): volume/pan points from the layout drawn as polylines through each arrange lane. |
-| 37 | (this work) | Automation editing: AUTO mode turns lane gestures into point add/move (snap + value deltas) with DEL PT removal, committing via `set_automation_data` in an undo transaction. |
+| 37 | `8b79940` | Automation editing: AUTO mode turns lane gestures into point add/move (snap + value deltas) with DEL PT removal, committing via `set_automation_data` in an undo transaction. |
+| 38 | (this work) | Audio settings: sample-rate/buffer cyclers, reconnect, device count and readiness readout, wired to `apply_audio_config`/`try_reconnect_audio_device`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -123,9 +124,9 @@ The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
 Remaining for the roll: CC lanes (unwired vestiges in Slint too).
-Beyond the roll: plugin preset/UI, settings/device, library — each
-its own multi-slice surface. (Automation editing landed in slice 37;
-read-only overlays in slice 36; drum mode in slice 35.)
+Beyond the roll: plugin preset/UI, device selection, library — each
+its own multi-slice surface. (Audio settings landed in slice 38;
+automation editing in slice 37.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

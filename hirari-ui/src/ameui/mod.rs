@@ -31,8 +31,9 @@
 //! colors in the canvases; slice 34 adds the plugin parameter
 //! strip; slice 35 adds drum mode; slice 36 adds read-only
 //! automation overlays; slice 37 adds automation editing (AUTO mode:
-//! add/move/delete points). Audio playback is real; the Slint UI remains
-//! the default entry until the port reaches parity.
+//! add/move/delete points); slice 38 adds audio settings. Audio
+//! playback is real; the Slint UI remains the default entry until the port
+//! reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -213,6 +214,9 @@ pub struct HirariAmeApp {
     tempo: State<f32>,
     playhead_beats: State<f64>,
     sample_rate: State<f64>,
+    audio_buffer: State<u32>,
+    audio_ready: State<bool>,
+    device_count: State<u32>,
     master_peak: State<f32>,
     tracks: State<Vec<ArrangeTrack>>,
     markers: State<Vec<ArrangeMarker>>,
@@ -329,6 +333,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         tempo: context.state(120.0f32),
         playhead_beats: context.state(0.0f64),
         sample_rate: context.state(0.0f64),
+        audio_buffer: context.state(256u32),
+        audio_ready: context.state(false),
+        device_count: context.state(0u32),
         master_peak: context.state(0.0f32),
         tracks: context.state(Vec::<ArrangeTrack>::new()),
         markers: context.state(Vec::<ArrangeMarker>::new()),
@@ -411,6 +418,7 @@ impl HirariAmeApp {
             return;
         };
         self.playing.set(core.is_playing());
+        self.audio_ready.set(core.is_audio_device_ready());
         self.loop_enabled.set(core.is_loop_enabled());
         self.metronome_enabled.set(core.is_metronome_enabled());
         self.tempo.set(core.get_tempo());
@@ -432,6 +440,11 @@ impl HirariAmeApp {
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
             self.poll_waveforms(&core);
+            let count = serde_json::from_str::<serde_json::Value>(&core.list_audio_devices_json())
+                .ok()
+                .and_then(|value| value.as_array().map(|array| array.len() as u32))
+                .unwrap_or(0);
+            self.device_count.set(count);
         }
         // Dropped-file imports complete asynchronously; poll the ticket
         // each tick like the Slint import poller.
@@ -2189,6 +2202,77 @@ impl App for HirariAmeApp {
             View::Caption(status),
         ])]);
 
+        // Audio settings (Slint audio_settings parity): sample-rate and
+        // buffer cyclers plus reconnect, read from the engine each poll.
+        let audio_ready = self.audio_ready.get();
+        let audio_devices = self.device_count.get();
+        let audio_buffer = self.audio_buffer.get();
+        let rate_core = self.core.clone();
+        let rate_state = self.audio_buffer.clone();
+        let rate_sample_rate = self.sample_rate.clone();
+        let rate_status = self.status.clone();
+        let rate_button = ButtonView::new(format!("{:.0} kHz", sample_rate / 1000.0))
+            .action_id("audio.sample_rate_cycle")
+            .secondary()
+            .on_press(move |_| {
+                const RATES: [u32; 5] = [44_100, 48_000, 88_200, 96_000, 192_000];
+                let Some(core) = &rate_core else { return };
+                let current = rate_sample_rate.get() as u32;
+                let next = RATES
+                    .iter()
+                    .copied()
+                    .find(|rate| *rate > current)
+                    .unwrap_or(RATES[0]);
+                if core.apply_audio_config(next, rate_state.get()) {
+                    rate_status.set(format!("AUDIO {} Hz", next));
+                } else {
+                    rate_status.set("AUDIO CONFIG FAILED".to_owned());
+                }
+            });
+        let buffer_core = self.core.clone();
+        let buffer_state = self.audio_buffer.clone();
+        let buffer_sample_rate = self.sample_rate.clone();
+        let buffer_status = self.status.clone();
+        let buffer_button = ButtonView::new(format!("{audio_buffer} spl"))
+            .action_id("audio.buffer_cycle")
+            .secondary()
+            .on_press(move |_| {
+                const SIZES: [u32; 7] = [32, 64, 128, 256, 512, 1024, 2048];
+                let Some(core) = &buffer_core else { return };
+                let next = SIZES
+                    .iter()
+                    .copied()
+                    .find(|size| *size > buffer_state.get())
+                    .unwrap_or(SIZES[0]);
+                buffer_state.set(next);
+                let rate = buffer_sample_rate.get().max(1.0) as u32;
+                if core.apply_audio_config(rate, next) {
+                    buffer_status.set(format!("AUDIO BUFFER {}", next));
+                } else {
+                    buffer_status.set("AUDIO CONFIG FAILED".to_owned());
+                }
+            });
+        let reconnect_core = self.core.clone();
+        let reconnect_button = ButtonView::new("RECONNECT")
+            .action_id("audio.reconnect")
+            .secondary()
+            .on_press(move |_| {
+                if let Some(core) = &reconnect_core {
+                    core.try_reconnect_audio_device();
+                }
+            });
+        let audio_card = View::Card(vec![View::HStack(vec![
+            View::Text("AUDIO".to_owned()),
+            rate_button.into(),
+            buffer_button.into(),
+            reconnect_button.into(),
+            View::Caption(format!(
+                "{} devices · {}",
+                audio_devices,
+                if audio_ready { "READY" } else { "NO DEVICE" }
+            )),
+        ])]);
+
         // Arrange toolbar (Slint dock header): zoom steps match the Slint
         // ±1.25 buttons; FIT returns to fit-to-width. Ruler drag pans.
         let zoom_out_state = self.arrange_zoom.clone();
@@ -3238,6 +3322,7 @@ impl App for HirariAmeApp {
             project_bar,
             transport,
             meter,
+            audio_card,
             arrange_toolbar,
             View::canvas("waveform").grow(1),
             View::canvas("arrange").grow(3),
