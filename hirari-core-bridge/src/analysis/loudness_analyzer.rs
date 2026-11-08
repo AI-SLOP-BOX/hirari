@@ -26,6 +26,13 @@ pub struct LoudnessAnalyzerEngine {
     previous_r: f32,
     previous2_l: f32,
     previous2_r: f32,
+    /// Rolling per-sample energies for the gated integrated loudness:
+    /// 400ms blocks at 75% overlap (100ms hop), as block mean energies.
+    gated_window: Vec<f32>,
+    gated_sum: f64,
+    gated_count: usize,
+    gated_hop: usize,
+    gated_blocks: Vec<f64>,
 }
 
 fn safe_sample_rate(sr: f64) -> f64 {
@@ -69,6 +76,11 @@ impl LoudnessAnalyzerEngine {
             previous_r: 0.0,
             previous2_l: 0.0,
             previous2_r: 0.0,
+            gated_window: vec![0.0; momentary_window_size],
+            gated_sum: 0.0,
+            gated_count: 0,
+            gated_hop: 0,
+            gated_blocks: Vec::new(),
         }
     }
 
@@ -88,6 +100,75 @@ impl LoudnessAnalyzerEngine {
         self.previous_r = 0.0;
         self.previous2_l = 0.0;
         self.previous2_r = 0.0;
+        self.gated_window = vec![0.0; self.momentary_window_size];
+        self.gated_sum = 0.0;
+        self.gated_count = 0;
+        self.gated_hop = 0;
+        self.gated_blocks.clear();
+    }
+
+    fn gated_block_energy(loudness_lufs: f64) -> f64 {
+        10f64.powf((loudness_lufs + 0.691) / 10.0)
+    }
+
+    /// BS.1770 gated integrated loudness over the accumulated 400ms
+    /// blocks: absolute gate at −70 LUFS, then a relative gate 10 LU
+    /// below the ungated mean of the survivors. Silence yields −70.
+    pub fn integrated_lufs(&self) -> f32 {
+        self.gated_loudness(-70.0, -10.0) as f32
+    }
+
+    /// Loudness range (EBU R128): 95th minus 10th percentile of the
+    /// 400ms short-term loudness distribution after the absolute gate,
+    /// with the relative gate 20 LU below the integrated value.
+    pub fn loudness_range_lu(&self) -> f32 {
+        let integrated = self.gated_loudness(-70.0, -10.0);
+        if !integrated.is_finite() || integrated <= -69.9 {
+            return 0.0;
+        }
+        let threshold = (integrated - 20.0).max(-70.0);
+        let mut short_term: Vec<f64> = self
+            .gated_blocks
+            .iter()
+            .map(|energy| -0.691 + 10.0 * energy.max(1e-12).log10())
+            .filter(|loudness| *loudness >= threshold)
+            .collect();
+        if short_term.len() < 2 {
+            return 0.0;
+        }
+        short_term.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let percentile = |p: f64| {
+            let index = (p * (short_term.len() - 1) as f64).round() as usize;
+            short_term[index.min(short_term.len() - 1)]
+        };
+        (percentile(0.95) - percentile(0.10)) as f32
+    }
+
+    fn gated_loudness(&self, absolute_gate: f64, relative_gate_lu: f64) -> f64 {
+        let blocks: Vec<f64> = self
+            .gated_blocks
+            .iter()
+            .copied()
+            .filter(|energy| {
+                -0.691 + 10.0 * energy.max(1e-12).log10() >= absolute_gate
+            })
+            .collect();
+        if blocks.is_empty() {
+            return absolute_gate;
+        }
+        let ungated_mean = blocks.iter().sum::<f64>() / blocks.len() as f64;
+        let threshold_energy = Self::gated_block_energy(
+            -0.691 + 10.0 * ungated_mean.max(1e-12).log10() + relative_gate_lu,
+        );
+        let survivors: Vec<f64> = blocks
+            .into_iter()
+            .filter(|energy| *energy >= threshold_energy)
+            .collect();
+        if survivors.is_empty() {
+            return absolute_gate;
+        }
+        let mean = survivors.iter().sum::<f64>() / survivors.len() as f64;
+        -0.691 + 10.0 * mean.max(1e-12).log10()
     }
 
     /// INDUSTRIAL: Processes an audio block with sliding windows and true peak estimation.
@@ -118,6 +199,24 @@ impl LoudnessAnalyzerEngine {
 
             self.energy_buffer[self.write_idx & mask] = energy;
             self.write_idx = self.write_idx.wrapping_add(1);
+
+            // Gated integrated-loudness accumulation: rolling 400ms mean
+            // energy, published every 100ms hop (75% overlap, BS.1770).
+            let window_len = self.gated_window.len();
+            if window_len > 0 {
+                let slot = self.gated_count % window_len;
+                self.gated_sum += energy as f64 - self.gated_window[slot] as f64;
+                self.gated_window[slot] = energy;
+                self.gated_count += 1;
+                self.gated_hop += 1;
+                if self.gated_hop >= (window_len / 4).max(1) {
+                    if self.gated_count >= window_len {
+                        self.gated_blocks
+                            .push(self.gated_sum.max(0.0) / window_len as f64);
+                    }
+                    self.gated_hop = 0;
+                }
+            }
 
             // 4x Catmull–Rom inter-sample peak estimate. Previous samples
             // persist across callback blocks so a boundary transition is not missed.
@@ -189,5 +288,63 @@ impl LoudnessAnalyzerEngine {
             && self.previous_r.is_finite()
             && self.previous2_l.is_finite()
             && self.previous2_r.is_finite()
+            && self.gated_window.len() == self.momentary_window_size
+            && self.gated_sum.is_finite()
+            && self.gated_blocks.iter().all(|energy| energy.is_finite())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sine_block(analyzer: &mut LoudnessAnalyzerEngine, amplitude: f32, milliseconds: u64) {
+        let frames = (analyzer.sample_rate * milliseconds as f64 / 1000.0) as usize;
+        let l: Vec<f32> = (0..frames)
+            .map(|i| {
+                amplitude * ((2.0 * std::f32::consts::PI * 1000.0 * i as f32) / 48_000.0).sin()
+            })
+            .collect();
+        let r = l.clone();
+        analyzer.process(&l, &r);
+    }
+
+    #[test]
+    fn silence_gates_to_floor() {
+        let mut analyzer = LoudnessAnalyzerEngine::new(48_000.0);
+        sine_block(&mut analyzer, 0.0, 2_000);
+        assert_eq!(analyzer.integrated_lufs(), -70.0);
+        assert_eq!(analyzer.loudness_range_lu(), 0.0);
+    }
+
+    #[test]
+    fn tone_integrates_near_theoretical_level() {
+        // 1kHz sine at 0.5 amplitude: unweighted mean square is 0.125 per
+        // channel (-9.72 LUFS); the K pre-filter's high shelf adds gain at
+        // 1kHz, so the result lands a few dB above that (bounded here).
+        let mut analyzer = LoudnessAnalyzerEngine::new(48_000.0);
+        sine_block(&mut analyzer, 0.5, 2_000);
+        let integrated = analyzer.integrated_lufs();
+        assert!((-9.72..-2.0).contains(&integrated), "got {integrated}");
+        // One steady level has near-zero range.
+        assert!(analyzer.loudness_range_lu() < 1.0);
+        // Monotonicity: a louder tone integrates louder.
+        let mut quieter = LoudnessAnalyzerEngine::new(48_000.0);
+        sine_block(&mut quieter, 0.1, 2_000);
+        assert!(quieter.integrated_lufs() < integrated - 10.0);
+    }
+
+    #[test]
+    fn loudness_range_spans_level_changes() {
+        // Loud half then quiet half: the 95th-10th percentile span of the
+        // short-term distribution must be wide.
+        let mut analyzer = LoudnessAnalyzerEngine::new(48_000.0);
+        sine_block(&mut analyzer, 0.5, 1_000);
+        sine_block(&mut analyzer, 0.05, 1_000);
+        assert!(analyzer.loudness_range_lu() > 10.0);
+        // The absolute gate keeps the quiet half included but the result
+        // stays near the loud half's level.
+        let integrated = analyzer.integrated_lufs();
+        assert!(integrated > -16.0, "got {integrated}");
     }
 }
