@@ -86,7 +86,8 @@ Notes:
 | 41 | `2c33fde` | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
 | 42 | `da12104` | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
 | 43 | `3749990` | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
-| 44 | (this work) | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
+| 44 | `6d658bf` | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
+| 45 | (this work) | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 

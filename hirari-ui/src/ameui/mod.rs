@@ -1,43 +1,43 @@
 //! AmeUI application shell — the migration target for the Slint surface.
 //!
 //! Slice 1 boots the real engine inside an AmeUI window: a transport bar
-//! (play/stop, tempo, playhead), a live master meter, the shared plot Canvas,
-//! and the track list read from the native project layout. Slice 3 adds the
-//! arrangement Canvas: lanes, clips, measure ruler, markers and playhead
-//! drawn from the neutral arrange model. Slice 4 makes that canvas
-//! seekable (click/drag moves the playhead); slice 5 adds zoom (toolbar
-//! −/+/FIT) and ruler-drag panning; slice 6 adds click clip selection;
-//! slice 7 adds clip drag-move (live preview, commit on release via the
-//! engine undo transaction); slice 8 adds edge-drag trim (Audio/Vocal
-//! only, fraction-clamped like the Slint dock); slice 9 draws clip
-//! waveform peaks from the async decode queue; slice 10 adds the snap
-//! division picker; slice 11 adds the edit lock; slice 12 turns the
-//! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
-//! project open/save/new; slice 14 adds loop/metronome toggles; slice 15
-//! adds the read-only piano roll; slice 16 adds its edit gestures
-//! (add/move/resize/delete via a full note-list replace); slice 17 adds
-//! quantize and velocity stepping; slice 18 adds chord insert and
-//! delete-all; slice 19 adds note lyric editing; slice 20 adds the
-//! articulation stepper; slice 21 adds keyboard shortcuts (Space
-//! plays, L loops); slice 22 adds progression insert; slice 23 adds
-//! articulation-map keyswitch editing; slice 24 adds articulation-name
-//! editing; slice 25 adds the selected-clip fade/gain inspector;
-//! slice 26 adds the per-track plugin strip; slice 27 adopts canvas
-//! text (lane/clip names, measure numbers, pitch labels); slice 28
-//! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
-//! the native file dialog (async, delivered on the poll); slice 30
-//! adds dropped-file audio import; slice 31 adopts dirty-canvas
-//! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
-//! colors in the canvases; slice 34 adds the plugin parameter strip;
-//! slice 35 adds drum mode; slice 36 adds read-only automation
-//! overlays; slice 37 adds automation editing (AUTO mode); slice 38
-//! adds audio settings; slice 39 adds device selection; slice 40
-//! adds plugin preset save/load; slice 41 adds the master gain
-//! slider; slice 42 adopts slider release callbacks for the clip
-//! fade/gain sliders (one undo entry per gesture); slice 43 adopts
-//! position-aware canvas cursors; slice 44 adds canvas accessibility
-//! regions. Audio playback is real; the Slint UI remains the default
-//! entry until the port reaches parity.
+//! (play/stop, tempo, playhead), a live master meter, the shared plot
+//! Canvas, and the track list read from the native project layout.
+//! Slice 3 adds the arrangement Canvas: lanes, clips, measure ruler,
+//! markers and playhead drawn from the neutral arrange model. Slice 4
+//! makes that canvas seekable (click/drag moves the playhead); slice 5
+//! adds zoom (toolbar −/+/FIT) and ruler-drag panning; slice 6 adds
+//! click clip selection; slice 7 adds clip drag-move (live preview,
+//! commit on release via the engine undo transaction); slice 8 adds
+//! edge-drag trim (Audio/Vocal only, fraction-clamped like the Slint
+//! dock); slice 9 draws clip waveform peaks from the async decode
+//! queue; slice 10 adds the snap division picker; slice 11 adds the
+//! edit lock; slice 12 turns the track list into mixer strips
+//! (fader/pan/mute/solo/arm); slice 13 adds project open/save/new;
+//! slice 14 adds loop/metronome toggles; slice 15 adds the read-only
+//! piano roll; slice 16 adds its edit gestures (add/move/resize/delete
+//! via a full note-list replace); slice 17 adds quantize and velocity
+//! stepping; slice 18 adds chord insert and delete-all; slice 19 adds
+//! note lyric editing; slice 20 adds the articulation stepper;
+//! slice 21 adds keyboard shortcuts (Space plays, L loops); slice 22
+//! adds progression insert; slice 23 adds articulation-map keyswitch
+//! editing; slice 24 adds articulation-name editing; slice 25 adds the
+//! selected-clip fade/gain inspector; slice 26 adds the per-track
+//! plugin strip; slice 27 adopts canvas text (lane/clip names, measure
+//! numbers, pitch labels); slice 28 adopts canvas wheel (scroll and
+//! Ctrl-wheel zoom); slice 29 adopts the native file dialog (async,
+//! delivered on the poll); slice 30 adds dropped-file audio import;
+//! slice 31 adopts dirty-canvas redraw; slice 32 adopts pinch/pan
+//! gestures; slice 33 adopts theme colors in the canvases; slice 34
+//! adds the plugin parameter strip; slice 35 adds drum mode;
+//! slice 36 adds read-only automation overlays; slice 37 adds
+//! automation editing (AUTO mode); slice 38 adds audio settings;
+//! slice 39 adds device selection; slice 40 adds plugin preset
+//! save/load; slice 41 adds the master gain slider; slice 42 adopts
+//! slider release callbacks; slice 43 adopts position-aware cursors;
+//! slice 44 adds canvas accessibility regions; slice 45 fixes the
+//! waveform canvas height. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -3556,7 +3556,7 @@ impl App for HirariAmeApp {
             meter,
             audio_card,
             arrange_toolbar,
-            View::canvas("waveform").grow(1),
+            View::canvas("waveform").frame(None, Some(168)),
             View::canvas("arrange").grow(3),
         ];
         if let Some(inspector) = inspector {
