@@ -150,32 +150,6 @@ fn themed(color: vello::peniko::Color, alpha: u8) -> Color {
     Color::from_rgba8(rgba[0], rgba[1], rgba[2], alpha)
 }
 
-/// Elides `text` with an ellipsis to fit `max_width` at `font_size`,
-/// using the same measure the canvas draws with.
-fn elide_text(
-    context: &CanvasContext,
-    text: &str,
-    max_width: f32,
-    font_size: f32,
-    bounds: &CanvasBounds,
-) -> String {
-    if max_width <= 0.0 {
-        return String::new();
-    }
-    if context.measure_text(text, font_size, bounds, None).0 <= max_width {
-        return text.to_owned();
-    }
-    let mut out = String::new();
-    for ch in text.chars() {
-        let trial = format!("{out}{ch}…");
-        if context.measure_text(&trial, font_size, bounds, None).0 > max_width {
-            break;
-        }
-        out.push(ch);
-    }
-    format!("{out}…")
-}
-
 /// Converts the parsed notes back to engine contracts for a full-list
 /// replace, with the same field clamping as the Slint commit path.
 fn notes_to_contracts(core: &HirariCore, notes: &[PianoNote]) -> Vec<MidiNoteContract> {
@@ -1203,7 +1177,7 @@ impl HirariAmeApp {
                 None,
                 &Rect::new(x0, top, x0 + 3.0, top + lane_height),
             );
-            let name = elide_text(context, &track.name, (header - 12.0) as f32, 11.0, &bounds);
+            let name = context.elide_text(&track.name, (header - 12.0) as f32, 11.0, &bounds, None);
             context.draw_text(
                 scene,
                 &bounds,
@@ -1214,12 +1188,12 @@ impl HirariAmeApp {
                 theme_text,
                 None,
             );
-            let sub = elide_text(
-                context,
+            let sub = context.elide_text(
                 &format!("{} · {} clips", track.kind, track.clips.len()),
                 (header - 12.0) as f32,
                 9.0,
                 &bounds,
+                None,
             );
             context.draw_text(
                 scene,
@@ -1288,12 +1262,12 @@ impl HirariAmeApp {
                     &rect,
                 );
                 if clip_width >= 24.0 {
-                    let label = elide_text(
-                        context,
+                    let label = context.elide_text(
                         &clip.name,
                         (clip_width - 8.0) as f32,
                         10.0,
                         &bounds,
+                        None,
                     );
                     context.draw_text(
                         scene,
