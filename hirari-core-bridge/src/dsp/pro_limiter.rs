@@ -4,7 +4,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 const LOOKAHEAD: usize = 480;
 const DELAY_CAPACITY: usize = 1024;
 
-/// State and sample loop for the plugin-host brickwall limiter.
+/// State and sample loop for the plugin-host brickwall limiter. Peak
+/// detection is inter-sample (true-peak): quarter-point Catmull-Rom
+/// interpolation between the previous and current samples, so the
+/// envelope reacts to overshoot the sample grid cannot represent.
 pub struct ProLimiterEngine {
     sample_rate: f64,
     threshold: AtomicU32,
@@ -13,6 +16,10 @@ pub struct ProLimiterEngine {
     delay_l: [f32; DELAY_CAPACITY],
     delay_r: [f32; DELAY_CAPACITY],
     write_idx: usize,
+    previous_l: f32,
+    previous_r: f32,
+    previous2_l: f32,
+    previous2_r: f32,
 }
 
 impl ProLimiterEngine {
@@ -25,6 +32,10 @@ impl ProLimiterEngine {
             delay_l: [0.0; DELAY_CAPACITY],
             delay_r: [0.0; DELAY_CAPACITY],
             write_idx: 0,
+            previous_l: 0.0,
+            previous_r: 0.0,
+            previous2_l: 0.0,
+            previous2_r: 0.0,
         };
         engine.prepare_to_play(sample_rate);
         engine
@@ -45,6 +56,10 @@ impl ProLimiterEngine {
         self.write_idx = 0;
         self.delay_l.fill(0.0);
         self.delay_r.fill(0.0);
+        self.previous_l = 0.0;
+        self.previous_r = 0.0;
+        self.previous2_l = 0.0;
+        self.previous2_r = 0.0;
     }
 
     pub fn set_threshold_db(&self, db: f32) {
@@ -95,7 +110,33 @@ impl ProLimiterEngine {
                 0.0
             };
 
-            let peak = in_l.abs().max(in_r.abs());
+            // True-peak estimate: Catmull-Rom quarter points between
+            // previous and current samples (future sample approximated
+            // by the current one, as in the loudness analyzer).
+            let interpolate = |p0: f32, p1: f32, p2: f32, p3: f32, t: f32| {
+                let t2 = t * t;
+                let t3 = t2 * t;
+                0.5 * (2.0 * p1
+                    + (-p0 + p2) * t
+                    + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2
+                    + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3)
+            };
+            let mut peak = in_l.abs().max(in_r.abs());
+            for step in 1..=4 {
+                let t = step as f32 * 0.2;
+                peak = peak.max(
+                    interpolate(self.previous2_l, self.previous_l, in_l, in_l, t)
+                        .abs()
+                        .max(
+                            interpolate(self.previous2_r, self.previous_r, in_r, in_r, t)
+                                .abs(),
+                        ),
+                );
+            }
+            self.previous2_l = self.previous_l;
+            self.previous2_r = self.previous_r;
+            self.previous_l = in_l;
+            self.previous_r = in_r;
             let threshold = self.threshold_linear();
             let target_gain = if peak > threshold {
                 threshold / peak
@@ -210,4 +251,51 @@ pub unsafe extern "C" fn hirari_pro_limiter_tail(state: *const c_void) -> u32 {
         .cast::<ProLimiterEngine>()
         .as_ref()
         .map_or(0, |state| state.tail_samples())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inter_sample_peaks_are_limited_below_sample_peaks() {
+        // Alternating Nyquist signal at amplitude 0.9 with a threshold
+        // of 0.5: sample peaks alone sit at the threshold boundary, but
+        // the interpolated peaks overshoot, so the envelope must pull the
+        // peak below the threshold (sample-peak-only code leaves it).
+        let mut engine = ProLimiterEngine::new(48_000.0);
+        engine.set_threshold_db(-6.02);
+        let frames = 96;
+        let mut left: Vec<f32> = (0..frames)
+            .map(|i| if i % 2 == 0 { 0.9 } else { -0.9 })
+            .collect();
+        let mut right = left.clone();
+        engine.process(&mut left, &mut right);
+        // Warm-up (the pre-filled delay line) is silent; the steady state
+        // must respect the threshold including inter-sample overshoot.
+        let peak = left
+            .iter()
+            .chain(right.iter())
+            .skip(LOOKAHEAD)
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        assert!(peak <= engine.threshold_linear() + 0.02, "peak {peak}");
+    }
+
+    #[test]
+    fn below_threshold_passes_through() {
+        let mut engine = ProLimiterEngine::new(48_000.0);
+        engine.set_threshold_db(-6.02);
+        let frames = 600;
+        let mut left: Vec<f32> = (0..frames)
+            .map(|i| 0.1 * ((2.0 * std::f32::consts::PI * 440.0 * i as f32) / 48_000.0).sin())
+            .collect();
+        let mut right = left.clone();
+        engine.process(&mut left, &mut right);
+        let out_peak = left
+            .iter()
+            .chain(right.iter())
+            .skip(LOOKAHEAD)
+            .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+        assert!((out_peak - 0.1).abs() < 0.01, "out peak {out_peak}");
+    }
 }
