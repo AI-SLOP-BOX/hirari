@@ -27,9 +27,9 @@
 //! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
 //! the native file dialog (async, delivered on the poll); slice 30
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
-//! redraw; slice 32 adopts pinch/pan gestures. Audio playback is
-//! real; the Slint UI remains the default entry until the port reaches
-//! parity.
+//! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
+//! colors in the canvases. Audio playback is real; the Slint UI remains
+//! the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -117,6 +117,13 @@ fn replace_notes(core: &HirariCore, notes_state: &State<Vec<PianoNote>>, notes: 
     notes_state.set(parse_midi_notes(&core.midi_notes_json(), |samples| {
         core.samples_to_beats(samples)
     }));
+}
+
+/// Re-alphas a theme color for canvas fills/strokes, so canvases follow
+/// the active theme instead of hard-coded RGB values.
+fn themed(color: vello::peniko::Color, alpha: u8) -> Color {
+    let rgba = color.to_rgba8().to_u8_array();
+    Color::from_rgba8(rgba[0], rgba[1], rgba[2], alpha)
 }
 
 /// Elides `text` with an ellipsis to fit `max_width` at `font_size`,
@@ -815,7 +822,7 @@ impl HirariAmeApp {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgb8(15, 17, 19),
+            themed(context.theme().background, 255),
             None,
             &Rect::new(x0, y0, x0 + width, y0 + height),
         );
@@ -827,7 +834,7 @@ impl HirariAmeApp {
             scene.stroke(
                 &grid,
                 Affine::IDENTITY,
-                Color::from_rgba8(120, 128, 140, 40),
+                themed(context.theme().surface_border, 45),
                 None,
                 &Line::new((x, y0), (x, y0 + height)),
             );
@@ -841,7 +848,10 @@ impl HirariAmeApp {
             scene.stroke(
                 &grid,
                 Affine::IDENTITY,
-                Color::from_rgba8(120, 128, 140, if stronger { 90 } else { 35 }),
+                themed(
+                    context.theme().surface_border,
+                    if stronger { 90 } else { 35 },
+                ),
                 None,
                 &Line::new((x0, y), (x0 + width, y)),
             );
@@ -969,14 +979,14 @@ impl HirariAmeApp {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgb8(15, 17, 19),
+            themed(context.theme().background, 255),
             None,
             &Rect::new(x0, y0, x0 + width, y0 + height),
         );
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgb8(22, 25, 29),
+            themed(context.theme().surface, 255),
             None,
             &Rect::new(x0, y0, x0 + width, y0 + ruler),
         );
@@ -985,14 +995,14 @@ impl HirariAmeApp {
         scene.fill(
             Fill::NonZero,
             Affine::IDENTITY,
-            Color::from_rgb8(22, 25, 29),
+            themed(context.theme().surface, 255),
             None,
             &Rect::new(x0, y0, x0 + header, y0 + height),
         );
         scene.stroke(
             &grid,
             Affine::IDENTITY,
-            Color::from_rgb8(38, 42, 46),
+            themed(context.theme().surface_border, 255),
             None,
             &Line::new((x0 + header, y0), (x0 + header, y0 + height)),
         );
@@ -1006,7 +1016,7 @@ impl HirariAmeApp {
             scene.stroke(
                 &grid,
                 Affine::IDENTITY,
-                Color::from_rgba8(120, 128, 140, 40),
+                themed(context.theme().surface_border, 45),
                 None,
                 &Line::new((x, y0 + ruler), (x, y0 + height)),
             );
@@ -1016,7 +1026,7 @@ impl HirariAmeApp {
             scene.stroke(
                 &grid,
                 Affine::IDENTITY,
-                Color::from_rgba8(120, 128, 140, 140),
+                themed(context.theme().surface_border, 140),
                 None,
                 &Line::new((x, y0), (x, y0 + height)),
             );
@@ -1037,7 +1047,7 @@ impl HirariAmeApp {
             scene.stroke(
                 &grid,
                 Affine::IDENTITY,
-                Color::from_rgb8(38, 42, 46),
+                themed(context.theme().surface_border, 255),
                 None,
                 &Line::new((x0, top), (x0 + width, top)),
             );
