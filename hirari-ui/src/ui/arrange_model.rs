@@ -65,6 +65,17 @@ pub struct ArrangeTrack {
     /// Installed plugin chain: engine plugin-type ids and bypass flags.
     pub plugin_types: Vec<u32>,
     pub plugin_bypass: Vec<bool>,
+    /// Volume/pan automation as (beat, value) after sample conversion.
+    pub volume_automation: Vec<AutomationPoint>,
+    pub pan_automation: Vec<AutomationPoint>,
+}
+
+/// One automation point in beat space (curve weights are edit-time
+/// detail and are not needed for the read-only lanes).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AutomationPoint {
+    pub beat: f32,
+    pub value: f32,
 }
 
 /// Display name for an engine plugin-type id, mirroring the names the
@@ -333,7 +344,49 @@ struct TrackLayout {
     #[serde(default)]
     plugin_bypass: Vec<bool>,
     #[serde(default)]
+    volume_automation: Vec<AutomationLayoutPoint>,
+    #[serde(default)]
+    pan_automation: Vec<AutomationLayoutPoint>,
+    #[serde(default)]
     regions: Vec<RegionLayout>,
+}
+
+#[derive(Deserialize)]
+struct AutomationLayoutPoint {
+    time: f64,
+    value: f32,
+    curve: f32,
+}
+
+/// Mirrors the Slint automation conversion: integer sample times become
+/// beats, values clamp to the lane range, invalid rows drop.
+fn parse_automation(
+    points: Vec<AutomationLayoutPoint>,
+    samples_to_beats: impl Fn(u64) -> f64,
+    min_value: f32,
+    max_value: f32,
+) -> Vec<AutomationPoint> {
+    points
+        .into_iter()
+        .filter_map(|point| {
+            if !point.time.is_finite()
+                || point.time < 0.0
+                || point.time.fract() != 0.0
+                || !point.value.is_finite()
+                || !point.curve.is_finite()
+            {
+                return None;
+            }
+            let beat = samples_to_beats(point.time as u64);
+            if !beat.is_finite() {
+                return None;
+            }
+            Some(AutomationPoint {
+                beat: beat as f32,
+                value: point.value.clamp(min_value, max_value),
+            })
+        })
+        .collect()
 }
 
 /// Reduces the native project layout JSON to arrangement lanes. Malformed or
@@ -350,6 +403,10 @@ pub fn parse_arrange_tracks(
         .into_iter()
         .enumerate()
         .map(|(index, layout)| {
+            let volume_automation =
+                parse_automation(layout.volume_automation, &samples_to_beats, 0.0, 2.0);
+            let pan_automation =
+                parse_automation(layout.pan_automation, &samples_to_beats, -1.0, 1.0);
             let clips = layout
                 .regions
                 .into_iter()
@@ -417,6 +474,8 @@ pub fn parse_arrange_tracks(
                 expression_map: layout.expression_map,
                 plugin_types: layout.plugin_types,
                 plugin_bypass: layout.plugin_bypass,
+                volume_automation,
+                pan_automation,
             }
         })
         .collect()
@@ -1072,6 +1131,8 @@ mod tests {
             expression_map: Vec::new(),
             plugin_types: Vec::new(),
             plugin_bypass: Vec::new(),
+            volume_automation: Vec::new(),
+            pan_automation: Vec::new(),
             clips: vec![
                 ArrangeClip {
                     id: 1,
@@ -1291,6 +1352,22 @@ mod tests {
     }
 
     #[test]
+    fn parses_automation_points_clamped_and_filtered() {
+        // 48000 samples == 1 beat here. Volume clamps to 0..2, pan to
+        // -1..1; a non-integer sample time drops.
+        let json = r#"[{"id":7,"name":"T","type":"Audio","volume":1.0,"pan":0.0,"mute":false,
+            "volume_automation":[{"time":48000,"value":1.5,"curve":0.5},{"time":96000,"value":3.0,"curve":0.0},{"time":48000.5,"value":1.0,"curve":0.0}],
+            "pan_automation":[{"time":48000,"value":-2.0,"curve":0.0}]}]"#;
+        let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
+        assert_eq!(tracks[0].volume_automation.len(), 2);
+        assert_eq!(tracks[0].volume_automation[0].beat, 1.0);
+        assert_eq!(tracks[0].volume_automation[0].value, 1.5);
+        assert_eq!(tracks[0].volume_automation[1].value, 2.0);
+        assert_eq!(tracks[0].pan_automation.len(), 1);
+        assert_eq!(tracks[0].pan_automation[0].value, -1.0);
+    }
+
+    #[test]
     fn last_clip_end_spans_all_lanes() {
         let tracks = vec![
             ArrangeTrack {
@@ -1306,6 +1383,8 @@ mod tests {
                 expression_map: Vec::new(),
                 plugin_types: Vec::new(),
                 plugin_bypass: Vec::new(),
+                volume_automation: Vec::new(),
+                pan_automation: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 1,
                     name: "a".into(),
@@ -1334,6 +1413,8 @@ mod tests {
                 expression_map: Vec::new(),
                 plugin_types: Vec::new(),
                 plugin_bypass: Vec::new(),
+                volume_automation: Vec::new(),
+                pan_automation: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 2,
                     name: "b".into(),

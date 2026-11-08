@@ -29,9 +29,9 @@
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
 //! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
 //! colors in the canvases; slice 34 adds the plugin parameter
-//! strip; slice 35 adds drum mode. Audio playback is real; the
-//! Audio playback is real; the Slint UI remains the default entry until the
-//! port reaches parity.
+//! strip; slice 35 adds drum mode; slice 36 adds read-only
+//! automation overlays. Audio playback is real; the Slint UI remains
+//! the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -1218,6 +1218,51 @@ impl HirariAmeApp {
                         }
                     }
                 }
+            }
+        }
+
+        // Automation overlays (read-only): volume/pan polylines through
+        // each lane, mirroring the Slint automation values.
+        for (index, track) in tracks.iter().enumerate() {
+            let top = y0 + f64::from(geometry.y_for_lane(index));
+            let inner = (lane_height - 8.0).max(4.0);
+            let mut draw_automation = |points: &[crate::ui::arrange_model::AutomationPoint],
+                                       min_value: f32,
+                                       max_value: f32,
+                                       color: Color| {
+                let span = (max_value - min_value).max(f32::EPSILON);
+                for pair in points.windows(2) {
+                    let (a, b) = (pair[0], pair[1]);
+                    let y = |value: f32| {
+                        top + 4.0 + f64::from(inner) * (1.0 - (value - min_value) / span) as f64
+                    };
+                    scene.stroke(
+                        &grid,
+                        Affine::IDENTITY,
+                        color,
+                        None,
+                        &Line::new(
+                            (x_for_beat(a.beat), y(a.value)),
+                            (x_for_beat(b.beat), y(b.value)),
+                        ),
+                    );
+                }
+            };
+            if !track.volume_automation.is_empty() {
+                draw_automation(
+                    &track.volume_automation,
+                    0.0,
+                    2.0,
+                    Color::from_rgba8(240, 180, 90, 220),
+                );
+            }
+            if !track.pan_automation.is_empty() {
+                draw_automation(
+                    &track.pan_automation,
+                    -1.0,
+                    1.0,
+                    Color::from_rgba8(120, 220, 240, 200),
+                );
             }
         }
 
