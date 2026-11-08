@@ -22,9 +22,10 @@
 //! plays, L loops); slice 22 adds progression insert; slice 23 adds
 //! articulation-map keyswitch editing; slice 24 adds articulation-name
 //! editing; slice 25 adds the selected-clip fade/gain inspector;
-//! slice 26 adds the per-track plugin strip. Audio playback is real;
-//! the Slint UI remains the default entry until the port reaches
-//! parity.
+//! slice 26 adds the per-track plugin strip; slice 27 adopts canvas
+//! text (lane/clip names, measure numbers, pitch labels). Audio
+//! playback is real; the Slint UI remains the default entry until
+//! the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -111,6 +112,32 @@ fn replace_notes(core: &HirariCore, notes_state: &State<Vec<PianoNote>>, notes: 
     notes_state.set(parse_midi_notes(&core.midi_notes_json(), |samples| {
         core.samples_to_beats(samples)
     }));
+}
+
+/// Elides `text` with an ellipsis to fit `max_width` at `font_size`,
+/// using the same measure the canvas draws with.
+fn elide_text(
+    context: &CanvasContext,
+    text: &str,
+    max_width: f32,
+    font_size: f32,
+    bounds: &CanvasBounds,
+) -> String {
+    if max_width <= 0.0 {
+        return String::new();
+    }
+    if context.measure_text(text, font_size, bounds).0 <= max_width {
+        return text.to_owned();
+    }
+    let mut out = String::new();
+    for ch in text.chars() {
+        let trial = format!("{out}{ch}…");
+        if context.measure_text(&trial, font_size, bounds).0 > max_width {
+            break;
+        }
+        out.push(ch);
+    }
+    format!("{out}…")
 }
 
 /// Converts the parsed notes back to engine contracts for a full-list
@@ -662,7 +689,12 @@ impl HirariAmeApp {
     /// playhead. Read-only for now (no add/move/resize yet); note
     /// geometry comes from `piano_roll_geometry`.
     /// Scene coordinates are absolute window pixels, offset by `bounds`.
-    fn draw_piano(&mut self, scene: &mut vello::Scene, bounds: CanvasBounds) {
+    fn draw_piano(
+        &mut self,
+        scene: &mut vello::Scene,
+        bounds: CanvasBounds,
+        context: &CanvasContext,
+    ) {
         let x0 = f64::from(bounds.x);
         let y0 = f64::from(bounds.y);
         let width = f64::from(bounds.width);
@@ -703,6 +735,9 @@ impl HirariAmeApp {
                 &Line::new((x, y0), (x, y0 + height)),
             );
         }
+        const PITCH_NAMES: [&str; 12] = [
+            "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+        ];
         for pitch in geometry.bottom_pitch..=geometry.top_pitch {
             let y = y0 + f64::from(geometry.y_for_pitch(pitch));
             let stronger = pitch % 12 == 0;
@@ -713,6 +748,19 @@ impl HirariAmeApp {
                 None,
                 &Line::new((x0, y), (x0 + width, y)),
             );
+            if stronger {
+                let label = format!("{}{}", PITCH_NAMES[(pitch % 12) as usize], pitch / 12 - 1);
+                context.draw_text(
+                    scene,
+                    &bounds,
+                    &label,
+                    x0 + 2.0,
+                    y + 1.0,
+                    9.0,
+                    context.theme().secondary_text,
+                    None,
+                );
+            }
         }
         // Notes are drawn from the full list so the edit preview can
         // find its note by global index; the preview (move/resize/add)
@@ -785,7 +833,12 @@ impl HirariAmeApp {
     /// the Slint dock, but there is no zoom/scroll, selection or drag yet,
     /// and no text inside the canvas (lane names live in the list below).
     /// Scene coordinates are absolute window pixels, offset by `bounds`.
-    fn draw_arrange(&mut self, scene: &mut vello::Scene, bounds: CanvasBounds) {
+    fn draw_arrange(
+        &mut self,
+        scene: &mut vello::Scene,
+        bounds: CanvasBounds,
+        context: &CanvasContext,
+    ) {
         let x0 = f64::from(bounds.x);
         let y0 = f64::from(bounds.y);
         let width = f64::from(bounds.width);
@@ -829,6 +882,24 @@ impl HirariAmeApp {
             None,
             &Rect::new(x0, y0, x0 + width, y0 + ruler),
         );
+        // Lane-header column (Slint 104px): name band for the text labels.
+        let header = f64::from(geometry.header_width);
+        scene.fill(
+            Fill::NonZero,
+            Affine::IDENTITY,
+            Color::from_rgb8(22, 25, 29),
+            None,
+            &Rect::new(x0, y0, x0 + header, y0 + height),
+        );
+        scene.stroke(
+            &grid,
+            Affine::IDENTITY,
+            Color::from_rgb8(38, 42, 46),
+            None,
+            &Line::new((x0 + header, y0), (x0 + header, y0 + height)),
+        );
+        let theme_text = context.theme().text;
+        let theme_secondary = context.theme().secondary_text;
 
         // Faint beat grid, then stronger measure lines (Slint opacities).
         let steps = (f64::from(timeline_end) / f64::from(geometry.beat_step)).ceil() as u32;
@@ -851,6 +922,16 @@ impl HirariAmeApp {
                 None,
                 &Line::new((x, y0), (x, y0 + height)),
             );
+            context.draw_text(
+                scene,
+                &bounds,
+                &measure.number.to_string(),
+                x + 4.0,
+                y0 + 4.0,
+                10.0,
+                theme_secondary,
+                None,
+            );
         }
 
         for (index, track) in tracks.iter().enumerate() {
@@ -869,6 +950,34 @@ impl HirariAmeApp {
                 Color::from_rgb8(track.color[0], track.color[1], track.color[2]),
                 None,
                 &Rect::new(x0, top, x0 + 3.0, top + lane_height),
+            );
+            let name = elide_text(context, &track.name, (header - 12.0) as f32, 11.0, &bounds);
+            context.draw_text(
+                scene,
+                &bounds,
+                &name,
+                x0 + 8.0,
+                top + 5.0,
+                11.0,
+                theme_text,
+                None,
+            );
+            let sub = elide_text(
+                context,
+                &format!("{} · {} clips", track.kind, track.clips.len()),
+                (header - 12.0) as f32,
+                9.0,
+                &bounds,
+            );
+            context.draw_text(
+                scene,
+                &bounds,
+                &sub,
+                x0 + 8.0,
+                top + 19.0,
+                9.0,
+                theme_secondary,
+                None,
             );
             let clip_height = (lane_height - 4.0).clamp(2.0, 42.0);
             for clip in &track.clips {
@@ -926,6 +1035,25 @@ impl HirariAmeApp {
                     None,
                     &rect,
                 );
+                if clip_width >= 24.0 {
+                    let label = elide_text(
+                        context,
+                        &clip.name,
+                        (clip_width - 8.0) as f32,
+                        10.0,
+                        &bounds,
+                    );
+                    context.draw_text(
+                        scene,
+                        &bounds,
+                        &label,
+                        clip_x + 4.0,
+                        clip_y + (clip_height - 10.0) / 2.0,
+                        10.0,
+                        theme_text,
+                        None,
+                    );
+                }
                 // Waveform peaks, as in the Slint dock: 128 pairs windowed
                 // by trim (and flipped when reversed), drawn only when the
                 // clip is wide enough to read (48px gate, as in Slint).
@@ -2493,11 +2621,11 @@ impl App for HirariAmeApp {
         _tree: &ViewTree,
     ) {
         if canvas_id == "arrange" {
-            self.draw_arrange(scene, bounds);
+            self.draw_arrange(scene, bounds, context);
             return;
         }
         if canvas_id == "piano" {
-            self.draw_piano(scene, bounds);
+            self.draw_piano(scene, bounds, context);
             return;
         }
         if canvas_id != "waveform" {

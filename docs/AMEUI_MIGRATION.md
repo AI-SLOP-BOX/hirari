@@ -68,7 +68,8 @@ Notes:
 | 23 | `8516db9` | Articulation map: MAP id cycler plus a KS keyswitch stepper (off/60/down) committed via `set_midi_expression_map`. `ArrangeTrack` now carries the expression map. |
 | 24 | `33d1e4e` | Articulation name editing: a text field for the MAP id's name, committed on submit through the same expression-map replace. |
 | 25 | `6afe0ef` | Clip inspector: fade in/out and gain sliders for the selected audio clip, committing through the engine undo transactions. `ArrangeClip` now carries fade fractions and gain. |
-| 26 | (this work) | Plugin strip: bypass toggles, removal and add (built-in chain stepper) for the selected track's plugin chain. `ArrangeTrack` now carries plugin types/bypass. |
+| 26 | `ea7b834` | Plugin strip: bypass toggles, removal and add (built-in chain stepper) for the selected track's plugin chain. `ArrangeTrack` now carries plugin types/bypass. |
+| 27 | (this work) | Canvas text: the landed `draw_text`/`measure_text` APIs draw lane headers, clip names, measure numbers and piano pitch labels; the arrange geometry gains the 104px lane-header column. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -88,15 +89,11 @@ Not yet (suggested order):
    `poll_waveforms`, trim/reverse-windowed draw). The snap picker
    landed in slice 10. Still open from the edit area: fade/gain
    editing, which Slint does outside the arrange dock.
-3. **Text in the canvas** — lane headers and clip names. Blocked on the
-   framework: AmeUI's host canvas API exposes textures and vector
-   shapes only; `draw_text` is crate-internal (`widgets/render.rs`), so
-   host apps cannot draw text into a canvas scene. Filed as the first
-   item of the Hirari section in AmeUI's `REQUESTS.md` (2026-11-08, plus
-   follow-ups: cursor, double-click, hover spec, theme, a11y, file
-   drop, canvas sizing). Until AmeUI exports a host text helper, the
-   track list below the canvas carries the names. (The arrange dock's
-   edit lock landed in slice 11.)
+3. ~~**Text in the canvas**~~ — landed in AmeUI (`CanvasContext::draw_text`
+   + `measure_text`, 2026-11-08) and adopted in slice 27 (lane headers,
+   clip names, measure numbers, pitch labels). The track list below the
+   canvas remains for mixer controls. (The arrange dock's edit lock
+   landed in slice 11.)
 4. **Slint deletion gate** — once the above reach parity, flip the
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.

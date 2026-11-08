@@ -487,6 +487,8 @@ pub struct ArrangeCanvasGeometry {
     pub beat_step: f32,
     /// Left edge of the visible window, in beats (clamped).
     pub scroll_beats: f32,
+    /// Width of the lane-header column at the left (Slint uses 104px).
+    pub header_width: f32,
 }
 
 impl ArrangeCanvasGeometry {
@@ -494,14 +496,14 @@ impl ArrangeCanvasGeometry {
     /// visible window map off-canvas (negative or past the width) and are
     /// clipped by the renderer; they are not clamped to the edges.
     pub fn x_for_beat(&self, beat: f32) -> f32 {
-        (beat - self.scroll_beats) * self.px_per_beat
+        self.header_width + (beat - self.scroll_beats) * self.px_per_beat
     }
 
     /// Beat at a canvas x (click-to-seek inverse of [`Self::x_for_beat`]).
     /// A zero scale (never drawn / collapsed canvas) seeks to beat 0.
     pub fn beat_for_x(&self, x: f32) -> f32 {
         if self.px_per_beat > 0.0 && x.is_finite() {
-            (x / self.px_per_beat + self.scroll_beats).max(0.0)
+            ((x - self.header_width) / self.px_per_beat + self.scroll_beats).max(0.0)
         } else {
             0.0
         }
@@ -546,9 +548,12 @@ pub fn arrange_canvas_geometry(
     } else {
         1.0
     };
-    let px_per_beat = width / timeline_end * zoom;
+    // The timeline area starts after the lane-header column.
+    let header_width = 104.0_f32.min(width);
+    let timeline_width = (width - header_width).max(0.0);
+    let px_per_beat = timeline_width / timeline_end * zoom;
     let visible_beats = if px_per_beat > 0.0 {
-        width / px_per_beat
+        timeline_width / px_per_beat
     } else {
         timeline_end
     };
@@ -576,6 +581,7 @@ pub fn arrange_canvas_geometry(
         lane_height,
         beat_step,
         scroll_beats,
+        header_width,
     }
 }
 
@@ -978,15 +984,16 @@ mod tests {
 
     #[test]
     fn canvas_geometry_fits_timeline_to_width() {
-        // 128 beats across 640px is 5 px/beat; two lanes split the area
-        // below the 24px ruler.
+        // 128 beats across the 536px after the 104px header is 4.1875
+        // px/beat; two lanes split the area below the 24px ruler.
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 1.0, 0.0);
-        assert_eq!(geometry.px_per_beat, 5.0);
+        assert_eq!(geometry.header_width, 104.0);
+        assert_eq!(geometry.px_per_beat, 4.1875);
         assert_eq!(geometry.ruler_height, 24.0);
         assert_eq!(geometry.lane_height, 100.0);
-        assert_eq!(geometry.x_for_beat(10.0), 50.0);
-        assert_eq!(geometry.x_for_beat(-1.0), -5.0);
-        assert_eq!(geometry.beat_for_x(50.0), 10.0);
+        assert_eq!(geometry.x_for_beat(10.0), 145.875);
+        assert_eq!(geometry.x_for_beat(-1.0), 99.8125);
+        assert_eq!(geometry.beat_for_x(145.875), 10.0);
         assert_eq!(geometry.beat_for_x(-5.0), 0.0);
         assert_eq!(
             arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0).beat_for_x(50.0),
@@ -1014,34 +1021,36 @@ mod tests {
             arrange_canvas_geometry(2560.0, 100.0, 128.0, 1, 1.0, 0.0).beat_step,
             1.0
         );
-        // 128 beats in 128px is 1 px/beat, so the step is 4 beats.
+        // 128 beats in the 128px timeline after the 104px header is
+        // 1 px/beat, so the step is 4 beats.
         assert_eq!(
-            arrange_canvas_geometry(128.0, 100.0, 128.0, 1, 1.0, 0.0).beat_step,
+            arrange_canvas_geometry(232.0, 100.0, 128.0, 1, 1.0, 0.0).beat_step,
             4.0
         );
     }
 
     #[test]
     fn canvas_zoom_scales_and_scroll_shifts() {
-        // Fit is 5 px/beat; zoom 2 doubles it and scroll 10 moves the
-        // window so beat 10 sits at x=0 and beat 20 at x=100.
+        // Fit is 4.1875 px/beat; zoom 2 doubles it and scroll 10 moves
+        // the window so beat 10 sits at the header edge and beat 20 at
+        // header + 83.75.
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 2.0, 10.0);
-        assert_eq!(geometry.px_per_beat, 10.0);
+        assert_eq!(geometry.px_per_beat, 8.375);
         assert_eq!(geometry.scroll_beats, 10.0);
-        assert_eq!(geometry.x_for_beat(10.0), 0.0);
-        assert_eq!(geometry.x_for_beat(20.0), 100.0);
-        assert_eq!(geometry.beat_for_x(100.0), 20.0);
+        assert_eq!(geometry.x_for_beat(10.0), 104.0);
+        assert_eq!(geometry.x_for_beat(20.0), 187.75);
+        assert_eq!(geometry.beat_for_x(187.75), 20.0);
     }
 
     #[test]
     fn canvas_zoom_and_scroll_are_clamped() {
-        // Zoom clamps to [1, 8]; at zoom 8 the 640px slot shows 16 beats,
-        // so scroll clamps to 128 - 16 = 112.
+        // Zoom clamps to [1, 8]; at zoom 8 the 536px timeline shows 16
+        // beats, so scroll clamps to 128 - 16 = 112.
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 100.0, 999.0);
-        assert_eq!(geometry.px_per_beat, 40.0);
+        assert_eq!(geometry.px_per_beat, 33.5);
         assert_eq!(geometry.scroll_beats, 112.0);
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 0.1, -5.0);
-        assert_eq!(geometry.px_per_beat, 5.0);
+        assert_eq!(geometry.px_per_beat, 4.1875);
         assert_eq!(geometry.scroll_beats, 0.0);
         // At fit zoom there is nothing to scroll.
         let geometry = arrange_canvas_geometry(640.0, 224.0, 128.0, 2, 1.0, 50.0);
@@ -1094,18 +1103,20 @@ mod tests {
                 },
             ],
         }];
-        // 640px / 128 beats = 5 px/beat, ruler 24, lane 100.
+        // 536px / 128 beats = 4.1875 px/beat after the 104px header,
+        // ruler 24, lane 100. Beat 2 is at x=112.375, beat 9 at 141.6875.
         let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 1.0, 0.0);
-        assert_eq!(clip_at(&tracks, &geometry, 10.0, 50.0), Some((7, 1)));
-        assert_eq!(clip_at(&tracks, &geometry, 45.0, 50.0), Some((7, 2)));
-        // Empty lane space, ruler band and below the lane miss.
-        assert_eq!(clip_at(&tracks, &geometry, 30.0, 50.0), None);
+        assert_eq!(clip_at(&tracks, &geometry, 112.375, 50.0), Some((7, 1)));
+        assert_eq!(clip_at(&tracks, &geometry, 141.6875, 50.0), Some((7, 2)));
+        // Empty lane space, ruler band and below the lane miss. Beat 6
+        // (x=129.125) is the gap between the clips.
+        assert_eq!(clip_at(&tracks, &geometry, 129.125, 50.0), None);
         assert_eq!(clip_at(&tracks, &geometry, 10.0, 10.0), None);
         assert_eq!(clip_at(&tracks, &geometry, 10.0, 200.0), None);
-        // Scrolled: beat 8 sits at x=0 when scrolled by 8 at zoom 1... use
-        // zoom 2 (10 px/beat) scrolled 8: clip b (8..12) starts at x=0.
+        // Zoom 2 (8.375 px/beat) scrolled 8: clip b (8..12) starts at
+        // the header edge; beat 8.5 is at x=108.1875.
         let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 2.0, 8.0);
-        assert_eq!(clip_at(&tracks, &geometry, 5.0, 50.0), Some((7, 2)));
+        assert_eq!(clip_at(&tracks, &geometry, 108.1875, 50.0), Some((7, 2)));
     }
 
     #[test]
@@ -1121,7 +1132,8 @@ mod tests {
 
     #[test]
     fn trim_edge_only_on_wide_clip_edges() {
-        // 5 px/beat: clip 0..4 beats spans x 0..20, edges are x<=6 / x>=14.
+        // 4.1875 px/beat: clip 0..4 beats spans the header edge x=104
+        // to x=120.75, edges within 6px of either side.
         let geometry = arrange_canvas_geometry(640.0, 124.0, 128.0, 1, 1.0, 0.0);
         let clip = ArrangeClip {
             id: 1,
@@ -1137,10 +1149,10 @@ mod tests {
             fade_out: 0.0,
             gain: 1.0,
         };
-        assert_eq!(trim_edge_at(&geometry, &clip, 3.0), Some(TrimEdge::Left));
-        assert_eq!(trim_edge_at(&geometry, &clip, 17.0), Some(TrimEdge::Right));
-        assert_eq!(trim_edge_at(&geometry, &clip, 10.0), None);
-        // A 1-beat clip is only 5px wide: no trim zones.
+        assert_eq!(trim_edge_at(&geometry, &clip, 107.0), Some(TrimEdge::Left));
+        assert_eq!(trim_edge_at(&geometry, &clip, 118.0), Some(TrimEdge::Right));
+        assert_eq!(trim_edge_at(&geometry, &clip, 112.0), None);
+        // A 1-beat clip is narrower than both zones: no trim.
         let narrow = ArrangeClip {
             length_beats: 1.0,
             ..clip
