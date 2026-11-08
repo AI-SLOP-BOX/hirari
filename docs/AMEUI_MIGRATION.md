@@ -92,6 +92,8 @@ Notes:
 | 47 | `1f3e018` | Adopts the landed `ame_ui::CursorIcon` re-export for the position-aware canvas cursor; the direct `winit` dependency is dropped. |
 | 48 | `c73c14f` | Audio library rows virtualized with the landed variable-height `VirtualList` (asset id as `StableKey`). |
 | 49 | `e4e16ca` | Adopts the landed `CanvasContext::elide_text`; the local elision helper is deleted. |
+| 50 | `e26eb10` | Double-click (landed `click_count`) splits the arrange clip under the cursor via `split_region`. |
+| 51 | `0bd0d1d` | Arrange clip labels drawn with the landed `draw_text_in_rect` (elision + vertical centering from the framework). |
 | E1 | `fc04f16` | Engine: BS.1770 gated integrated loudness + LRA (`loudness_analyzer`). |
 | E2 | `aae9409` | Engine: I/O latency measurement (device+unit properties + buffer) stored per stream, exposed as `io_latency_seconds`, applied as recording-start compensation, and shown in the AmeUI audio card. |
 | E3 | `4f6426f` | Engine: dedicated recording poll worker with a single-consumer input queue and captured drop errors. |
