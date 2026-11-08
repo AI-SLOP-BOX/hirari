@@ -89,6 +89,9 @@ Notes:
 | 44 | `6d658bf` | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
 | 45 | `f32d822` | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
 | 46 | `0815f1d` | Audio library: folder scan, search filter, per-asset preview and import to the piano track, via `scan_preview_audio` and the queued import. |
+| 47 | `1f3e018` | Adopts the landed `ame_ui::CursorIcon` re-export for the position-aware canvas cursor; the direct `winit` dependency is dropped. |
+| 48 | `c73c14f` | Audio library rows virtualized with the landed variable-height `VirtualList` (asset id as `StableKey`). |
+| 49 | `e4e16ca` | Adopts the landed `CanvasContext::elide_text`; the local elision helper is deleted. |
 | E1 | `fc04f16` | Engine: BS.1770 gated integrated loudness + LRA (`loudness_analyzer`). |
 | E2 | `aae9409` | Engine: I/O latency measurement (device+unit properties + buffer) stored per stream, exposed as `io_latency_seconds`, applied as recording-start compensation, and shown in the AmeUI audio card. |
 | E3 | `4f6426f` | Engine: dedicated recording poll worker with a single-consumer input queue and captured drop errors. |
@@ -96,7 +99,8 @@ Notes:
 | E5 | `3218953` | Engine: 2× oversampling in the tube saturator using the existing all-pass oversampler. |
 | E6 | `e89148d` | Engine: LUFS-target normalization for queued offline exports — the orchestrator now measures gated integrated LUFS and applies the delivery gain (peak-capped) instead of plain peak normalization when `normalize` is set. |
 | E7 | `1d73b48` | Engine: project-end freeze now renders a 2 s processor tail beyond the last region, and unfreezing resets the live processors so stale delay/reverb state cannot leak back. |
-| P1 | (this work) | Plugin: VST3 fixture compatibility now covers Surge XT effects plus the Vital instrument path (MIDI note-on produces audible output). |
+| P1 | `b524bed` | Plugin: VST3 fixture compatibility now covers Surge XT effects plus the Vital instrument path (MIDI note-on produces audible output). |
+| R1 | `fad1332` (AmeUI) | Filed Hirari pt.6 requests: TimelineView controlled zoom/offset binding, marker/loop/selection edit events, and beat/bar ruler grids. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
