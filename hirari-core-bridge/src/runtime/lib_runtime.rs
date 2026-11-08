@@ -138,7 +138,14 @@ pub struct HirariCore {
     undo_state: usize,
     log_state: usize,
     preview_audio: std::sync::Mutex<preview_audio_runtime::PreviewAudioRuntime>,
-    recording_session: std::sync::Mutex<Option<recording_session::RecordingSession>>,
+    recording_session:
+        std::sync::Arc<std::sync::Mutex<Option<recording_session::RecordingSession>>>,
+    /// Dedicated recording poll worker (started on first record): pulling
+    /// the driver queue off the UI timer keeps takes from dropping blocks
+    /// while the UI is busy. The worker owns the input queue while it runs.
+    recorder_poller_started: std::sync::atomic::AtomicBool,
+    recorder_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    recorder_error: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     comping: RevisionedMutex<comping::CompingOrchestrator>,
     aux_track_ids: RevisionedMutex<HashSet<u32>>,
     midi_events: RevisionedMutex<Vec<midi::MIDIEvent>>,
@@ -599,6 +606,8 @@ impl Drop for HirariCore {
         // Cancel bridge-owned offline work before the handle disappears. The
         // native singleton remains alive for other bridge handles, while this
         // handle's driver and render requests are stopped deterministically.
+        self.recorder_stop
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         self.cancel_render();
         if let Some(engine) = self.engine_opt() {
             engine.shutdown();

@@ -1,3 +1,41 @@
+/// One pull of driver input into the recording session, shared by the
+/// timer path and the dedicated poll worker. After a queue drop the
+/// worker fails the capture instead of faking contiguity.
+fn recorder_poll_once(
+    session: &std::sync::Arc<std::sync::Mutex<Option<recording_session::RecordingSession>>>,
+    driver_handle: usize,
+    failed: &std::sync::atomic::AtomicBool,
+) -> anyhow::Result<bool> {
+    if failed.load(std::sync::atomic::Ordering::Relaxed) {
+        return Ok(false);
+    }
+    let block = crate::audio_driver_host::poll_input(driver_handle);
+    if !block.interleaved.is_empty() {
+        let mut slot = session
+            .lock()
+            .map_err(|_| anyhow::anyhow!("recording session lock poisoned"))?;
+        let Some(active) = slot.as_mut() else {
+            return Ok(false);
+        };
+        if block.channel_count == 0 || active.channel_count() != block.channel_count as u16 {
+            return Err(anyhow::anyhow!(
+                "audio input channel layout changed during recording"
+            ));
+        }
+        active
+            .append_interleaved(block.interleaved.as_slice())
+            .map_err(|error| anyhow::anyhow!("recording input rejected: {error:?}"))?;
+    }
+    if block.dropped_blocks > 0 {
+        failed.store(true, std::sync::atomic::Ordering::Relaxed);
+        anyhow::bail!(
+            "audio input queue dropped {} block(s); capture stopped at the last contiguous input",
+            block.dropped_blocks
+        );
+    }
+    Ok(!block.interleaved.is_empty())
+}
+
 impl HirariCore {
     fn recording_take_regions(
         &self,
@@ -74,6 +112,7 @@ impl HirariCore {
         start_sample: u64,
         count_in_frames: u64,
     ) -> anyhow::Result<()> {
+        self.ensure_recorder_poller();
         self.discard_pending_recording_input();
         let start_sample = start_sample.saturating_sub(self.input_latency_frames(sample_rate));
         let mut slot = self
@@ -110,6 +149,7 @@ impl HirariCore {
         punch_in_sample: u64,
         punch_out_sample: u64,
     ) -> anyhow::Result<()> {
+        self.ensure_recorder_poller();
         self.discard_pending_recording_input();
         let mut slot = self
             .recording_session
@@ -137,7 +177,70 @@ impl HirariCore {
     }
 
     pub fn poll_recording_capture(&self) -> anyhow::Result<bool> {
+        // While the dedicated poller owns the input queue, the timer
+        // path only surfaces its captured errors.
+        if self
+            .recorder_poller_started
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            if let Ok(mut slot) = self.recorder_error.lock() {
+                if let Some(error) = slot.take() {
+                    return Err(anyhow::anyhow!(error));
+                }
+            }
+            return Ok(false);
+        }
         self.poll_recording_preview()
+    }
+
+    /// Starts the dedicated recording poll worker (once per handle). It
+    /// pulls driver input into the recording session continuously while a
+    /// session is active, so a busy UI thread cannot drop take blocks the
+    /// way the timer-polled path could. The worker exits on handle drop.
+    fn ensure_recorder_poller(&self) {
+        if self
+            .recorder_poller_started
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .is_err()
+        {
+            return;
+        }
+        let session = self.recording_session.clone();
+        let handle = self.driver_handle();
+        let stop = self.recorder_stop.clone();
+        let error = self.recorder_error.clone();
+        let failed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        std::thread::Builder::new()
+            .name("hirari-recording-poller".to_owned())
+            .spawn(move || loop {
+                if stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                let active = session.lock().is_ok_and(|slot| slot.is_some());
+                if !active {
+                    failed.store(false, std::sync::atomic::Ordering::Relaxed);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    continue;
+                }
+                match recorder_poll_once(&session, handle, &failed) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                    }
+                    Err(message) => {
+                        if let Ok(mut slot) = error.lock() {
+                            *slot = Some(message.to_string());
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                    }
+                }
+            })
+            .expect("recording poller thread must spawn");
     }
 
     pub fn recording_capture_auto_stop_requested(&self) -> bool {
@@ -649,6 +752,7 @@ impl HirariCore {
         max_frames: usize,
         start_sample: u64,
     ) -> anyhow::Result<()> {
+        self.ensure_recorder_poller();
         self.discard_pending_recording_input();
         // Input audio arrives late by the measured I/O latency; start the
         // session early so captured regions align with the playhead.
@@ -701,25 +805,24 @@ impl HirariCore {
     /// straight from `audio_driver_host`, which owns the planar scratch and the
     /// interleaving, so no C++ buffer is involved.
     pub fn poll_recording_preview(&self) -> anyhow::Result<bool> {
+        // The dedicated poller owns the input queue once started; calling
+        // into it here as well would split blocks across two consumers.
+        if self
+            .recorder_poller_started
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Ok(false);
+        }
         if self.is_silent_audio_fallback() {
             return Err(anyhow::anyhow!(
                 "native audio input is unavailable; use an audio device before polling recording"
             ));
         }
-        let block = crate::audio_driver_host::poll_input(self.driver_handle());
-        if !block.interleaved.is_empty() {
-            self.append_recording_preview_block(
-                block.interleaved.as_slice(),
-                block.channel_count as u16,
-            )?;
-        }
-        if block.dropped_blocks > 0 {
-            anyhow::bail!(
-                "audio input queue dropped {} block(s); capture stopped at the last contiguous input",
-                block.dropped_blocks
-            );
-        }
-        Ok(!block.interleaved.is_empty())
+        recorder_poll_once(
+            &self.recording_session,
+            self.driver_handle(),
+            &std::sync::atomic::AtomicBool::new(false),
+        )
     }
 
     fn discard_pending_recording_input(&self) {
