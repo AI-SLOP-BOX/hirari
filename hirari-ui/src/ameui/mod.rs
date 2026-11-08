@@ -33,8 +33,9 @@
 //! overlays; slice 37 adds automation editing (AUTO mode); slice 38
 //! adds audio settings; slice 39 adds device selection; slice 40
 //! adds plugin preset save/load; slice 41 adds the master gain
-//! slider. Audio playback is real; the Slint UI remains the default
-//! entry until the port reaches parity.
+//! slider; slice 42 adopts slider release callbacks for the clip
+//! fade/gain sliders (one undo entry per gesture). Audio playback is
+//! real; the Slint UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -2530,7 +2531,7 @@ impl App for HirariAmeApp {
                 let fade_in = SliderView::new(clip.fade_in, 0.0, 1.0)
                     .action_id(format!("clip.fade_in.{}", clip.id))
                     .disabled(fade_locked)
-                    .on_change(move |value| {
+                    .on_release(move |value| {
                         if fade_locked {
                             return;
                         }
@@ -2557,7 +2558,7 @@ impl App for HirariAmeApp {
                 let fade_out = SliderView::new(clip.fade_out, 0.0, 1.0)
                     .action_id(format!("clip.fade_out.{}", clip.id))
                     .disabled(fade_locked)
-                    .on_change(move |value| {
+                    .on_release(move |value| {
                         if fade_locked {
                             return;
                         }
@@ -2584,7 +2585,7 @@ impl App for HirariAmeApp {
                 let gain = SliderView::new(clip.gain, 0.0, 2.0)
                     .action_id(format!("clip.gain.{}", clip.id))
                     .disabled(fade_locked)
-                    .on_change(move |value| {
+                    .on_release(move |value| {
                         if fade_locked {
                             return;
                         }

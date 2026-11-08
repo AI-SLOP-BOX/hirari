@@ -83,7 +83,8 @@ Notes:
 | 38 | `ceafc30` | Audio settings: sample-rate/buffer cyclers, reconnect, device count and readiness readout, wired to `apply_audio_config`/`try_reconnect_audio_device`. |
 | 39 | `98a105f` | Device selection: catalog parsing plus cycle/select buttons applying `select_audio_device` at the current config values. |
 | 40 | `e3a5127` | Plugin presets: SAVE/LOAD preset buttons using the native dialogs, executed on the poll via the pending-preset slot. |
-| 41 | (this work) | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
+| 41 | `2c33fde` | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
+| 42 | (this work) | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
