@@ -1941,6 +1941,31 @@ impl App for HirariAmeApp {
         }
         match event.phase {
             CanvasPointerPhase::Down => {
+                // Double-click splits the clip under the cursor at the
+                // click beat (the landed click_count makes the second
+                // press reliable instead of arming a move/seek).
+                if event.click_count >= 2
+                    && (event.y as f32) >= self.arrange_geometry.ruler_height
+                    && (event.x as f32) >= self.arrange_geometry.header_width
+                {
+                    let tracks = self.tracks.get();
+                    if let Some((track_id, clip_id)) = clip_at(
+                        &tracks,
+                        &self.arrange_geometry,
+                        event.x as f32,
+                        event.y as f32,
+                    ) {
+                        if let Some(core) = self.core.clone() {
+                            let beat = f64::from(self.arrange_geometry.beat_for_x(event.x as f32));
+                            if core.split_region(track_id, clip_id as u32, beat) {
+                                self.selected_clip.set(Some((track_id, clip_id)));
+                                self.status.set(format!("CLIP SPLIT AT {beat:.2} BEATS"));
+                                self.refresh_arrange_state(&core);
+                            }
+                        }
+                        return true;
+                    }
+                }
                 if (event.y as f32) < self.arrange_geometry.ruler_height {
                     // Ruler drag pans; lane drags seek (slice 4).
                     self.panning = true;
