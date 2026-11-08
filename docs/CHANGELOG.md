@@ -20,6 +20,8 @@ production support.
 - Project-end track freeze now captures a 2 s processor tail beyond the
   last region, and unfreezing resets the live processors so stale
   delay/reverb state cannot leak into unfrozen playback.
+- VST3 fixture compatibility now also covers the Vital instrument path:
+  a MIDI note-on produces audible output through the SDK adapter.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.
