@@ -26,14 +26,15 @@
 //! text (lane/clip names, measure numbers, pitch labels); slice 28
 //! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
 //! the native file dialog (async, delivered on the poll); slice 30
-//! adds dropped-file audio import. Audio playback is real; the Slint
-//! UI remains the default entry until the port reaches parity.
+//! adds dropped-file audio import; slice 31 adopts dirty-canvas
+//! redraw. Audio playback is real; the Slint UI remains the default
+//! entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
 //! `AppMessage("tick")` through the event-loop proxy; `on_event` does the poll.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
@@ -260,6 +261,15 @@ pub struct HirariAmeApp {
     pending_save: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     /// Last arrange canvas bounds, to map a file drop to lane/beat.
     arrange_bounds: (f32, f32, f32, f32),
+    /// Last drawn inputs for the dirty-canvas check (see
+    /// `canvas_scene_dirty`). Bumped on layout refreshes and piano edits.
+    dirty_playhead: Cell<f64>,
+    dirty_zoom: Cell<f32>,
+    dirty_scroll: Cell<f32>,
+    dirty_selected: Cell<Option<(u32, i32)>>,
+    dirty_piano: Cell<(u32, u64)>,
+    dirty_layout: Cell<u64>,
+    dirty_layout_seen: Cell<u64>,
     /// In-flight dropped-file audio import: (ticket, path, track).
     pending_import: Option<(u64, String, u32)>,
     tick: u64,
@@ -329,6 +339,13 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         pending_open: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
         arrange_bounds: (0.0, 0.0, 0.0, 0.0),
+        dirty_playhead: Cell::new(f64::NAN),
+        dirty_zoom: Cell::new(-1.0),
+        dirty_scroll: Cell::new(-1.0),
+        dirty_selected: Cell::new(Some((u32::MAX, 0))),
+        dirty_piano: Cell::new((0, 424_242)),
+        dirty_layout: Cell::new(424_242),
+        dirty_layout_seen: Cell::new(424_243),
         pending_import: None,
         tick: 0,
     }
@@ -545,6 +562,8 @@ impl HirariAmeApp {
         }
         self.piano_notes.set(notes);
         self.tracks.set(tracks);
+        self.dirty_layout
+            .set(self.dirty_layout.get().wrapping_add(1));
     }
 
     /// Pointer travel since the lane press, in logical pixels. Clicks
@@ -1208,6 +1227,9 @@ impl HirariAmeApp {
     fn on_piano_pointer(&mut self, event: CanvasPointerEvent) -> bool {
         let track_id = self.piano_track.get();
         let geometry = self.piano_geometry;
+        // Edits and previews must redraw: bump the dirty generation.
+        self.dirty_piano
+            .set((track_id, self.dirty_piano.get().1.wrapping_add(1)));
         match event.phase {
             CanvasPointerPhase::Down => {
                 let notes = self.piano_notes.get();
@@ -1450,6 +1472,37 @@ impl App for HirariAmeApp {
                 .set((self.arrange_scroll_beats.get() + delta_beats).max(0.0));
         }
         true
+    }
+
+    /// Redraws canvases only when their inputs changed, using the landed
+    /// dirty-canvas API: the waveform always animates (meters), while
+    /// arrange/piano replay their cached scenes when idle. Geometry and
+    /// scale changes re-record regardless (framework behavior).
+    fn canvas_scene_dirty(&self, canvas_id: &str) -> bool {
+        match canvas_id {
+            "waveform" => true,
+            "arrange" | "piano" => {
+                let playhead = self.playhead_beats.get();
+                let zoom = self.arrange_zoom.get();
+                let scroll = self.arrange_scroll_beats.get();
+                let selected = self.selected_clip.get();
+                let piano = (self.piano_track.get(), self.dirty_piano.get().1);
+                let dirty = playhead != self.dirty_playhead.get()
+                    || zoom != self.dirty_zoom.get()
+                    || scroll != self.dirty_scroll.get()
+                    || selected != self.dirty_selected.get()
+                    || piano != self.dirty_piano.get()
+                    || self.dirty_layout.get() != self.dirty_layout_seen.get();
+                self.dirty_playhead.set(playhead);
+                self.dirty_zoom.set(zoom);
+                self.dirty_scroll.set(scroll);
+                self.dirty_selected.set(selected);
+                self.dirty_piano.set(piano);
+                self.dirty_layout_seen.set(self.dirty_layout.get());
+                dirty
+            }
+            _ => true,
+        }
     }
 
     fn on_canvas_pointer_event(&mut self, canvas_id: &str, event: CanvasPointerEvent) -> bool {

@@ -72,7 +72,8 @@ Notes:
 | 27 | `149b915` | Canvas text: the landed `draw_text`/`measure_text` APIs draw lane headers, clip names, measure numbers and piano pitch labels; the arrange geometry gains the 104px lane-header column. |
 | 28 | `ac4ee9c` | Canvas wheel: plain wheel scrolls the arrange timeline, Ctrl/⌘-wheel zooms anchored at the pointer beat, via the landed `on_canvas_scroll`. |
 | 29 | `e41996b` | Native file dialog: Open/Save use the landed async `NativeFileDialog`, with results delivered to the poll (the engine is not `Send`, so dialogs never touch it). |
-| 30 | (this work) | Dropped-file import: OS file drops (landed `FileDropped`) become clips on the lane under the drop point via the queued engine import, polled to completion. |
+| 30 | `1682eb4` | Dropped-file import: OS file drops (landed `FileDropped`) become clips on the lane under the drop point via the queued engine import, polled to completion. |
+| 31 | (this work) | Dirty-canvas redraw: arrange/piano canvases replay cached scenes when idle (playhead/zoom/scroll/selection/layout tracked); the waveform always animates. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
