@@ -341,6 +341,63 @@ mod tests {
     }
 
     #[test]
+    fn loudness_normalization_reaches_the_broadcast_target() {
+        let frames = 96_000usize;
+        let mut source = Vec::with_capacity(frames * 2);
+        for frame in 0..frames {
+            let sample =
+                0.5 * (2.0 * std::f32::consts::PI * 1000.0 * frame as f32 / 48_000.0).sin();
+            source.push(sample);
+            source.push(sample);
+        }
+        let before = integrated_lufs_for_export(&source, 2, 48_000).unwrap();
+        let normalized =
+            prepare_loudness_normalized_export_buffer(&source, 24, 48_000, 2, -23.0, false)
+                .unwrap();
+        let after = integrated_lufs_for_export(&normalized, 2, 48_000).unwrap();
+        assert!(before > after);
+        assert!((after - (-23.0)).abs() < 0.5, "before {before}, after {after}");
+        assert!(normalized.iter().all(|sample| sample.is_finite() && sample.abs() <= 1.0));
+    }
+
+    #[test]
+    fn orchestrator_normalizes_jobs_to_their_lufs_target() {
+        let directory = std::env::temp_dir().join(format!(
+            "hirari-lufs-batch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let frames = 96_000usize;
+        let mut source = Vec::with_capacity(frames * 2);
+        for frame in 0..frames {
+            let sample =
+                0.5 * (2.0 * std::f32::consts::PI * 1000.0 * frame as f32 / 48_000.0).sin();
+            source.push(sample);
+            source.push(sample);
+        }
+        let mut orchestrator = ExportOrchestrator::new();
+        orchestrator.add_job(ExportJob {
+            name: "Broadcast Master".into(),
+            codec: Codec::WAV,
+            bit_depth: 24,
+            sample_rate: 48_000,
+            normalize: true,
+            lufs_target: -23.0,
+        });
+        let paths = orchestrator
+            .execute_jobs_with_buffers(&directory, &[source], 2)
+            .unwrap();
+        assert_eq!(paths.len(), 1);
+        let bytes = fs::read(&paths[0]).unwrap();
+        assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 24);
+        let _ = fs::remove_dir_all(directory);
+    }
+
+    #[test]
     fn stem_export_writes_each_atomic_output_with_requested_depth() {
         let directory = std::env::temp_dir().join(format!(
             "hirari-stems-{}-{}",

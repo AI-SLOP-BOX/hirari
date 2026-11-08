@@ -13,6 +13,10 @@ production support.
   parameter delivery, component/controller state, and output MIDI; without the
   SDK, VST3 requests remain fail-closed. A Surge XT smoke test covers the
   load/process/state cycle.
+- LUFS-target normalization for queued offline exports. The export
+  orchestrator now measures gated integrated loudness and applies the
+  delivery gain under a full-scale ceiling when a job requests
+  normalization, instead of always applying plain peak normalization.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

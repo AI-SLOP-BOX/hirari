@@ -90,7 +90,11 @@ Notes:
 | 45 | `f32d822` | Fixed waveform canvas height (168px) via the landed fixed-frame sizing, so the waveform texture is no longer stretched. |
 | 46 | `0815f1d` | Audio library: folder scan, search filter, per-asset preview and import to the piano track, via `scan_preview_audio` and the queued import. |
 | E1 | `fc04f16` | Engine: BS.1770 gated integrated loudness + LRA (`loudness_analyzer`). |
-| E2 | (this work) | Engine: I/O latency measurement (device+unit properties + buffer) stored per stream, exposed as `io_latency_seconds`, applied as recording-start compensation, and shown in the AmeUI audio card. |
+| E2 | `aae9409` | Engine: I/O latency measurement (device+unit properties + buffer) stored per stream, exposed as `io_latency_seconds`, applied as recording-start compensation, and shown in the AmeUI audio card. |
+| E3 | `4f6426f` | Engine: dedicated recording poll worker with a single-consumer input queue and captured drop errors. |
+| E4 | `40e3314` | Engine: true-peak detection in the native brickwall limiter using Catmull-Rom interpolation. |
+| E5 | `3218953` | Engine: 2× oversampling in the tube saturator using the existing all-pass oversampler. |
+| E6 | (this work) | Engine: LUFS-target normalization for queued offline exports — the orchestrator now measures gated integrated LUFS and applies the delivery gain (peak-capped) instead of plain peak normalization when `normalize` is set. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 

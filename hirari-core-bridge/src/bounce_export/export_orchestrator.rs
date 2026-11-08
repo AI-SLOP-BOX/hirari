@@ -85,7 +85,18 @@ impl ExportOrchestrator {
 
         let mut published = Vec::with_capacity(paths.len());
         for (job, (path, samples)) in self.jobs.iter().zip(paths.iter().zip(buffers)) {
-            let prepared = match prepare_export_buffer(samples, job.bit_depth, job.normalize, false) {
+            let prepared = match if job.normalize {
+                prepare_loudness_normalized_export_buffer(
+                    samples,
+                    job.bit_depth,
+                    job.sample_rate,
+                    channels,
+                    job.lufs_target,
+                    false,
+                )
+            } else {
+                prepare_export_buffer(samples, job.bit_depth, false, false)
+            } {
                 Ok(buffer) => buffer,
                 Err(error) => {
                     for prior in &published { let _ = fs::remove_file(prior); }

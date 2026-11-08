@@ -1,3 +1,5 @@
+use crate::loudness_analyzer::LoudnessAnalyzerEngine;
+
 /// Returns an interleaved frame range for selection/loop exports without
 /// mutating the source render buffer.
 pub fn select_frame_range(
@@ -41,6 +43,10 @@ pub fn prepare_export_buffer(
     } else {
         1.0
     };
+    Ok(apply_gain_and_dither(samples, bit_depth, gain, dither))
+}
+
+fn apply_gain_and_dither(samples: &[f32], bit_depth: u32, gain: f32, dither: bool) -> Vec<f32> {
     let step = 1.0 / (1u64 << (bit_depth - 1)) as f32;
     let mut state = 0x0A0A_2026_u64;
     let mut output = Vec::with_capacity(samples.len());
@@ -56,7 +62,90 @@ pub fn prepare_export_buffer(
         };
         output.push((sample * gain + noise).clamp(-1.0, 1.0));
     }
-    Ok(output)
+    output
+}
+
+/// Measures BS.1770 gated integrated loudness for mono/stereo interleaved
+/// offline export buffers. Buffers shorter than one 400 ms gate block or
+/// with more than two channels have no supported measurement and return
+/// `None`.
+pub fn integrated_lufs_for_export(
+    samples: &[f32],
+    channels: u16,
+    sample_rate: u32,
+) -> Option<f32> {
+    if samples.is_empty()
+        || !matches!(channels, 1 | 2)
+        || !(8_000..=384_000).contains(&sample_rate)
+        || !samples.len().is_multiple_of(channels as usize)
+        || samples.iter().any(|sample| !sample.is_finite())
+    {
+        return None;
+    }
+    let frames = samples.len() / channels as usize;
+    if (frames as f64) < (0.4 * f64::from(sample_rate)) {
+        return None;
+    }
+    let mut left = Vec::with_capacity(frames);
+    let mut right = Vec::with_capacity(frames);
+    if channels == 1 {
+        left.extend_from_slice(samples);
+        right.extend_from_slice(samples);
+    } else {
+        for frame in samples.chunks_exact(2) {
+            left.push(frame[0]);
+            right.push(frame[1]);
+        }
+    }
+    let mut analyzer = LoudnessAnalyzerEngine::new(f64::from(sample_rate));
+    for (left_block, right_block) in left.chunks(4096).zip(right.chunks(4096)) {
+        analyzer.process(left_block, right_block);
+    }
+    Some(analyzer.integrated_lufs())
+}
+
+/// Applies broadcast loudness normalization for an offline export buffer.
+/// The existing peak-normalization fallback is used for channel counts and
+/// short buffers the gated analyzer cannot measure, so `normalize` never
+/// fails merely because the delivery format is not mono/stereo.
+pub fn prepare_loudness_normalized_export_buffer(
+    samples: &[f32],
+    bit_depth: u32,
+    sample_rate: u32,
+    channels: u16,
+    target_lufs: f32,
+    dither: bool,
+) -> Result<Vec<f32>, WavExportError> {
+    if samples.is_empty() {
+        return Err(WavExportError::EmptyBuffer);
+    }
+    if !matches!(bit_depth, 16 | 24 | 32) {
+        return Err(WavExportError::UnsupportedFormat);
+    }
+    if channels == 0 || !samples.len().is_multiple_of(channels as usize) {
+        return Err(WavExportError::IncompleteFrame);
+    }
+    if !(8_000..=384_000).contains(&sample_rate) || !target_lufs.is_finite() {
+        return Err(WavExportError::InvalidSampleRate);
+    }
+    if !(-120.0..=0.0).contains(&target_lufs) {
+        return Err(WavExportError::UnsupportedFormat);
+    }
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        return Err(WavExportError::NonFiniteSample);
+    }
+    let peak = samples
+        .iter()
+        .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+    if let Some(integrated) = integrated_lufs_for_export(samples, channels, sample_rate) {
+        if let Some((normalized, _applied_db)) =
+            crate::delivery::normalize_loudness_interleaved(samples, integrated, target_lufs, 0.0)
+        {
+            return Ok(apply_gain_and_dither(&normalized, bit_depth, 1.0, dither));
+        }
+    }
+    let gain = if peak > 0.0 { 1.0 / peak } else { 1.0 };
+    Ok(apply_gain_and_dither(samples, bit_depth, gain, dither))
 }
 
 /// Writes one validated file per stem. A stem is published only after its
