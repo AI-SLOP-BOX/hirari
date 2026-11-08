@@ -24,8 +24,9 @@
 //! editing; slice 25 adds the selected-clip fade/gain inspector;
 //! slice 26 adds the per-track plugin strip; slice 27 adopts canvas
 //! text (lane/clip names, measure numbers, pitch labels); slice 28
-//! adopts canvas wheel (scroll and Ctrl-wheel zoom). Audio playback
-//! is real; the Slint UI remains the default entry until
+//! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
+//! the native file dialog (async, delivered on the poll). Audio
+//! playback is real; the Slint UI remains the default entry until
 //! the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
@@ -253,6 +254,10 @@ pub struct HirariAmeApp {
     last_gen: u64,
     /// Last opened/saved project path, for save-without-dialog.
     project_path: Rc<RefCell<Option<String>>>,
+    /// Paths chosen in async native dialogs, delivered to the UI thread
+    /// by the poll (the engine is not `Send`, so dialogs never touch it).
+    pending_open: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    pending_save: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     tick: u64,
 }
 
@@ -317,6 +322,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         gen_value: 0,
         last_gen: u64::MAX,
         project_path: Rc::new(RefCell::new(None)),
+        pending_open: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
         tick: 0,
     }
 }
@@ -356,6 +363,49 @@ impl HirariAmeApp {
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
             self.poll_waveforms(&core);
+        }
+        // File-dialog results arrive from the async native dialog on a
+        // background thread; the engine work happens here on the UI thread.
+        if let Some(path) = self
+            .pending_open
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            let path = path.to_string_lossy().into_owned();
+            if core.load_project(&path) {
+                *self.project_path.borrow_mut() = Some(path.clone());
+                self.selected_clip.set(None);
+                self.status.set(format!(
+                    "OPENED {}",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or(path)
+                ));
+            } else {
+                self.status.set("LOAD FAILED".to_owned());
+            }
+        }
+        if let Some(path) = self
+            .pending_save
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            let path = path.to_string_lossy().into_owned();
+            if core.save_project(&path) {
+                *self.project_path.borrow_mut() = Some(path.clone());
+                self.status.set(format!(
+                    "SAVED {}",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or(path)
+                ));
+            } else {
+                self.status.set("SAVE FAILED".to_owned());
+            }
         }
     }
 
@@ -1507,16 +1557,14 @@ impl App for HirariAmeApp {
 
         // Project bar: open/save/new. The file dialog blocks the UI thread
         // while it is open, same as the Slint project actions.
-        let open_core = self.core.clone();
         let open_path = self.project_path.clone();
-        let open_selected = self.selected_clip.clone();
-        let open_status = self.status.clone();
+        let open_pending = self.pending_open.clone();
         let open_button = ButtonView::new("Open")
             .action_id("project.open")
             .secondary()
             .on_press(move |_| {
-                let Some(core) = &open_core else { return };
-                let dialog = rfd::FileDialog::new().add_filter("Hirari project", &["hirari"]);
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .add_filter("Hirari project", &["hirari"]);
                 let dialog = match open_path.borrow().as_deref() {
                     Some(path) => dialog.set_directory(
                         std::path::Path::new(path)
@@ -1526,55 +1574,52 @@ impl App for HirariAmeApp {
                     ),
                     None => dialog,
                 };
-                let Some(output) = dialog.pick_file() else {
-                    return;
-                };
-                let path = output.to_string_lossy().into_owned();
-                if core.load_project(&path) {
-                    *open_path.borrow_mut() = Some(path.clone());
-                    open_selected.set(None);
-                    open_status.set(format!(
-                        "OPENED {}",
-                        std::path::Path::new(&path)
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or(path)
-                    ));
-                } else {
-                    open_status.set("LOAD FAILED".to_owned());
-                }
+                let pending = open_pending.clone();
+                dialog.pick_file_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
             });
         let save_core = self.core.clone();
         let save_path = self.project_path.clone();
+        let save_pending = self.pending_save.clone();
         let save_status = self.status.clone();
         let save_button = ButtonView::new("Save")
             .action_id("project.save")
             .secondary()
             .on_press(move |_| {
                 let Some(core) = &save_core else { return };
-                let path = match save_path.borrow().clone() {
-                    Some(path) => path,
+                match save_path.borrow().clone() {
+                    Some(path) => {
+                        if core.save_project(&path) {
+                            *save_path.borrow_mut() = Some(path.clone());
+                            save_status.set(format!(
+                                "SAVED {}",
+                                std::path::Path::new(&path)
+                                    .file_name()
+                                    .map(|name| name.to_string_lossy().into_owned())
+                                    .unwrap_or(path)
+                            ));
+                        } else {
+                            save_status.set("SAVE FAILED".to_owned());
+                        }
+                    }
                     None => {
-                        let dialog = rfd::FileDialog::new()
+                        let dialog = ame_ui::platform::NativeFileDialog::new()
                             .set_file_name("Untitled.hirari")
                             .add_filter("Hirari project", &["hirari"]);
-                        let Some(output) = dialog.save_file() else {
-                            return;
-                        };
-                        output.to_string_lossy().into_owned()
+                        let pending = save_pending.clone();
+                        dialog.save_file_async(move |path| {
+                            if let Some(path) = path {
+                                if let Ok(mut slot) = pending.lock() {
+                                    *slot = Some(path);
+                                }
+                            }
+                        });
                     }
-                };
-                if core.save_project(&path) {
-                    *save_path.borrow_mut() = Some(path.clone());
-                    save_status.set(format!(
-                        "SAVED {}",
-                        std::path::Path::new(&path)
-                            .file_name()
-                            .map(|name| name.to_string_lossy().into_owned())
-                            .unwrap_or(path)
-                    ));
-                } else {
-                    save_status.set("SAVE FAILED".to_owned());
                 }
             });
         let new_core = self.core.clone();
