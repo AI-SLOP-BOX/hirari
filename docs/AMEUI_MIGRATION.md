@@ -67,7 +67,8 @@ Notes:
 | 22 | `9a17457` | Progression insert: P preset cycle + PROG button placing four chords (preset roots/qualities, inversion, engine chord-symbol events) at the playhead. |
 | 23 | `8516db9` | Articulation map: MAP id cycler plus a KS keyswitch stepper (off/60/down) committed via `set_midi_expression_map`. `ArrangeTrack` now carries the expression map. |
 | 24 | `33d1e4e` | Articulation name editing: a text field for the MAP id's name, committed on submit through the same expression-map replace. |
-| 25 | (this work) | Clip inspector: fade in/out and gain sliders for the selected audio clip, committing through the engine undo transactions. `ArrangeClip` now carries fade fractions and gain. |
+| 25 | `6afe0ef` | Clip inspector: fade in/out and gain sliders for the selected audio clip, committing through the engine undo transactions. `ArrangeClip` now carries fade fractions and gain. |
+| 26 | (this work) | Plugin strip: bypass toggles, removal and add (built-in chain stepper) for the selected track's plugin chain. `ArrangeTrack` now carries plugin types/bypass. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -114,10 +115,10 @@ hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
-Remaining for the roll: drum mode and CC lanes (CC lanes are
-unwired vestiges in Slint too; drum mode needs canvas text). Beyond the
-roll: automation lanes, plugin strip, settings/device, library — each
-its own multi-slice surface.
+Remaining for the roll: drum mode (needs canvas text) and CC lanes
+(unwired vestiges in Slint too). Beyond the roll: automation lanes,
+plugin params/UI, settings/device, library — each its own multi-slice
+surface.
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

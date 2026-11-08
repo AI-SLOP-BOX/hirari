@@ -21,9 +21,10 @@
 //! articulation stepper; slice 21 adds keyboard shortcuts (Space
 //! plays, L loops); slice 22 adds progression insert; slice 23 adds
 //! articulation-map keyswitch editing; slice 24 adds articulation-name
-//! editing; slice 25 adds the selected-clip fade/gain inspector.
-//! Audio playback is real; the Slint UI remains the default entry
-//! until the port reaches parity.
+//! editing; slice 25 adds the selected-clip fade/gain inspector;
+//! slice 26 adds the per-track plugin strip. Audio playback is real;
+//! the Slint UI remains the default entry until the port reaches
+//! parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -50,9 +51,9 @@ use vello::wgpu;
 use crate::ui::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
     last_clip_end, note_at, parse_arrange_tracks, parse_markers, parse_midi_notes,
-    piano_roll_geometry, trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker,
-    ArrangeTrack, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX,
-    ARRANGE_ZOOM_MIN,
+    piano_roll_geometry, plugin_name, trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry,
+    ArrangeMarker, ArrangeTrack, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge,
+    ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
@@ -186,6 +187,8 @@ pub struct HirariAmeApp {
     progression_preset: State<u32>,
     /// Articulation-map id being edited (1..255).
     map_articulation_id: State<u32>,
+    /// Plugin type the ADD button installs (built-in chain 0..=10).
+    add_plugin_type: State<u32>,
     /// Selected note index into `piano_notes` (for delete).
     selected_note: State<Option<usize>>,
     status: State<String>,
@@ -259,6 +262,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         chord_inversion: context.state(0u32),
         progression_preset: context.state(0u32),
         map_articulation_id: context.state(1u32),
+        add_plugin_type: context.state(0u32),
         selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
@@ -1678,6 +1682,95 @@ impl App for HirariAmeApp {
                 ])]))
             });
 
+        // Plugin strip for the selected track: bypass toggles, removal,
+        // and an add stepper over the built-in chain (Slint fx list).
+        let plugin_strip = tracks
+            .iter()
+            .find(|track| track.id == self.piano_track.get())
+            .filter(|track| !track.plugin_types.is_empty())
+            .map(|track| {
+                let track_id = track.id;
+                let mut rows: Vec<View> = vec![View::Text("PLUGINS".to_owned())];
+                for (index, plugin_type) in track.plugin_types.iter().enumerate() {
+                    let bypassed = track.plugin_bypass.get(index).copied().unwrap_or(false);
+                    let bypass_core = self.core.clone();
+                    let bypass_tracks = self.tracks.clone();
+                    let bypass_locked = self.arrange_locked.get();
+                    let bypass_button = ButtonView::new(if bypassed { "Enable" } else { "Bypass" })
+                        .action_id(format!("plugin.bypass.{index}"))
+                        .secondary()
+                        .on_press(move |_| {
+                            if bypass_locked {
+                                return;
+                            }
+                            if let Some(core) = &bypass_core {
+                                if core.set_plugin_bypass(track_id, index as u32, !bypassed) {
+                                    bypass_tracks.set(parse_arrange_tracks(
+                                        &core.get_project_layout_json(),
+                                        |samples| core.samples_to_beats(samples),
+                                    ));
+                                }
+                            }
+                        });
+                    let remove_core = self.core.clone();
+                    let remove_tracks = self.tracks.clone();
+                    let remove_button = ButtonView::new("Remove")
+                        .action_id(format!("plugin.remove.{index}"))
+                        .secondary()
+                        .on_press(move |_| {
+                            if bypass_locked {
+                                return;
+                            }
+                            if let Some(core) = &remove_core {
+                                if core.remove_plugin(track_id, index as u32) {
+                                    remove_tracks.set(parse_arrange_tracks(
+                                        &core.get_project_layout_json(),
+                                        |samples| core.samples_to_beats(samples),
+                                    ));
+                                }
+                            }
+                        });
+                    rows.push(View::HStack(vec![
+                        View::Text(plugin_name(*plugin_type, index)),
+                        bypass_button.into(),
+                        remove_button.into(),
+                    ]));
+                }
+                let add_type_state = self.add_plugin_type.clone();
+                let add_button =
+                    ButtonView::new(format!("ADD {}", plugin_name(add_type_state.get(), 0)))
+                        .action_id("plugin.add")
+                        .secondary()
+                        .on_press({
+                            let add_core = self.core.clone();
+                            let add_tracks = self.tracks.clone();
+                            let add_locked = self.arrange_locked.get();
+                            let add_type = add_type_state.get();
+                            move |_| {
+                                if add_locked {
+                                    return;
+                                }
+                                if let Some(core) = &add_core {
+                                    if core.add_plugin(track_id, add_type) {
+                                        add_tracks.set(parse_arrange_tracks(
+                                            &core.get_project_layout_json(),
+                                            |samples| core.samples_to_beats(samples),
+                                        ));
+                                    }
+                                }
+                            }
+                        });
+                let cycle_state = self.add_plugin_type.clone();
+                let cycle_button = ButtonView::new("TYPE")
+                    .action_id("plugin.add_type_cycle")
+                    .secondary()
+                    .on_press(move |_| {
+                        cycle_state.set((cycle_state.get() + 1) % 11);
+                    });
+                rows.push(View::HStack(vec![cycle_button.into(), add_button.into()]));
+                View::Card(vec![View::VStack(rows)])
+            });
+
         // Mixer strips: the canvas draws geometry only (no text), so the
         // list below carries names plus the fader/pan/mute/solo/arm
         // controls, wired to the same engine setters as the Slint mixer.
@@ -2382,6 +2475,9 @@ impl App for HirariAmeApp {
         ];
         if let Some(inspector) = inspector {
             views.push(inspector);
+        }
+        if let Some(plugin_strip) = plugin_strip {
+            views.push(plugin_strip);
         }
         views.extend([piano_selector, View::canvas("piano").grow(2), track_list]);
         View::VStack(views)

@@ -62,6 +62,28 @@ pub struct ArrangeTrack {
     pub record_armed: bool,
     /// Expression-map entries (keyswitch/articulation map editing).
     pub expression_map: Vec<hirari_core_bridge::project_contracts::ExpressionMapEntry>,
+    /// Installed plugin chain: engine plugin-type ids and bypass flags.
+    pub plugin_types: Vec<u32>,
+    pub plugin_bypass: Vec<bool>,
+}
+
+/// Display name for an engine plugin-type id, mirroring the names the
+/// Slint track sync publishes for the built-in chain.
+pub fn plugin_name(plugin_type: u32, index: usize) -> String {
+    match plugin_type {
+        0 => "Hirari Limiter".to_owned(),
+        1 => "Hirari Compressor".to_owned(),
+        2 => "Hirari Gate".to_owned(),
+        3 => "Tube Saturation".to_owned(),
+        4 => "Hirari Transient".to_owned(),
+        5 => "Hirari De-Esser".to_owned(),
+        6 => "Hirari Delay".to_owned(),
+        7 => "Hirari Reverb".to_owned(),
+        8 => "Hirari Dynamic EQ".to_owned(),
+        9 => "Hirari Mid/Side".to_owned(),
+        10 => "Hirari Width".to_owned(),
+        _ => format!("Plugin {}", index + 1),
+    }
 }
 
 /// A timeline marker. `color` is the engine's `#rrggbb` marker color as
@@ -307,6 +329,10 @@ struct TrackLayout {
     #[serde(default)]
     expression_map: Vec<hirari_core_bridge::project_contracts::ExpressionMapEntry>,
     #[serde(default)]
+    plugin_types: Vec<u32>,
+    #[serde(default)]
+    plugin_bypass: Vec<bool>,
+    #[serde(default)]
     regions: Vec<RegionLayout>,
 }
 
@@ -389,6 +415,8 @@ pub fn parse_arrange_tracks(
                 solo: layout.solo,
                 record_armed: layout.record_armed,
                 expression_map: layout.expression_map,
+                plugin_types: layout.plugin_types,
+                plugin_bypass: layout.plugin_bypass,
             }
         })
         .collect()
@@ -893,7 +921,7 @@ mod tests {
 
     #[test]
     fn parses_tracks_and_regions_from_layout_json() {
-        let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"expression_map":[{"articulation_id":1,"name":"Short","keyswitch_pitch":36}],"regions":[
+        let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"expression_map":[{"articulation_id":1,"name":"Short","keyswitch_pitch":36}],"plugin_types":[0,7],"plugin_bypass":[false,true],"regions":[
             {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3,"fade_in_samples":12000,"fade_out_samples":6000,"clip_gain":1.5},
             {"id":2,"name":"Snare","start":96000,"len":48000,"reverse":true}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
@@ -920,6 +948,8 @@ mod tests {
         assert!(tracks[0].record_armed);
         assert_eq!(tracks[0].expression_map.len(), 1);
         assert_eq!(tracks[0].expression_map[0].keyswitch_pitch, Some(36));
+        assert_eq!(tracks[0].plugin_types, vec![0, 7]);
+        assert_eq!(tracks[0].plugin_bypass, vec![false, true]);
         // No base_length published: full-clip trim window.
         assert_eq!(tracks[0].clips[0].trim_start, 0.0);
         assert_eq!(tracks[0].clips[0].trim_end, 1.0);
@@ -1031,6 +1061,8 @@ mod tests {
             solo: false,
             record_armed: false,
             expression_map: Vec::new(),
+            plugin_types: Vec::new(),
+            plugin_bypass: Vec::new(),
             clips: vec![
                 ArrangeClip {
                     id: 1,
@@ -1240,6 +1272,13 @@ mod tests {
     }
 
     #[test]
+    fn plugin_names_follow_the_builtin_chain() {
+        assert_eq!(plugin_name(0, 0), "Hirari Limiter");
+        assert_eq!(plugin_name(3, 0), "Tube Saturation");
+        assert_eq!(plugin_name(99, 4), "Plugin 5");
+    }
+
+    #[test]
     fn last_clip_end_spans_all_lanes() {
         let tracks = vec![
             ArrangeTrack {
@@ -1253,6 +1292,8 @@ mod tests {
                 solo: false,
                 record_armed: false,
                 expression_map: Vec::new(),
+                plugin_types: Vec::new(),
+                plugin_bypass: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 1,
                     name: "a".into(),
@@ -1279,6 +1320,8 @@ mod tests {
                 solo: false,
                 record_armed: false,
                 expression_map: Vec::new(),
+                plugin_types: Vec::new(),
+                plugin_bypass: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 2,
                     name: "b".into(),
