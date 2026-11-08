@@ -28,8 +28,9 @@
 //! the native file dialog (async, delivered on the poll); slice 30
 //! adds dropped-file audio import; slice 31 adopts dirty-canvas
 //! redraw; slice 32 adopts pinch/pan gestures; slice 33 adopts theme
-//! colors in the canvases. Audio playback is real; the Slint UI remains
-//! the default entry until the port reaches parity.
+//! colors in the canvases; slice 34 adds the plugin parameter strip.
+//! Audio playback is real; the Slint UI remains the default entry until the
+//! port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -228,6 +229,8 @@ pub struct HirariAmeApp {
     map_articulation_id: State<u32>,
     /// Plugin type the ADD button installs (built-in chain 0..=10).
     add_plugin_type: State<u32>,
+    /// Plugin whose parameters are shown (index into the chain).
+    selected_plugin: State<u32>,
     /// Selected note index into `piano_notes` (for delete).
     selected_note: State<Option<usize>>,
     status: State<String>,
@@ -319,6 +322,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         progression_preset: context.state(0u32),
         map_articulation_id: context.state(1u32),
         add_plugin_type: context.state(0u32),
+        selected_plugin: context.state(0u32),
         selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
@@ -2111,8 +2115,18 @@ impl App for HirariAmeApp {
                                 }
                             }
                         });
+                    let select_state = self.selected_plugin.clone();
+                    let select_active = self.selected_plugin.get() == index as u32;
+                    let select_button =
+                        ButtonView::new(if select_active { "Selected" } else { "Params" })
+                            .action_id(format!("plugin.select.{index}"))
+                            .secondary()
+                            .on_press(move |_| {
+                                select_state.set(index as u32);
+                            });
                     rows.push(View::HStack(vec![
                         View::Text(plugin_name(*plugin_type, index)),
+                        select_button.into(),
                         bypass_button.into(),
                         remove_button.into(),
                     ]));
@@ -2859,6 +2873,68 @@ impl App for HirariAmeApp {
         }
         if let Some(plugin_strip) = plugin_strip {
             views.push(plugin_strip);
+        }
+        // Plugin parameter strip for the selected plugin of the selected
+        // track (normalized 0..1 sliders, like the Slint plugin UI).
+        if let Some(core) = &self.core {
+            let params_track = tracks
+                .iter()
+                .find(|track| track.id == self.piano_track.get());
+            if let Some(track) = params_track {
+                let params_track_id = track.id;
+                let plugin_count = track.plugin_types.len() as u32;
+                if plugin_count > 0 {
+                    let plugin_index = self.selected_plugin.get().min(plugin_count - 1);
+                    let count = core
+                        .get_plugin_parameter_count(params_track_id, plugin_index)
+                        .min(32);
+                    if count > 0 {
+                        let param_locked = self.arrange_locked.get();
+                        let mut param_rows: Vec<View> = vec![View::Text(format!(
+                            "PARAMS · {}",
+                            plugin_name(
+                                track.plugin_types[plugin_index as usize],
+                                plugin_index as usize
+                            )
+                        ))];
+                        for parameter_id in 0..count {
+                            let name = core.get_plugin_parameter_name(
+                                params_track_id,
+                                plugin_index,
+                                parameter_id,
+                            );
+                            let label = if name.trim().is_empty() {
+                                format!("Parameter {parameter_id}")
+                            } else {
+                                name
+                            };
+                            let value = core
+                                .get_plugin_parameter(params_track_id, plugin_index, parameter_id)
+                                .clamp(0.0, 1.0);
+                            let param_core = self.core.clone();
+                            let slider = SliderView::new(value, 0.0, 1.0)
+                                .action_id(format!("plugin.param.{plugin_index}.{parameter_id}"))
+                                .disabled(param_locked)
+                                .on_change(move |new_value| {
+                                    if param_locked {
+                                        return;
+                                    }
+                                    if let Some(core) = &param_core {
+                                        let _ = core.set_plugin_parameter(
+                                            params_track_id,
+                                            plugin_index,
+                                            parameter_id,
+                                            new_value.clamp(0.0, 1.0),
+                                        );
+                                    }
+                                });
+                            param_rows
+                                .push(View::HStack(vec![View::Caption(label), slider.into()]));
+                        }
+                        views.push(View::Card(vec![View::VStack(param_rows)]));
+                    }
+                }
+            }
         }
         views.extend([piano_selector, View::canvas("piano").grow(2), track_list]);
         View::VStack(views)
