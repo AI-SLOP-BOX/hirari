@@ -11,6 +11,8 @@ description = "Rust and Slint desktop application for the Hirari DAW."
 # Slint manages the entire user surface and interaction logic.
 slint.workspace = true
 raw-window-handle.workspace = true
+# Cursor icons for the AmeUI canvas (position-aware canvas_cursor).
+winit.workspace = true
 
 # 🟢 ENGINE BRIDGE
 # Connects the Rust UI to the Hirari runtime and native audio boundary.

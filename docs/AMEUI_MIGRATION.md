@@ -84,7 +84,8 @@ Notes:
 | 39 | `98a105f` | Device selection: catalog parsing plus cycle/select buttons applying `select_audio_device` at the current config values. |
 | 40 | `e3a5127` | Plugin presets: SAVE/LOAD preset buttons using the native dialogs, executed on the poll via the pending-preset slot. |
 | 41 | `2c33fde` | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
-| 42 | (this work) | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
+| 42 | `da12104` | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
+| 43 | (this work) | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 

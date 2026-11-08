@@ -51,6 +51,7 @@ hirari-moufu-adapter = { path = "./hirari-moufu-adapter" }
 # Canvas scene/device types are the same crate instance across the boundary.
 ame-ui = { path = "../AmeUI" }
 vello = "0.11"
+winit = "0.30"
 slint = { version = "1.17.1", default-features = false, features = [
     "std",
     "accessibility",

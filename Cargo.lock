@@ -279,6 +279,9 @@ dependencies = [
  "image",
  "muda 0.21.2",
  "notify",
+ "objc2 0.5.2",
+ "objc2-foundation 0.2.2",
+ "objc2-ui-kit 0.2.2",
  "pollster",
  "raw-window-handle",
  "resvg 0.48.1",
@@ -2636,6 +2639,7 @@ dependencies = [
  "sys-locale",
  "vello",
  "wgpu 0.20.1",
+ "winit",
 ]
 
 [[package]]

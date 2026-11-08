@@ -34,8 +34,9 @@
 //! adds audio settings; slice 39 adds device selection; slice 40
 //! adds plugin preset save/load; slice 41 adds the master gain
 //! slider; slice 42 adopts slider release callbacks for the clip
-//! fade/gain sliders (one undo entry per gesture). Audio playback is
-//! real; the Slint UI remains the default entry until the port reaches parity.
+//! fade/gain sliders (one undo entry per gesture); slice 43 adopts
+//! position-aware canvas cursors. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -1753,6 +1754,56 @@ impl App for HirariAmeApp {
     /// dirty-canvas API: the waveform always animates (meters), while
     /// arrange/piano replay their cached scenes when idle. Geometry and
     /// scale changes re-record regardless (framework behavior).
+    /// Position-aware cursor: resize over Audio/Vocal trim edges, pointer
+    /// over clips/notes, default elsewhere. Uses the landed per-region
+    /// cursor API (previously a static per-slot icon).
+    fn canvas_cursor(&self, canvas_id: &str, x: f64, y: f64) -> Option<winit::window::CursorIcon> {
+        match canvas_id {
+            "arrange" => {
+                let geometry = self.arrange_geometry;
+                if geometry.lane_height <= 0.0 || (y as f32) < geometry.ruler_height {
+                    return None;
+                }
+                let lane = ((y as f32 - geometry.ruler_height) / geometry.lane_height) as usize;
+                let tracks = self.tracks.get();
+                let track = tracks.get(lane)?.clone();
+                let hit = clip_at(&tracks, &geometry, x as f32, y as f32);
+                let Some((_, clip_id)) = hit else {
+                    return None;
+                };
+                let clip = track.clips.iter().find(|clip| clip.id == clip_id)?;
+                if clip.midi {
+                    return Some(winit::window::CursorIcon::Pointer);
+                }
+                if (track.kind == "Audio" || track.kind == "Vocal")
+                    && trim_edge_at(&geometry, clip, x as f32).is_some()
+                {
+                    return Some(winit::window::CursorIcon::EwResize);
+                }
+                Some(winit::window::CursorIcon::Pointer)
+            }
+            "piano" => {
+                let geometry = self.piano_geometry;
+                if geometry.px_per_pitch <= 0.0 {
+                    return None;
+                }
+                let track_id = self.piano_track.get();
+                let notes = self.piano_notes.get();
+                let visible: Vec<PianoNote> = notes
+                    .iter()
+                    .filter(|note| note.track_id == track_id)
+                    .cloned()
+                    .collect();
+                if note_at(&visible, &geometry, x as f32, y as f32).is_some() {
+                    Some(winit::window::CursorIcon::Pointer)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn canvas_scene_dirty(&self, canvas_id: &str) -> bool {
         match canvas_id {
             "waveform" => true,
