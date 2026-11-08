@@ -64,7 +64,8 @@ Notes:
 | 19 | `dd2e60b` | Piano roll lyric editing: a text field for the selected note's lyric, committed on submit through the full note-list replace (length/NUL guarded like the engine). |
 | 20 | `d473190` | Piano roll articulation stepper: ART-/ART+ step the selected note's articulation (0–127) through the shared full-replace commit. |
 | 21 | `1d13eb4` | Keyboard shortcuts: Space toggles playback, L toggles loop via `App::on_shortcut` (framework withholds it while a text editor is focused). |
-| 22 | (this work) | Progression insert: P preset cycle + PROG button placing four chords (preset roots/qualities, inversion, engine chord-symbol events) at the playhead. |
+| 22 | `9a17457` | Progression insert: P preset cycle + PROG button placing four chords (preset roots/qualities, inversion, engine chord-symbol events) at the playhead. |
+| 23 | (this work) | Articulation map: MAP id cycler plus a KS keyswitch stepper (off/60/down) committed via `set_midi_expression_map`. `ArrangeTrack` now carries the expression map. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -111,8 +112,9 @@ hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
-Remaining for the roll: drum mode, CC lanes, articulation *map*
-editing. (Progression insert landed in slice 22.)
+Remaining for the roll: drum mode, CC lanes, articulation *name*
+editing. (Keyswitch map editing landed in slice 23; progression insert
+in slice 22.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see

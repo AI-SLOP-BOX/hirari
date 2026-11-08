@@ -54,6 +54,8 @@ pub struct ArrangeTrack {
     pub muted: bool,
     pub solo: bool,
     pub record_armed: bool,
+    /// Expression-map entries (keyswitch/articulation map editing).
+    pub expression_map: Vec<hirari_core_bridge::project_contracts::ExpressionMapEntry>,
 }
 
 /// A timeline marker. `color` is the engine's `#rrggbb` marker color as
@@ -287,6 +289,8 @@ struct TrackLayout {
     #[serde(default)]
     record_armed: bool,
     #[serde(default)]
+    expression_map: Vec<hirari_core_bridge::project_contracts::ExpressionMapEntry>,
+    #[serde(default)]
     regions: Vec<RegionLayout>,
 }
 
@@ -357,6 +361,7 @@ pub fn parse_arrange_tracks(
                 muted: layout.mute,
                 solo: layout.solo,
                 record_armed: layout.record_armed,
+                expression_map: layout.expression_map,
             }
         })
         .collect()
@@ -861,7 +866,7 @@ mod tests {
 
     #[test]
     fn parses_tracks_and_regions_from_layout_json() {
-        let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"regions":[
+        let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"expression_map":[{"articulation_id":1,"name":"Short","keyswitch_pitch":36}],"regions":[
             {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3},
             {"id":2,"name":"Snare","start":96000,"len":48000,"reverse":true}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
@@ -883,6 +888,8 @@ mod tests {
         assert!(tracks[0].muted);
         assert!(tracks[0].solo);
         assert!(tracks[0].record_armed);
+        assert_eq!(tracks[0].expression_map.len(), 1);
+        assert_eq!(tracks[0].expression_map[0].keyswitch_pitch, Some(36));
         // No base_length published: full-clip trim window.
         assert_eq!(tracks[0].clips[0].trim_start, 0.0);
         assert_eq!(tracks[0].clips[0].trim_end, 1.0);
@@ -993,6 +1000,7 @@ mod tests {
             muted: false,
             solo: false,
             record_armed: false,
+            expression_map: Vec::new(),
             clips: vec![
                 ArrangeClip {
                     id: 1,
@@ -1205,6 +1213,7 @@ mod tests {
                 muted: false,
                 solo: false,
                 record_armed: false,
+                expression_map: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 1,
                     name: "a".into(),
@@ -1227,6 +1236,7 @@ mod tests {
                 muted: false,
                 solo: false,
                 record_armed: false,
+                expression_map: Vec::new(),
                 clips: vec![ArrangeClip {
                     id: 2,
                     name: "b".into(),

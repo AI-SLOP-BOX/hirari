@@ -19,9 +19,9 @@
 //! quantize and velocity stepping; slice 18 adds chord insert and
 //! delete-all; slice 19 adds note lyric editing; slice 20 adds the
 //! articulation stepper; slice 21 adds keyboard shortcuts (Space
-//! plays, L loops); slice 22 adds progression insert. Audio playback
-//! is real; the Slint UI remains the default entry until the port
-//! reaches parity.
+//! plays, L loops); slice 22 adds progression insert; slice 23 adds
+//! articulation-map keyswitch editing. Audio playback is real; the
+//! Slint UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -182,6 +182,8 @@ pub struct HirariAmeApp {
     chord_length: State<f32>,
     chord_inversion: State<u32>,
     progression_preset: State<u32>,
+    /// Articulation-map id being edited (1..255).
+    map_articulation_id: State<u32>,
     /// Selected note index into `piano_notes` (for delete).
     selected_note: State<Option<usize>>,
     status: State<String>,
@@ -254,6 +256,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         chord_length: context.state(4.0f32),
         chord_inversion: context.state(0u32),
         progression_preset: context.state(0u32),
+        map_articulation_id: context.state(1u32),
         selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
@@ -2006,6 +2009,115 @@ impl App for HirariAmeApp {
             });
         piano_buttons.push(preset_button.into());
         piano_buttons.push(prog_button.into());
+        // Articulation map (Slint set-articulation-map): MAP cycles the
+        // articulation id; KS steps the keyswitch pitch (off, 60, down).
+        let map_state = self.map_articulation_id.clone();
+        let map_button = ButtonView::new(format!("MAP{}", self.map_articulation_id.get()))
+            .action_id("piano.map_cycle")
+            .secondary()
+            .on_press(move |_| {
+                let next = map_state.get() + 1;
+                map_state.set(if next > 255 { 1 } else { next });
+            });
+        piano_buttons.push(map_button.into());
+        let ks_core = self.core.clone();
+        let ks_tracks = self.tracks.clone();
+        let ks_track = self.piano_track.clone();
+        let ks_map_id = self.map_articulation_id.clone();
+        let ks_locked = self.arrange_locked.clone();
+        let ks_current = tracks
+            .iter()
+            .find(|track| track.id == piano_track)
+            .and_then(|track| {
+                track
+                    .expression_map
+                    .iter()
+                    .find(|entry| entry.articulation_id as u32 == self.map_articulation_id.get())
+                    .and_then(|entry| entry.keyswitch_pitch)
+            });
+        let ks_label = match ks_current {
+            Some(pitch) => format!("KS{pitch}"),
+            None => "KS OFF".to_owned(),
+        };
+        let ks_button = ButtonView::new(ks_label)
+            .action_id("piano.map_keyswitch")
+            .secondary()
+            .on_press(move |_| {
+                if ks_locked.get() {
+                    return;
+                }
+                let Some(core) = &ks_core else { return };
+                let track_id = ks_track.get();
+                let articulation_id = ks_map_id.get();
+                if !(1..=255).contains(&articulation_id) {
+                    return;
+                }
+                let tracks = ks_tracks.get();
+                let Some(track) = tracks.iter().find(|track| track.id == track_id) else {
+                    return;
+                };
+                let mut entries = track.expression_map.clone();
+                let current = entries
+                    .iter()
+                    .find(|entry| entry.articulation_id as u32 == articulation_id)
+                    .and_then(|entry| entry.keyswitch_pitch);
+                let pitch: Option<u8> = match current {
+                    None => Some(60),
+                    Some(0) => None,
+                    Some(pitch) => Some(pitch - 1),
+                };
+                let id = articulation_id as u8;
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.articulation_id == id) {
+                    entry.outputs.retain(|output| {
+                        !matches!(
+                            output,
+                            hirari_core_bridge::project_contracts::ExpressionMapOutput::KeySwitch {
+                                ..
+                            }
+                        )
+                    });
+                    if let Some(pitch) = pitch {
+                        entry.outputs.insert(
+                            0,
+                            hirari_core_bridge::project_contracts::ExpressionMapOutput::KeySwitch {
+                                note: pitch,
+                                velocity: 127,
+                                length_ticks: 0,
+                            },
+                        );
+                        entry.keyswitch_pitch = Some(pitch);
+                    } else {
+                        entry.keyswitch_pitch = None;
+                    }
+                } else if let Some(pitch) = pitch {
+                    entries.push(hirari_core_bridge::project_contracts::ExpressionMapEntry {
+                        articulation_id: id,
+                        name: format!("Articulation {id}"),
+                        keyswitch_pitch: Some(pitch),
+                        channel: 0,
+                        group: 0,
+                        outputs: vec![
+                            hirari_core_bridge::project_contracts::ExpressionMapOutput::KeySwitch {
+                                note: pitch,
+                                velocity: 127,
+                                length_ticks: 0,
+                            },
+                        ],
+                        off_outputs: Vec::new(),
+                        transition_off_outputs: Vec::new(),
+                    });
+                }
+                entries.sort_by_key(|entry| entry.articulation_id);
+                let accepted =
+                    core.set_midi_expression_map(track_id, entries, articulation_id as u8);
+                if accepted {
+                    ks_tracks.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                }
+            });
+        piano_buttons.push(ks_button.into());
         // Lyric editor for the selected note; commits on submit, like the
         // Slint lyric field. The text buffer is shared between the change
         // and submit closures so Enter commits the typed value.
