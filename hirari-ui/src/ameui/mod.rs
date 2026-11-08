@@ -20,8 +20,9 @@
 //! delete-all; slice 19 adds note lyric editing; slice 20 adds the
 //! articulation stepper; slice 21 adds keyboard shortcuts (Space
 //! plays, L loops); slice 22 adds progression insert; slice 23 adds
-//! articulation-map keyswitch editing. Audio playback is real; the
-//! Slint UI remains the default entry until the port reaches parity.
+//! articulation-map keyswitch editing; slice 24 adds articulation-name
+//! editing. Audio playback is real; the Slint UI remains the default
+//! entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -2118,6 +2119,75 @@ impl App for HirariAmeApp {
                 }
             });
         piano_buttons.push(ks_button.into());
+        // Articulation name field for the MAP id (Slint set-articulation-name).
+        let name_core = self.core.clone();
+        let name_tracks = self.tracks.clone();
+        let name_track = self.piano_track.clone();
+        let name_map_id = self.map_articulation_id.clone();
+        let name_locked = self.arrange_locked.clone();
+        let current_name = tracks
+            .iter()
+            .find(|track| track.id == piano_track)
+            .and_then(|track| {
+                track
+                    .expression_map
+                    .iter()
+                    .find(|entry| entry.articulation_id as u32 == self.map_articulation_id.get())
+                    .map(|entry| entry.name.clone())
+            })
+            .unwrap_or_default();
+        let name_text = Rc::new(RefCell::new(current_name.clone()));
+        let name_change_text = name_text.clone();
+        let name_submit_text = name_text.clone();
+        let name_field = TextFieldView::new(current_name, "Articulation name")
+            .change_action_id("piano.map_name")
+            .submit_action_id("piano.map_name")
+            .on_change(move |value| {
+                *name_change_text.borrow_mut() = value;
+            })
+            .on_submit(move || {
+                if name_locked.get() {
+                    return;
+                }
+                let Some(core) = &name_core else { return };
+                let track_id = name_track.get();
+                let articulation_id = name_map_id.get();
+                if !(1..=255).contains(&articulation_id) {
+                    return;
+                }
+                let name = name_submit_text.borrow().clone();
+                if name.len() > 128 || name.contains('\0') {
+                    return;
+                }
+                let tracks = name_tracks.get();
+                let Some(track) = tracks.iter().find(|track| track.id == track_id) else {
+                    return;
+                };
+                let mut entries = track.expression_map.clone();
+                let id = articulation_id as u8;
+                if let Some(entry) = entries.iter_mut().find(|entry| entry.articulation_id == id) {
+                    entry.name = name;
+                } else {
+                    entries.push(hirari_core_bridge::project_contracts::ExpressionMapEntry {
+                        articulation_id: id,
+                        name,
+                        keyswitch_pitch: None,
+                        channel: 0,
+                        group: 0,
+                        outputs: Vec::new(),
+                        off_outputs: Vec::new(),
+                        transition_off_outputs: Vec::new(),
+                    });
+                }
+                entries.sort_by_key(|entry| entry.articulation_id);
+                if core.set_midi_expression_map(track_id, entries, articulation_id as u8) {
+                    name_tracks.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                }
+            });
+        piano_buttons.push(name_field.into());
         // Lyric editor for the selected note; commits on submit, like the
         // Slint lyric field. The text buffer is shared between the change
         // and submit closures so Enter commits the typed value.
