@@ -58,7 +58,8 @@ Notes:
 | 13 | `3d5b596` | Project bar: Open/Save/New via `rfd` dialogs and `load_project`/`save_project`/`new_project`, with path memory and selection reset on project change. |
 | 14 | `1f50643` | Transport extras: Loop and metronome toggle buttons, polled from `is_loop_enabled`/`is_metronome_enabled`. Adds the missing `HirariCore` metronome forwarders in the bridge. |
 | 15 | `d2cd6cb` | Piano roll (read-only): neutral `parse_midi_notes` + `piano_roll_geometry`, track picker, note canvas with beat grid, velocity-shaded notes and playhead. |
-| 16 | (this work) | Piano roll editing: press a note to move it (right edge resizes), press empty space to add one, DELETE removes the selection; commits as one full note-list replace in an undo transaction. `PianoNote` now carries the full authoring contract (lyric/articulation/vibrato survive edits). |
+| 16 | `8816fc5` | Piano roll editing: press a note to move it (right edge resizes), press empty space to add one, DELETE removes the selection; commits as one full note-list replace in an undo transaction. `PianoNote` now carries the full authoring contract (lyric/articulation/vibrato survive edits). |
+| 17 | (this work) | Piano roll extras: QUANTIZE (snap selected track's note starts to the snap grid) and VEL-/VEL+ stepping for the selected note, both through the same full-replace commit. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -103,9 +104,10 @@ hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 ## Next surface: piano roll (extras)
 
 The arrange dock + mixer + project + transport are at parity (text
-excepted), and the piano roll edits since slice 16. Remaining for the
-roll: velocity/articulation/lyric editing, quantize, chord/progression
-tools, drum mode, CC lanes. Entry points:
+excepted), and the piano roll edits since slice 16. Quantize and
+velocity stepping landed in slice 17. Remaining for the roll:
+articulation/lyric editing, chord/progression tools, drum mode, CC
+lanes. Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see
   `hirari-core-bridge/src/runtime/hirari_core_arrangement_midi_editing.rs`)

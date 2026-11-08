@@ -15,9 +15,9 @@
 //! track list into mixer strips (fader/pan/mute/solo/arm); slice 13 adds
 //! project open/save/new; slice 14 adds loop/metronome toggles; slice 15
 //! adds the read-only piano roll; slice 16 adds its edit gestures
-//! (add/move/resize/delete via a full note-list replace). Audio
-//! playback is real; the Slint UI remains the default entry until the
-//! port reaches parity.
+//! (add/move/resize/delete via a full note-list replace); slice 17 adds
+//! quantize and velocity stepping. Audio playback is real; the Slint UI
+//! remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -89,6 +89,21 @@ struct PianoEdit {
     orig_length: f32,
     delta_beats: f32,
     delta_pitches: i32,
+}
+
+/// Full note-list replace in one undo transaction, then republish from
+/// the engine (mirrors `sync_midi_notes_to_core`). Free function so view
+/// closures (which cannot borrow the app) can commit too.
+fn replace_notes(core: &HirariCore, notes_state: &State<Vec<PianoNote>>, notes: Vec<PianoNote>) {
+    core.begin_undo_transaction("Edit MIDI Notes");
+    if core.replace_midi_note_contracts(notes_to_contracts(core, &notes), true) {
+        let _ = core.end_undo_transaction();
+    } else {
+        let _ = core.abort_undo_transaction();
+    }
+    notes_state.set(parse_midi_notes(&core.midi_notes_json(), |samples| {
+        core.samples_to_beats(samples)
+    }));
 }
 
 /// Converts the parsed notes back to engine contracts for a full-list
@@ -557,22 +572,10 @@ impl HirariAmeApp {
         self.selected_note.set(None);
     }
 
-    /// Full note-list replace in one undo transaction, then republish
-    /// from the engine (mirrors `sync_midi_notes_to_core`).
     fn replace_notes(&self, notes: Vec<PianoNote>) {
-        let Some(core) = self.core.clone() else {
-            return;
-        };
-        core.begin_undo_transaction("Edit MIDI Notes");
-        if core.replace_midi_note_contracts(notes_to_contracts(&core, &notes), true) {
-            let _ = core.end_undo_transaction();
-        } else {
-            let _ = core.abort_undo_transaction();
+        if let Some(core) = self.core.clone() {
+            replace_notes(&core, &self.piano_notes, notes);
         }
-        self.piano_notes
-            .set(parse_midi_notes(&core.midi_notes_json(), |samples| {
-                core.samples_to_beats(samples)
-            }));
     }
 
     /// Commits the dragged clip move through the engine, mirroring the
@@ -1637,21 +1640,66 @@ impl App for HirariAmeApp {
                 if index < notes.len() {
                     notes.remove(index);
                     if let Some(core) = &delete_core {
-                        core.begin_undo_transaction("Edit MIDI Notes");
-                        if core.replace_midi_note_contracts(notes_to_contracts(core, &notes), true)
-                        {
-                            let _ = core.end_undo_transaction();
-                        } else {
-                            let _ = core.abort_undo_transaction();
-                        }
-                        delete_notes.set(parse_midi_notes(&core.midi_notes_json(), |samples| {
-                            core.samples_to_beats(samples)
-                        }));
+                        replace_notes(core, &delete_notes, notes);
                     }
                 }
                 delete_selected.set(None);
             });
         piano_buttons.push(delete_button.into());
+        let quantize_core = self.core.clone();
+        let quantize_notes = self.piano_notes.clone();
+        let quantize_track = self.piano_track.clone();
+        let quantize_snap = self.arrange_snap_division.clone();
+        let quantize_locked = self.arrange_locked.clone();
+        let quantize_button = ButtonView::new("QUANTIZE")
+            .action_id("piano.quantize")
+            .secondary()
+            .on_press(move |_| {
+                if quantize_locked.get() {
+                    return;
+                }
+                let Some(core) = &quantize_core else { return };
+                let step = 4.0 / quantize_snap.get().max(1.0);
+                let track_id = quantize_track.get();
+                let mut notes = quantize_notes.get();
+                let mut changed = false;
+                for note in notes.iter_mut().filter(|note| note.track_id == track_id) {
+                    let snapped = (note.start_beat / step).round() * step;
+                    if snapped != note.start_beat {
+                        note.start_beat = snapped.max(0.0);
+                        changed = true;
+                    }
+                }
+                if changed {
+                    replace_notes(core, &quantize_notes, notes);
+                }
+            });
+        piano_buttons.push(quantize_button.into());
+        for (label, delta) in [("VEL-", -1), ("VEL+", 1)] {
+            let velocity_core = self.core.clone();
+            let velocity_notes = self.piano_notes.clone();
+            let velocity_selected = self.selected_note.clone();
+            let velocity_locked = self.arrange_locked.clone();
+            let button = ButtonView::new(label)
+                .action_id(format!("piano.velocity.{label}"))
+                .secondary()
+                .on_press(move |_| {
+                    if velocity_locked.get() {
+                        return;
+                    }
+                    let Some(core) = &velocity_core else { return };
+                    let Some(index) = velocity_selected.get() else {
+                        return;
+                    };
+                    let mut notes = velocity_notes.get();
+                    let Some(note) = notes.get_mut(index) else {
+                        return;
+                    };
+                    note.velocity = (i32::from(note.velocity) + delta).clamp(1, 127) as u8;
+                    replace_notes(core, &velocity_notes, notes);
+                });
+            piano_buttons.push(button.into());
+        }
         let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
 
         View::VStack(vec![
