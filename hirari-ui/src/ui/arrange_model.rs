@@ -38,6 +38,12 @@ pub struct ArrangeClip {
     /// Reversed playback; flips the waveform peak mapping like the Slint
     /// dock, and gates trim handles to Audio/Vocal lanes at draw time.
     pub reverse: bool,
+    /// Fade in/out as fractions of the clip length (0..1), as published
+    /// by the layout and consumed by `set_region_fades`.
+    pub fade_in: f32,
+    pub fade_out: f32,
+    /// Clip gain (linear, 0..2), consumed by `set_region_gain`.
+    pub gain: f32,
 }
 
 /// One arrangement lane reduced to what the timeline draws, plus the
@@ -271,6 +277,16 @@ struct RegionLayout {
     source_length: u64,
     #[serde(default)]
     reverse: bool,
+    #[serde(default)]
+    fade_in_samples: u64,
+    #[serde(default)]
+    fade_out_samples: u64,
+    #[serde(default = "default_clip_gain")]
+    clip_gain: f32,
+}
+
+fn default_clip_gain() -> f32 {
+    1.0
 }
 
 #[derive(Deserialize)]
@@ -347,6 +363,17 @@ pub fn parse_arrange_tracks(
                                 / region.base_length as f32
                         },
                         reverse: region.reverse,
+                        fade_in: if region.len == 0 {
+                            0.0
+                        } else {
+                            region.fade_in_samples as f32 / region.len as f32
+                        },
+                        fade_out: if region.len == 0 {
+                            0.0
+                        } else {
+                            region.fade_out_samples as f32 / region.len as f32
+                        },
+                        gain: region.clip_gain.clamp(0.0, 2.0),
                     }
                 })
                 .collect();
@@ -867,7 +894,7 @@ mod tests {
     #[test]
     fn parses_tracks_and_regions_from_layout_json() {
         let json = r#"[{"id":7,"name":"Drums","type":"Audio","volume":0.5,"pan":-0.25,"mute":true,"solo":true,"record_armed":true,"expression_map":[{"articulation_id":1,"name":"Short","keyswitch_pitch":36}],"regions":[
-            {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3},
+            {"id":1,"name":"Kick","start":0,"len":48000,"sync_group":3,"fade_in_samples":12000,"fade_out_samples":6000,"clip_gain":1.5},
             {"id":2,"name":"Snare","start":96000,"len":48000,"reverse":true}]}]"#;
         // 48000 samples == 1 beat in this fixture's conversion.
         let tracks = parse_arrange_tracks(json, |samples| samples as f64 / 48000.0);
@@ -883,6 +910,9 @@ mod tests {
         assert_eq!(tracks[0].clips[1].sync_group, 0);
         assert!(!tracks[0].clips[0].reverse);
         assert!(tracks[0].clips[1].reverse);
+        assert_eq!(tracks[0].clips[0].fade_in, 0.25);
+        assert_eq!(tracks[0].clips[0].fade_out, 0.125);
+        assert_eq!(tracks[0].clips[0].gain, 1.5);
         assert_eq!(tracks[0].volume, 0.5);
         assert_eq!(tracks[0].pan, -0.25);
         assert!(tracks[0].muted);
@@ -1012,6 +1042,9 @@ mod tests {
                     trim_start: 0.0,
                     trim_end: 1.0,
                     reverse: false,
+                    fade_in: 0.0,
+                    fade_out: 0.0,
+                    gain: 1.0,
                 },
                 ArrangeClip {
                     id: 2,
@@ -1023,6 +1056,9 @@ mod tests {
                     trim_start: 0.0,
                     trim_end: 1.0,
                     reverse: false,
+                    fade_in: 0.0,
+                    fade_out: 0.0,
+                    gain: 1.0,
                 },
             ],
         }];
@@ -1065,6 +1101,9 @@ mod tests {
             trim_start: 0.0,
             trim_end: 1.0,
             reverse: false,
+            fade_in: 0.0,
+            fade_out: 0.0,
+            gain: 1.0,
         };
         assert_eq!(trim_edge_at(&geometry, &clip, 3.0), Some(TrimEdge::Left));
         assert_eq!(trim_edge_at(&geometry, &clip, 17.0), Some(TrimEdge::Right));
@@ -1224,6 +1263,9 @@ mod tests {
                     trim_start: 0.0,
                     trim_end: 1.0,
                     reverse: false,
+                    fade_in: 0.0,
+                    fade_out: 0.0,
+                    gain: 1.0,
                 }],
             },
             ArrangeTrack {
@@ -1247,6 +1289,9 @@ mod tests {
                     trim_start: 0.0,
                     trim_end: 1.0,
                     reverse: false,
+                    fade_in: 0.0,
+                    fade_out: 0.0,
+                    gain: 1.0,
                 }],
             },
         ];
