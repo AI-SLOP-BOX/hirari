@@ -69,7 +69,8 @@ Notes:
 | 24 | `33d1e4e` | Articulation name editing: a text field for the MAP id's name, committed on submit through the same expression-map replace. |
 | 25 | `6afe0ef` | Clip inspector: fade in/out and gain sliders for the selected audio clip, committing through the engine undo transactions. `ArrangeClip` now carries fade fractions and gain. |
 | 26 | `ea7b834` | Plugin strip: bypass toggles, removal and add (built-in chain stepper) for the selected track's plugin chain. `ArrangeTrack` now carries plugin types/bypass. |
-| 27 | (this work) | Canvas text: the landed `draw_text`/`measure_text` APIs draw lane headers, clip names, measure numbers and piano pitch labels; the arrange geometry gains the 104px lane-header column. |
+| 27 | `149b915` | Canvas text: the landed `draw_text`/`measure_text` APIs draw lane headers, clip names, measure numbers and piano pitch labels; the arrange geometry gains the 104px lane-header column. |
+| 28 | (this work) | Canvas wheel: plain wheel scrolls the arrange timeline, Ctrl/⌘-wheel zooms anchored at the pointer beat, via the landed `on_canvas_scroll`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
