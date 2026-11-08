@@ -78,7 +78,8 @@ Notes:
 | 33 | `b1e48c4` | Theme colors: arrange/piano canvas fills and grid strokes follow the landed `CanvasContext::theme()` instead of hard-coded RGB. |
 | 34 | `45484f6` | Plugin parameters: a params strip (first 32) for the selected plugin with normalized sliders, wired to `get/set_plugin_parameter`. |
 | 35 | `142bf3d` | Drum mode: DRUM/PIANO toggle filtering the roll to GM drum lanes (35–81) with `drum_lane_label` row labels. |
-| 36 | (this work) | Automation overlays (read-only): volume/pan points from the layout drawn as polylines through each arrange lane. |
+| 36 | `4c92f58` | Automation overlays (read-only): volume/pan points from the layout drawn as polylines through each arrange lane. |
+| 37 | (this work) | Automation editing: AUTO mode turns lane gestures into point add/move (snap + value deltas) with DEL PT removal, committing via `set_automation_data` in an undo transaction. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -122,9 +123,9 @@ The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
 Remaining for the roll: CC lanes (unwired vestiges in Slint too).
-Beyond the roll: automation *editing*, plugin preset/UI,
-settings/device, library — each its own multi-slice surface. (Drum
-mode landed in slice 35; read-only automation overlays in slice 36.)
+Beyond the roll: plugin preset/UI, settings/device, library — each
+its own multi-slice surface. (Automation editing landed in slice 37;
+read-only overlays in slice 36; drum mode in slice 35.)
 Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see
