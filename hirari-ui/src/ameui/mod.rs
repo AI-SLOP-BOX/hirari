@@ -35,8 +35,9 @@
 //! adds plugin preset save/load; slice 41 adds the master gain
 //! slider; slice 42 adopts slider release callbacks for the clip
 //! fade/gain sliders (one undo entry per gesture); slice 43 adopts
-//! position-aware canvas cursors. Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! position-aware canvas cursors; slice 44 adds canvas accessibility
+//! regions. Audio playback is real; the Slint UI remains the default
+//! entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -47,9 +48,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use ame_ui::app::{
-    App, AppEventSender, CanvasBounds, CanvasContext, CanvasGestureEvent, CanvasGestureKind,
-    CanvasPointerEvent, CanvasPointerPhase, CanvasScrollEvent, State, StateContext, Viewport,
-    WindowConfig,
+    App, AppEventSender, CanvasAccessibilityItem, CanvasBounds, CanvasContext, CanvasGestureEvent,
+    CanvasGestureKind, CanvasItemRole, CanvasPointerEvent, CanvasPointerPhase, CanvasScrollEvent,
+    State, StateContext, Viewport, WindowConfig,
 };
 use ame_ui::event::{AmeEvent, KeyModifiers};
 use ame_ui::theme::Theme;
@@ -1801,6 +1802,85 @@ impl App for HirariAmeApp {
                 }
             }
             _ => None,
+        }
+    }
+
+    /// Declares the arrange/piano elements as screen-reader regions,
+    /// using the landed canvas accessibility API (bounds are slot-local,
+    /// matching pointer coordinates).
+    fn canvas_accessibility_items(&self, canvas_id: &str) -> Vec<CanvasAccessibilityItem> {
+        const MAX_ITEMS: usize = 512;
+        match canvas_id {
+            "arrange" => {
+                let geometry = self.arrange_geometry;
+                let tracks = self.tracks.get();
+                let selected = self.selected_clip.get();
+                let mut items = Vec::new();
+                for (index, track) in tracks.iter().enumerate() {
+                    let top = geometry.y_for_lane(index);
+                    items.push(CanvasAccessibilityItem {
+                        label: track.name.clone(),
+                        role: CanvasItemRole::Label,
+                        x: 0.0,
+                        y: top,
+                        width: geometry.header_width,
+                        height: geometry.lane_height,
+                        value: Some(format!("{} · {} clips", track.kind, track.clips.len())),
+                        selected: None,
+                    });
+                    for clip in &track.clips {
+                        if items.len() >= MAX_ITEMS {
+                            return items;
+                        }
+                        let start = geometry.x_for_beat(clip.start_beat);
+                        let width = (clip.length_beats * geometry.px_per_beat).max(4.0) - 2.0;
+                        let height = (geometry.lane_height - 4.0).clamp(2.0, 42.0);
+                        let y = top + (geometry.lane_height - height) / 2.0;
+                        items.push(CanvasAccessibilityItem {
+                            label: clip.name.clone(),
+                            role: CanvasItemRole::Button,
+                            x: start,
+                            y,
+                            width,
+                            height,
+                            value: None,
+                            selected: Some(selected == Some((track.id, clip.id))),
+                        });
+                    }
+                }
+                items
+            }
+            "piano" => {
+                let geometry = self.piano_geometry;
+                let track_id = self.piano_track.get();
+                let selected = self.selected_note.get();
+                const PITCH_NAMES: [&str; 12] = [
+                    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+                ];
+                self.piano_notes
+                    .get()
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, note)| note.track_id == track_id)
+                    .take(MAX_ITEMS)
+                    .map(|(index, note)| CanvasAccessibilityItem {
+                        label: format!(
+                            "Note {}{} velocity {}",
+                            PITCH_NAMES[(note.pitch % 12) as usize],
+                            note.pitch / 12 - 1,
+                            note.velocity
+                        ),
+                        role: CanvasItemRole::Button,
+                        x: geometry.x_for_beat(note.start_beat),
+                        y: geometry.y_for_pitch(note.pitch),
+                        width: (note.length_beats * geometry.px_per_beat).max(2.0),
+                        height: geometry.px_per_pitch.max(1.0),
+                        value: None,
+                        selected: Some(selected == Some(index)),
+                    })
+                    .collect()
+            }
+            _ => Vec::new(),
         }
     }
 

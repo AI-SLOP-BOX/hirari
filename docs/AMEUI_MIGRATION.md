@@ -85,7 +85,8 @@ Notes:
 | 40 | `e3a5127` | Plugin presets: SAVE/LOAD preset buttons using the native dialogs, executed on the poll via the pending-preset slot. |
 | 41 | `2c33fde` | Master gain slider in the meter card, wired to `set_master_gain` and polled from `master_gain`. |
 | 42 | `da12104` | Slider release callbacks: clip fade/gain sliders commit on release (one undo entry per gesture) via the landed `on_release`. |
-| 43 | (this work) | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
+| 43 | `3749990` | Position-aware canvas cursors: resize cursor over Audio/Vocal trim edges, pointer over clips/notes, via the landed per-region `canvas_cursor` (adds the `winit` dep for `CursorIcon`). |
+| 44 | (this work) | Canvas accessibility: arrange tracks/clips and piano notes declared as screen-reader regions via the landed `canvas_accessibility_items`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -107,9 +108,9 @@ Not yet (suggested order):
    editing, which Slint does outside the arrange dock.
 3. ~~**Text in the canvas**~~ — landed in AmeUI (`CanvasContext::draw_text`
    + `measure_text`, 2026-11-08) and adopted in slice 27 (lane headers,
-   clip names, measure numbers, pitch labels). The track list below the
-   canvas remains for mixer controls. (The arrange dock's edit lock
-   landed in slice 11.)
+   clip names, measure numbers, pitch labels). Canvas accessibility
+   regions landed and were adopted in slice 44. The track list below
+   the canvas remains for mixer controls.
 4. **Slint deletion gate** — once the above reach parity, flip the
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
