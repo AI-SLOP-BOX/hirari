@@ -90,6 +90,15 @@ Not yet (suggested order):
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
 
+## Framework discoveries (verified 2026-11-08)
+
+Already available in AmeUI, no request needed: native menu bar
+(`App::native_menus` / `on_native_menu_action`), window-global keyboard
+(`AmeEvent::Key` via `on_event`), IME preedit/commit events, structured
+same-window drop, window title syncing, close-request and shortcut
+hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
+(add/move/resize/delete via full note-list replace).
+
 ## Next surface: piano roll (editing)
 
 The arrange dock + mixer + project + transport are at parity (text
