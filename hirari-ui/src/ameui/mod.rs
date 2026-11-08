@@ -16,8 +16,9 @@
 //! project open/save/new; slice 14 adds loop/metronome toggles; slice 15
 //! adds the read-only piano roll; slice 16 adds its edit gestures
 //! (add/move/resize/delete via a full note-list replace); slice 17 adds
-//! quantize and velocity stepping. Audio playback is real; the Slint UI
-//! remains the default entry until the port reaches parity.
+//! quantize and velocity stepping; slice 18 adds chord insert and
+//! delete-all. Audio playback is real; the Slint UI remains the default
+//! entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -172,6 +173,11 @@ pub struct HirariAmeApp {
     /// notes) and its parsed notes.
     piano_track: State<u32>,
     piano_notes: State<Vec<PianoNote>>,
+    /// Chord-insert settings (Slint piano roll chord controls).
+    chord_root: State<u32>,
+    chord_quality: State<u32>,
+    chord_length: State<f32>,
+    chord_inversion: State<u32>,
     /// Selected note index into `piano_notes` (for delete).
     selected_note: State<Option<usize>>,
     status: State<String>,
@@ -239,6 +245,10 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
         piano_notes: context.state(Vec::<PianoNote>::new()),
+        chord_root: context.state(60u32),
+        chord_quality: context.state(0u32),
+        chord_length: context.state(4.0f32),
+        chord_inversion: context.state(0u32),
         selected_note: context.state(None),
         status: context.state(status),
         waveform_image: None,
@@ -1700,6 +1710,163 @@ impl App for HirariAmeApp {
                 });
             piano_buttons.push(button.into());
         }
+        // Chord controls (Slint piano roll): root/quality/length/inversion
+        // steppers plus the insert action at the playhead.
+        let chord_root_state = self.chord_root.clone();
+        let root_down_core = self.chord_root.clone();
+        let root_down = ButtonView::new("ROOT-")
+            .action_id("piano.chord_root_down")
+            .secondary()
+            .on_press(move |_| {
+                root_down_core.set(root_down_core.get().saturating_sub(1));
+            });
+        let root_up_core = self.chord_root.clone();
+        let root_up = ButtonView::new("ROOT+")
+            .action_id("piano.chord_root_up")
+            .secondary()
+            .on_press(move |_| {
+                root_up_core.set((root_up_core.get() + 1).min(127));
+            });
+        let quality_state = self.chord_quality.clone();
+        let quality_label = match self.chord_quality.get() {
+            1 => "MIN",
+            2 => "7TH",
+            3 => "SUS",
+            _ => "MAJ",
+        };
+        let quality_button = ButtonView::new(quality_label)
+            .action_id("piano.chord_quality")
+            .secondary()
+            .on_press(move |_| {
+                quality_state.set((quality_state.get() + 1) % 4);
+            });
+        let length_state = self.chord_length.clone();
+        let length_label = format!("LEN{}", self.chord_length.get() as u32);
+        let length_button = ButtonView::new(length_label)
+            .action_id("piano.chord_length")
+            .secondary()
+            .on_press(move |_| {
+                let next = match length_state.get() {
+                    1.0 => 2.0,
+                    2.0 => 4.0,
+                    _ => 1.0,
+                };
+                length_state.set(next);
+            });
+        let inversion_state = self.chord_inversion.clone();
+        let inversion_button = ButtonView::new(format!("INV{}", self.chord_inversion.get()))
+            .action_id("piano.chord_inversion")
+            .secondary()
+            .on_press(move |_| {
+                inversion_state.set((inversion_state.get() + 1) % 3);
+            });
+        let chord_core = self.core.clone();
+        let chord_notes = self.piano_notes.clone();
+        let chord_track = self.piano_track.clone();
+        let chord_root = self.chord_root.clone();
+        let chord_quality_state = self.chord_quality.clone();
+        let chord_length_state = self.chord_length.clone();
+        let chord_inversion_state = self.chord_inversion.clone();
+        let chord_locked = self.arrange_locked.clone();
+        let playhead_state = self.playhead_beats.clone();
+        let chord_button = ButtonView::new("CHORD")
+            .action_id("piano.chord_insert")
+            .secondary()
+            .on_press(move |_| {
+                if chord_locked.get() {
+                    return;
+                }
+                let Some(core) = &chord_core else { return };
+                let root = chord_root.get();
+                let quality = chord_quality_state.get();
+                let length = chord_length_state.get();
+                let inversion = chord_inversion_state.get();
+                if !(0..=127).contains(&root)
+                    || !(0.0625..=64.0).contains(&length)
+                    || quality > 3
+                    || inversion > 2
+                {
+                    return;
+                }
+                let base_intervals: &[i32] = match quality {
+                    0 => &[0, 4, 7],
+                    1 => &[0, 3, 7],
+                    2 => &[0, 4, 7, 10],
+                    _ => &[0, 5, 7],
+                };
+                let mut intervals = base_intervals.to_vec();
+                let rotation = (inversion as usize).min(intervals.len().saturating_sub(1));
+                for _ in 0..rotation {
+                    let first = intervals.remove(0) + 12;
+                    intervals.push(first);
+                }
+                let track_id = chord_track.get();
+                let beat = playhead_state.get().max(0.0) as f32;
+                let mut notes = chord_notes.get();
+                for interval in &intervals {
+                    let pitch = root as i32 + *interval;
+                    if !(0..=127).contains(&pitch) {
+                        continue;
+                    }
+                    let pitch = pitch as u8;
+                    if notes.iter().any(|note| {
+                        note.track_id == track_id
+                            && note.pitch == pitch
+                            && (note.start_beat - beat).abs() < 0.01
+                    }) {
+                        continue;
+                    }
+                    notes.push(PianoNote {
+                        track_id,
+                        region_id: 0,
+                        pitch,
+                        midi_channel: 0,
+                        articulation: 0,
+                        velocity: 100,
+                        start_beat: beat,
+                        length_beats: length,
+                        lyric: String::new(),
+                        phoneme: String::new(),
+                        pitch_curve_cents: Vec::new(),
+                        vibrato_depth_cents: 0,
+                        vibrato_rate_millihz: 5_000,
+                        portamento_samples: 0,
+                        probability: 100,
+                        repeat_count: 1,
+                    });
+                }
+                replace_notes(core, &chord_notes, notes);
+            });
+        let clear_core = self.core.clone();
+        let clear_notes = self.piano_notes.clone();
+        let clear_track = self.piano_track.clone();
+        let clear_locked = self.arrange_locked.clone();
+        let clear_button = ButtonView::new("DELETE ALL")
+            .action_id("piano.delete_all")
+            .secondary()
+            .on_press(move |_| {
+                if clear_locked.get() {
+                    return;
+                }
+                let Some(core) = &clear_core else { return };
+                let track_id = clear_track.get();
+                let notes: Vec<PianoNote> = clear_notes
+                    .get()
+                    .into_iter()
+                    .filter(|note| note.track_id != track_id)
+                    .collect();
+                replace_notes(core, &clear_notes, notes);
+            });
+        piano_buttons.extend([
+            root_down.into(),
+            View::Text(format!("ROOT{}", chord_root_state.get())),
+            root_up.into(),
+            quality_button.into(),
+            length_button.into(),
+            inversion_button.into(),
+            chord_button.into(),
+            clear_button.into(),
+        ]);
         let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
 
         View::VStack(vec![
