@@ -18,8 +18,9 @@
 //! (add/move/resize/delete via a full note-list replace); slice 17 adds
 //! quantize and velocity stepping; slice 18 adds chord insert and
 //! delete-all; slice 19 adds note lyric editing; slice 20 adds the
-//! articulation stepper. Audio playback is real; the Slint UI remains
-//! the default entry until the port reaches parity.
+//! articulation stepper; slice 21 adds keyboard shortcuts (Space
+//! plays, L loops). Audio playback is real; the Slint UI remains the
+//! default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -34,7 +35,7 @@ use ame_ui::app::{
     App, AppEventSender, CanvasBounds, CanvasContext, CanvasPointerEvent, CanvasPointerPhase,
     State, StateContext, Viewport, WindowConfig,
 };
-use ame_ui::event::AmeEvent;
+use ame_ui::event::{AmeEvent, KeyModifiers};
 use ame_ui::theme::Theme;
 use ame_ui::view::{ButtonView, SliderView, TextFieldView, View, ViewTree};
 use ame_ui::CanvasTexture;
@@ -1117,6 +1118,34 @@ impl App for HirariAmeApp {
             if message == "tick" {
                 self.poll_engine();
             }
+        }
+    }
+
+    /// App-wide shortcuts (Slint parity: Space plays, L loops). The
+    /// framework only calls this with no text editor focused, so the
+    /// lyric field keeps Space/L as text input.
+    fn on_shortcut(&mut self, key: &str, modifiers: KeyModifiers) -> bool {
+        if modifiers.control || modifiers.alt || modifiers.super_key {
+            return false;
+        }
+        match key {
+            "Named(Space)" => {
+                if let Some(core) = &self.core {
+                    let playing = !self.playing.get();
+                    core.set_playing(playing);
+                    self.playing.set(playing);
+                }
+                true
+            }
+            "l" | "L" => {
+                if let Some(core) = &self.core {
+                    let loop_on = !self.loop_enabled.get();
+                    core.set_loop(loop_on);
+                    self.loop_enabled.set(loop_on);
+                }
+                true
+            }
+            _ => false,
         }
     }
 

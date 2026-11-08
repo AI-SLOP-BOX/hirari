@@ -62,7 +62,8 @@ Notes:
 | 17 | `0046be0` | Piano roll extras: QUANTIZE (snap selected track's note starts to the snap grid) and VEL-/VEL+ stepping for the selected note, both through the same full-replace commit. |
 | 18 | `0e66830` | Piano roll chord tools: ROOT±/quality/length/inversion steppers + CHORD insert at the playhead (Slint interval/inversion math) and DELETE ALL for the selected track. |
 | 19 | `dd2e60b` | Piano roll lyric editing: a text field for the selected note's lyric, committed on submit through the full note-list replace (length/NUL guarded like the engine). |
-| 20 | (this work) | Piano roll articulation stepper: ART-/ART+ step the selected note's articulation (0–127) through the shared full-replace commit. |
+| 20 | `d473190` | Piano roll articulation stepper: ART-/ART+ step the selected note's articulation (0–127) through the shared full-replace commit. |
+| 21 | (this work) | Keyboard shortcuts: Space toggles playback, L toggles loop via `App::on_shortcut` (framework withholds it while a text editor is focused). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
