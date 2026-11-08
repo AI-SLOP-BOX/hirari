@@ -60,7 +60,8 @@ Notes:
 | 15 | `d2cd6cb` | Piano roll (read-only): neutral `parse_midi_notes` + `piano_roll_geometry`, track picker, note canvas with beat grid, velocity-shaded notes and playhead. |
 | 16 | `8816fc5` | Piano roll editing: press a note to move it (right edge resizes), press empty space to add one, DELETE removes the selection; commits as one full note-list replace in an undo transaction. `PianoNote` now carries the full authoring contract (lyric/articulation/vibrato survive edits). |
 | 17 | `0046be0` | Piano roll extras: QUANTIZE (snap selected track's note starts to the snap grid) and VEL-/VEL+ stepping for the selected note, both through the same full-replace commit. |
-| 18 | (this work) | Piano roll chord tools: ROOT±/quality/length/inversion steppers + CHORD insert at the playhead (Slint interval/inversion math) and DELETE ALL for the selected track. |
+| 18 | `0e66830` | Piano roll chord tools: ROOT±/quality/length/inversion steppers + CHORD insert at the playhead (Slint interval/inversion math) and DELETE ALL for the selected track. |
+| 19 | (this work) | Piano roll lyric editing: a text field for the selected note's lyric, committed on submit through the full note-list replace (length/NUL guarded like the engine). |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
@@ -107,8 +108,8 @@ hooks. The piano-roll slice 16 work is uncommitted in `ameui/mod.rs`
 The arrange dock + mixer + project + transport are at parity (text
 excepted), and the piano roll edits since slice 16. Quantize, velocity
 stepping, chord insert and delete-all landed in slices 17–18.
-Remaining for the roll: articulation/lyric editing, progression tools,
-drum mode, CC lanes. Entry points:
+Remaining for the roll: articulation editing, progression tools, drum
+mode, CC lanes. (Lyric editing landed in slice 19.) Entry points:
 
 - Data: `core.midi_notes_json()` (timeline-sorted; see
   `hirari-core-bridge/src/runtime/hirari_core_arrangement_midi_editing.rs`)

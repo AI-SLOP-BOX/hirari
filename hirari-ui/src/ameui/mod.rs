@@ -17,8 +17,9 @@
 //! adds the read-only piano roll; slice 16 adds its edit gestures
 //! (add/move/resize/delete via a full note-list replace); slice 17 adds
 //! quantize and velocity stepping; slice 18 adds chord insert and
-//! delete-all. Audio playback is real; the Slint UI remains the default
-//! entry until the port reaches parity.
+//! delete-all; slice 19 adds note lyric editing. Audio playback is
+//! real; the Slint UI remains the default entry until the port reaches
+//! parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -35,7 +36,7 @@ use ame_ui::app::{
 };
 use ame_ui::event::AmeEvent;
 use ame_ui::theme::Theme;
-use ame_ui::view::{ButtonView, SliderView, View, ViewTree};
+use ame_ui::view::{ButtonView, SliderView, TextFieldView, View, ViewTree};
 use ame_ui::CanvasTexture;
 use hirari_core_bridge::HirariCore;
 use vello::kurbo::{Affine, Line, Rect, RoundedRect, Stroke};
@@ -1867,6 +1868,52 @@ impl App for HirariAmeApp {
             chord_button.into(),
             clear_button.into(),
         ]);
+        // Lyric editor for the selected note; commits on submit, like the
+        // Slint lyric field. The text buffer is shared between the change
+        // and submit closures so Enter commits the typed value.
+        let lyric_notes = self.piano_notes.clone();
+        let lyric_selected = self.selected_note.clone();
+        let lyric_core = self.core.clone();
+        let lyric_locked = self.arrange_locked.clone();
+        let lyric_text = Rc::new(RefCell::new(
+            self.selected_note
+                .get()
+                .and_then(|index| {
+                    self.piano_notes
+                        .get()
+                        .get(index)
+                        .map(|note| note.lyric.clone())
+                })
+                .unwrap_or_default(),
+        ));
+        let lyric_change_text = lyric_text.clone();
+        let lyric_submit_text = lyric_text.clone();
+        let lyric_field = TextFieldView::new(lyric_text.borrow().clone(), "lyric (Enter to apply)")
+            .change_action_id("piano.lyric")
+            .submit_action_id("piano.lyric")
+            .on_change(move |value| {
+                *lyric_change_text.borrow_mut() = value;
+            })
+            .on_submit(move || {
+                if lyric_locked.get() {
+                    return;
+                }
+                let Some(core) = &lyric_core else { return };
+                let Some(index) = lyric_selected.get() else {
+                    return;
+                };
+                let mut notes = lyric_notes.get();
+                let Some(note) = notes.get_mut(index) else {
+                    return;
+                };
+                let lyric = lyric_submit_text.borrow().clone();
+                if lyric.len() > 1_024 || lyric.contains('\0') {
+                    return;
+                }
+                note.lyric = lyric;
+                replace_notes(core, &lyric_notes, notes);
+            });
+        piano_buttons.push(lyric_field.into());
         let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
 
         View::VStack(vec![
