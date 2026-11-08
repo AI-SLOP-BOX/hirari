@@ -17,9 +17,9 @@
 //! adds the read-only piano roll; slice 16 adds its edit gestures
 //! (add/move/resize/delete via a full note-list replace); slice 17 adds
 //! quantize and velocity stepping; slice 18 adds chord insert and
-//! delete-all; slice 19 adds note lyric editing. Audio playback is
-//! real; the Slint UI remains the default entry until the port reaches
-//! parity.
+//! delete-all; slice 19 adds note lyric editing; slice 20 adds the
+//! articulation stepper. Audio playback is real; the Slint UI remains
+//! the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -1914,6 +1914,32 @@ impl App for HirariAmeApp {
                 replace_notes(core, &lyric_notes, notes);
             });
         piano_buttons.push(lyric_field.into());
+        // Articulation stepper for the selected note (Slint set-note-articulation).
+        for (label, delta) in [("ART-", -1), ("ART+", 1)] {
+            let art_core = self.core.clone();
+            let art_notes = self.piano_notes.clone();
+            let art_selected = self.selected_note.clone();
+            let art_locked = self.arrange_locked.clone();
+            let button = ButtonView::new(label)
+                .action_id(format!("piano.articulation.{label}"))
+                .secondary()
+                .on_press(move |_| {
+                    if art_locked.get() {
+                        return;
+                    }
+                    let Some(core) = &art_core else { return };
+                    let Some(index) = art_selected.get() else {
+                        return;
+                    };
+                    let mut notes = art_notes.get();
+                    let Some(note) = notes.get_mut(index) else {
+                        return;
+                    };
+                    note.articulation = (i32::from(note.articulation) + delta).clamp(0, 127) as u8;
+                    replace_notes(core, &art_notes, notes);
+                });
+            piano_buttons.push(button.into());
+        }
         let piano_selector = View::Card(vec![View::HStack(piano_buttons)]);
 
         View::VStack(vec![
