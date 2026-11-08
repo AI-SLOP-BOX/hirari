@@ -25,9 +25,9 @@
 //! slice 26 adds the per-track plugin strip; slice 27 adopts canvas
 //! text (lane/clip names, measure numbers, pitch labels); slice 28
 //! adopts canvas wheel (scroll and Ctrl-wheel zoom); slice 29 adopts
-//! the native file dialog (async, delivered on the poll). Audio
-//! playback is real; the Slint UI remains the default entry until
-//! the port reaches parity.
+//! the native file dialog (async, delivered on the poll); slice 30
+//! adds dropped-file audio import. Audio playback is real; the Slint
+//! UI remains the default entry until the port reaches parity.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -258,6 +258,10 @@ pub struct HirariAmeApp {
     /// by the poll (the engine is not `Send`, so dialogs never touch it).
     pending_open: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     pending_save: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    /// Last arrange canvas bounds, to map a file drop to lane/beat.
+    arrange_bounds: (f32, f32, f32, f32),
+    /// In-flight dropped-file audio import: (ticket, path, track).
+    pending_import: Option<(u64, String, u32)>,
     tick: u64,
 }
 
@@ -324,6 +328,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         project_path: Rc::new(RefCell::new(None)),
         pending_open: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        arrange_bounds: (0.0, 0.0, 0.0, 0.0),
+        pending_import: None,
         tick: 0,
     }
 }
@@ -363,6 +369,25 @@ impl HirariAmeApp {
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
             self.poll_waveforms(&core);
+        }
+        // Dropped-file imports complete asynchronously; poll the ticket
+        // each tick like the Slint import poller.
+        if let Some((ticket, path, imported_track)) = self.pending_import.take() {
+            match core.complete_region_import(ticket) {
+                0 => self.pending_import = Some((ticket, path, imported_track)),
+                1 => {
+                    let _ = core.register_preview_audio(&path);
+                    self.status.set(format!(
+                        "IMPORTED: {}",
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or(path)
+                    ));
+                    self.refresh_arrange_state(&core);
+                }
+                _ => self.status.set("IMPORT FAILED".to_owned()),
+            }
         }
         // File-dialog results arrive from the async native dialog on a
         // background thread; the engine work happens here on the UI thread.
@@ -897,6 +922,7 @@ impl HirariAmeApp {
         if width <= 0.0 || height <= 0.0 {
             return;
         }
+        self.arrange_bounds = (bounds.x, bounds.y, bounds.width, bounds.height);
         let tracks = self.tracks.get();
         let selected_clip = self.selected_clip.get();
         let peaks = self.clip_peaks.get();
@@ -1268,6 +1294,51 @@ impl HirariAmeApp {
             }
         }
     }
+    /// A dropped audio file becomes a clip on the lane under the drop
+    /// point (falling back to the piano track and the playhead), via the
+    /// engine's queued import, like the Slint audio import.
+    fn on_file_dropped(&mut self, path: &str, x: Option<f64>, y: Option<f64>) {
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        let (bounds_x, bounds_y, _, _) = self.arrange_bounds;
+        let geometry = self.arrange_geometry;
+        let tracks = self.tracks.get();
+        let (track_id, beat) = match (x, y) {
+            (Some(drop_x), Some(drop_y)) => {
+                let local_x = drop_x as f32 - bounds_x;
+                let local_y = drop_y as f32 - bounds_y;
+                if geometry.lane_height <= 0.0 || local_y < geometry.ruler_height {
+                    return;
+                }
+                let lane = ((local_y - geometry.ruler_height) / geometry.lane_height) as usize;
+                let Some(track) = tracks.get(lane) else {
+                    return;
+                };
+                (track.id, f64::from(geometry.beat_for_x(local_x)))
+            }
+            _ => {
+                let track_id = self.piano_track.get();
+                (track_id, self.playhead_beats.get())
+            }
+        };
+        if track_id == 0 {
+            return;
+        }
+        let ticket = core.queue_region_import_at_beat(track_id, path, beat);
+        if ticket == 0 {
+            self.status.set("IMPORT FAILED".to_owned());
+            return;
+        }
+        self.status.set(format!(
+            "IMPORTING: {}",
+            std::path::Path::new(path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_owned())
+        ));
+        self.pending_import = Some((ticket, path.to_owned(), track_id));
+    }
 }
 
 impl App for HirariAmeApp {
@@ -1305,10 +1376,16 @@ impl App for HirariAmeApp {
     }
 
     fn on_event(&mut self, event: &AmeEvent) {
-        if let AmeEvent::AppMessage(message) = event {
-            if message == "tick" {
-                self.poll_engine();
+        match event {
+            AmeEvent::AppMessage(message) => {
+                if message == "tick" {
+                    self.poll_engine();
+                }
             }
+            AmeEvent::FileDropped { path, x, y } => {
+                self.on_file_dropped(path, *x, *y);
+            }
+            _ => {}
         }
     }
 

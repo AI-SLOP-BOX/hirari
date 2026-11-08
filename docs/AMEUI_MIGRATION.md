@@ -71,7 +71,8 @@ Notes:
 | 26 | `ea7b834` | Plugin strip: bypass toggles, removal and add (built-in chain stepper) for the selected track's plugin chain. `ArrangeTrack` now carries plugin types/bypass. |
 | 27 | `149b915` | Canvas text: the landed `draw_text`/`measure_text` APIs draw lane headers, clip names, measure numbers and piano pitch labels; the arrange geometry gains the 104px lane-header column. |
 | 28 | `ac4ee9c` | Canvas wheel: plain wheel scrolls the arrange timeline, Ctrl/⌘-wheel zooms anchored at the pointer beat, via the landed `on_canvas_scroll`. |
-| 29 | (this work) | Native file dialog: Open/Save use the landed async `NativeFileDialog`, with results delivered to the poll (the engine is not `Send`, so dialogs never touch it). |
+| 29 | `e41996b` | Native file dialog: Open/Save use the landed async `NativeFileDialog`, with results delivered to the poll (the engine is not `Send`, so dialogs never touch it). |
+| 30 | (this work) | Dropped-file import: OS file drops (landed `FileDropped`) become clips on the lane under the drop point via the queued engine import, polled to completion. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
