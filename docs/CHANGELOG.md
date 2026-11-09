@@ -27,6 +27,12 @@ production support.
   `getLatencySamples`) and publish it through the sandbox mailbox; the
   chain reports it to the compensation solve. The mailbox ABI is bumped
   to version 6.
+- Sidechain audio now reaches sandbox plugins. The mailbox ABI (version
+  7) carries stereo sidechain arrays: the block host refreshes the gate
+  handle per track pass, the chain stamps the (track, node) link key on
+  sandbox nodes, the host copies the published source with link level
+  into the mailbox, and the VST3 adapter feeds it into the second input
+  bus. CLAP/AU adapters currently ignore the arrays.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

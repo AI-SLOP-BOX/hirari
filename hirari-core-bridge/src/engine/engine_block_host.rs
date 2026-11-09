@@ -1268,6 +1268,9 @@ impl EngineBlockState {
             if !bus_state.is_null() && frames != 0 && frames <= MAX_BUS_FRAMES as u32 {
                 unsafe { hirari_bus_audio_read(bus_state, work.left, work.right, frames, false) };
             }
+            // Refresh the sidechain gate handle so sandbox workers fetch
+            // this block's published sources during the track pass.
+            runtime.set_sidechain_gate(self.sidechain);
             // The graph publishes the node it just rendered whether or not the
             // chain ran: a muted or frozen track still owns its bus stage and
             // still feeds downstream sidechain and Send edges.

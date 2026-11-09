@@ -995,6 +995,8 @@ struct RealtimeContext {
     snapshot: *const RuntimeSnapshot,
     midi: *mut c_void,
     bpm: f64,
+    sidechain_gate: *mut c_void,
+    sidechain_track: u32,
 }
 
 unsafe extern "C" fn realtime_node_info(
@@ -1038,6 +1040,7 @@ unsafe extern "C" fn realtime_process_node(
         return false;
     };
     unsafe { mix.write(chain.mix()) };
+    chain.set_sidechain_context(context.sidechain_gate, context.sidechain_track, index);
     chain.process(
         if parallel {
             &context.parallel
@@ -1057,6 +1060,8 @@ pub unsafe extern "C" fn hirari_effect_chain_process(
     audio_storage: *mut c_void,
     midi_state: *mut c_void,
     bpm: f64,
+    sidechain_gate: *mut c_void,
+    sidechain_track: u32,
 ) {
     let Some(host) = (unsafe { host(state) }) else {
         return;
@@ -1081,6 +1086,8 @@ pub unsafe extern "C" fn hirari_effect_chain_process(
         snapshot: unsafe { effect_chain::audio_snapshot(host.runtime) },
         midi: midi_state,
         bpm,
+        sidechain_gate,
+        sidechain_track,
     };
     let node_count = if context.snapshot.is_null() {
         0
@@ -1515,7 +1522,16 @@ mod tests {
             }
         }
         let midi_state = unsafe { crate::midi_buffer_ops::hirari_midi_buffer_create() };
-        unsafe { hirari_effect_chain_process(state, storage, midi_state, 120.0) };
+        unsafe {
+            hirari_effect_chain_process(
+                state,
+                storage,
+                midi_state,
+                120.0,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
         for plane in 0..2 {
             for frame in 0..256 {
                 let sample = unsafe { (*planes.add(plane)).add(frame).read() };

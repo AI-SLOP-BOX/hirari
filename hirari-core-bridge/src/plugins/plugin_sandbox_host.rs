@@ -172,6 +172,11 @@ pub struct SandboxHost {
     /// Processor latency in samples, published by the worker at load time
     /// and read by the PDC solve through the chain node.
     latency_samples: AtomicU32,
+    /// Sidechain delivery context: engine gate plus the (destination track,
+    /// plugin index) link key. Null gate disables sidechain input.
+    sidechain_gate: AtomicPtr<c_void>,
+    sidechain_track: AtomicU32,
+    sidechain_plugin: AtomicU32,
     parameter_cache: crate::plugin_parameter_snapshot::Snapshot,
 }
 
@@ -263,6 +268,9 @@ impl SandboxHost {
             prepared_rate_bits: AtomicU64::new(normalized_rate.to_bits()),
             prepared_block: AtomicU32::new(max_block_size.clamp(1, MAX_FRAMES as u32)),
             latency_samples: AtomicU32::new(0),
+            sidechain_gate: AtomicPtr::new(std::ptr::null_mut()),
+            sidechain_track: AtomicU32::new(0),
+            sidechain_plugin: AtomicU32::new(0),
             parameter_cache: crate::plugin_parameter_snapshot::Snapshot::new(),
         })
     }
@@ -1359,6 +1367,40 @@ impl SandboxHost {
         }
         shared.channels.store(submit_channels, Ordering::Relaxed);
         shared.frames.store(submit_frames, Ordering::Relaxed);
+        // Sidechain delivery: fetch this block's published source for the
+        // (destination track, plugin) link into the mailbox so adapters with
+        // a sidechain bus receive the detector signal. No link means zero
+        // frames, which every adapter treats as silence (no behavior change).
+        let gate = self.sidechain_gate.load(Ordering::Acquire);
+        if gate.is_null() {
+            shared.sidechain_frames.store(0, Ordering::Relaxed);
+        } else {
+            let mut metadata = [0u64; 6];
+            let copied = unsafe {
+                crate::sidechain_manager::hirari_sidechain_engine_copy_link(
+                    gate.cast_const(),
+                    self.sidechain_track.load(Ordering::Relaxed),
+                    self.sidechain_plugin.load(Ordering::Relaxed),
+                    shared.sidechain_left.as_mut_ptr(),
+                    shared.sidechain_right.as_mut_ptr(),
+                    submit_frames,
+                    metadata.as_mut_ptr(),
+                )
+            };
+            let frames = copied.min(submit_frames);
+            if frames > 0 {
+                let level = f32::from_bits(metadata[1] as u32);
+                if level != 1.0 && level.is_finite() {
+                    for index in 0..frames as usize {
+                        shared.sidechain_left[index] *= level;
+                        shared.sidechain_right[index] *= level;
+                    }
+                }
+            }
+            shared
+                .sidechain_frames
+                .store(frames, Ordering::Release);
+        }
         for channel in 0..submit_channels as usize {
             shared.input.samples[channel][..submit_frames as usize].copy_from_slice(
                 &audio.pending_input[channel][..submit_frames as usize],
@@ -1484,6 +1526,12 @@ impl SandboxHost {
 
     fn latency_samples(&self) -> u32 {
         self.latency_samples.load(Ordering::Acquire)
+    }
+
+    fn set_sidechain_context(&self, gate: *mut c_void, track: u32, plugin: u32) {
+        self.sidechain_gate.store(gate, Ordering::Release);
+        self.sidechain_track.store(track, Ordering::Relaxed);
+        self.sidechain_plugin.store(plugin, Ordering::Relaxed);
     }
 
     fn set_state(&self, data: &[u8]) -> bool {
@@ -1985,7 +2033,7 @@ fn new_sandbox_host(
 /// plugin slot and calls it directly. The C++ engine used to wrap the same host
 /// in a `DSP::IProcessor` subclass; the marshalling below is that wrapper.
 pub mod chain {
-    use std::ffi::c_char;
+    use std::ffi::{c_char, c_void};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, MutexGuard};
 
@@ -2124,6 +2172,10 @@ pub mod chain {
 
         pub fn latency_samples(&self) -> u32 {
             self.host.latency_samples()
+        }
+
+        pub fn set_sidechain_context(&self, gate: *mut c_void, track: u32, plugin: u32) {
+            self.host.set_sidechain_context(gate, track, plugin);
         }
 
         /// One realtime block. A false return tells the chain traversal to keep

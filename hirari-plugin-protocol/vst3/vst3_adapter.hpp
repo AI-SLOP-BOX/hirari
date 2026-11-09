@@ -269,6 +269,22 @@ public:
                         frames,
                         m_processData.inputs[0].channelBuffers32[channel]);
         }
+        // VST3 sidechain convention: a second audio input bus carries the
+        // detector signal. Copy it through the same SDK-owned buffers.
+        if (m_processData.numInputs > 1) {
+            const auto sidechainFrames = std::min<uint32_t>(
+                shared.sidechainFrames.load(std::memory_order_acquire), frames);
+            const auto sidechainChannels = std::min<uint32_t>(
+                2, static_cast<uint32_t>(m_processData.inputs[1].numChannels));
+            for (uint32_t channel = 0; channel < sidechainChannels; ++channel) {
+                const auto* source =
+                    channel == 0 ? shared.sidechainLeft : shared.sidechainRight;
+                std::copy_n(source, sidechainFrames,
+                            m_processData.inputs[1].channelBuffers32[channel]);
+                std::fill_n(m_processData.inputs[1].channelBuffers32[channel] + sidechainFrames,
+                            frames - sidechainFrames, 0.0f);
+            }
+        }
         const auto result = m_processor->process(m_processData);
         if (result != Steinberg::kResultOk) {
             m_error = "VST3 processor returned an error";

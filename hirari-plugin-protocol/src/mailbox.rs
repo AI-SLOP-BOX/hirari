@@ -16,7 +16,7 @@ pub const MAX_STATE_BYTES: usize = crate::MAX_STATE_BYTES;
 /// Bounded ring for completed SysEx/MIDI 2.0 messages that cannot fit in the
 /// legacy 256-byte event slot.
 pub const EXTENDED_RING_BYTES: usize = crate::RING_STORAGE_BYTES;
-pub const AUDIO_BLOCK_PROTOCOL_VERSION: u32 = 6;
+pub const AUDIO_BLOCK_PROTOCOL_VERSION: u32 = 7;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -85,11 +85,17 @@ pub struct SharedAudioBlock {
     /// Processor latency in samples, as reported by the format adapter at
     /// load time. The host reads it once after READY and feeds it into PDC.
     pub plugin_latency_samples: AtomicU32,
+    /// Sidechain input for the current block: stereo source audio published
+    /// by the engine gate for this (track, plugin) link. Zero frames means
+    /// no link; adapters feed it into their sidechain bus when present.
+    pub sidechain_left: [f32; MAX_FRAMES],
+    pub sidechain_right: [f32; MAX_FRAMES],
+    pub sidechain_frames: AtomicU32,
 }
 
 // The host allocates exactly this many bytes for the mailbox, so a layout
 // change here must be made together with the request/response framing.
-const _: () = assert!(core::mem::size_of::<SharedAudioBlock>() == 9_142_720);
+const _: () = assert!(core::mem::size_of::<SharedAudioBlock>() == 9_208_256);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, request_sequence) == 8);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, heartbeat) == 24);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, frames) == 32);
@@ -107,6 +113,9 @@ const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, parameter_change) 
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, output_midi) == 4_669_824);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, state) == 4_948_352);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, plugin_latency_samples) == 9_142_656);
+const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, sidechain_left) == 9_142_660);
+const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, sidechain_right) == 9_175_428);
+const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, sidechain_frames) == 9_208_196);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, input) % 64 == 0);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, extended_midi) % 64 == 0);
 

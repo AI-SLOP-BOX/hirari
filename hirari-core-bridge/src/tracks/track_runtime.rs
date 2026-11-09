@@ -104,6 +104,9 @@ pub struct TrackRuntime {
     region_inputs: AtomicPtr<c_void>,
     region_count: AtomicUsize,
     region_published: AtomicU8,
+    /// Sidechain engine handle for sandbox delivery; the block host refreshes
+    /// it before each track pass so workers read this block's sources.
+    sidechain_gate: AtomicPtr<c_void>,
 }
 
 // The handles are only dereferenced from this track's audio callback and from
@@ -150,6 +153,12 @@ impl TrackRuntime {
     /// identity and the tap buffers it publishes have to be readable natively.
     pub(crate) fn track_id(&self) -> u32 {
         self.track_id
+    }
+
+    /// Refreshes the sidechain engine handle used for sandbox delivery in
+    /// the next track pass. Null disables sidechain input.
+    pub(crate) fn set_sidechain_gate(&self, gate: *mut c_void) {
+        self.sidechain_gate.store(gate, Ordering::Release);
     }
 
     /// The work buffer the graph-visible stages read at one block length. A
@@ -444,6 +453,8 @@ impl TrackRuntime {
                     audio,
                     self.midi,
                     f64::from_bits(self.transport_bpm.load(Ordering::Relaxed)),
+                    self.sidechain_gate.load(Ordering::Acquire),
+                    self.track_id,
                 );
                 // Processors share the mutable MIDI buffer for one block, so it
                 // is dropped here rather than left for an alternate render path
@@ -643,6 +654,7 @@ pub unsafe extern "C" fn hirari_track_runtime_create(
         region_inputs: AtomicPtr::new(ptr::null_mut()),
         region_count: AtomicUsize::new(0),
         region_published: AtomicU8::new(0),
+        sidechain_gate: AtomicPtr::new(ptr::null_mut()),
     }))
     .cast()
 }

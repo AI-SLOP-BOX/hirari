@@ -238,6 +238,15 @@ impl ChainNode {
         }
     }
 
+    /// Refreshes the sidechain delivery context for sandbox nodes. Built-in
+    /// processors are unaffected (their sidechain sum arrives as program
+    /// audio), so this is a no-op for internal kinds.
+    pub fn set_sidechain_context(&self, gate: *mut c_void, track: u32, index: u32) {
+        if let NodeKind::Sandbox(node) = &self.kind {
+            node.set_sidechain_context(gate, track, index);
+        }
+    }
+
     pub fn latency_samples(&self) -> u32 {
         match &self.kind {
             NodeKind::Internal(host) => unsafe { hirari_native_plugin_host_latency_samples(*host) },
