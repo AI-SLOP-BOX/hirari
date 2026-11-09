@@ -36,6 +36,12 @@ extern "C" {
         parameter_changes: *const std::ffi::c_void,
         parameter_count: u32,
     ) -> bool;
+    fn hirari_au_set_sidechain_context(
+        instance: *mut std::ffi::c_void,
+        left: *const f32,
+        right: *const f32,
+        frames: u32,
+    );
     fn hirari_au_state_block(
         instance: *mut std::ffi::c_void,
         mode: u8,
@@ -68,6 +74,18 @@ fn load_render_state_cycle() {
         input[frame] = 0.25;
         input[8192 + frame] = -0.25;
     }
+    // The sidechain context setter must accept both null (no link) and
+    // attached mailbox planes without disturbing the render path.
+    unsafe { hirari_au_set_sidechain_context(instance, ptr::null(), ptr::null(), 0) };
+    let sidechain = vec![0.125f32; 8192 * 2];
+    unsafe {
+        hirari_au_set_sidechain_context(
+            instance,
+            sidechain.as_ptr(),
+            sidechain.as_ptr().add(8192),
+            512,
+        )
+    };
     let ok = unsafe {
         hirari_au_process_block(
             instance,

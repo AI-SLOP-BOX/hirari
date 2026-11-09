@@ -16,7 +16,8 @@ use crate::mailbox::{self, SharedAudioBlock};
 use crate::au_host::{
     hirari_au_instance_destroy, hirari_au_instance_latency, hirari_au_instance_load,
     hirari_au_instance_parameter_count, hirari_au_instance_parameter_info,
-    hirari_au_instance_reset, hirari_au_process_block, hirari_au_state_block,
+    hirari_au_instance_reset, hirari_au_process_block, hirari_au_set_sidechain_context,
+    hirari_au_state_block,
 };
 #[cfg(vst3_sdk)]
 extern "C" {
@@ -270,6 +271,16 @@ extern "C" fn backend_process(
         },
         #[cfg(target_os = "macos")]
         FORMAT_AUDIO_UNIT => {
+            // Attach the mailbox sidechain planes so input bus 1 (where the
+            // unit exposes a detector) receives this block's source.
+            unsafe {
+                hirari_au_set_sidechain_context(
+                    context.au_instance,
+                    block.sidechain_left.as_ptr(),
+                    block.sidechain_right.as_ptr(),
+                    block.sidechain_frames.load(Ordering::Acquire),
+                );
+            }
             let processed = unsafe {
                 hirari_au_process_block(
                     context.au_instance,

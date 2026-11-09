@@ -40,6 +40,11 @@ production support.
 - Sandbox chain nodes cache probe results, so parameter counts, names
   and defaults now flow to the UI snapshot and automation lanes for
   external plugins; writes already flowed through the mailbox.
+- AU sidechain delivery: the worker probes the unit's input bus count
+  and, for units with a second bus, feeds the mailbox sidechain planes
+  through a pull callback (silence when unlinked). The CLAP descriptor
+  layout fix from the probe work also lets real CLAP plugins load in
+  the sandbox where they previously misbehaved during feature lookup.
 - CLAP hosting compatibility on real plugins. The descriptor `features`
   array was modeled as a pointer field instead of core-abis' flexible
   array member, which misaligned every lookup after the minimal fixture;

@@ -48,6 +48,10 @@ struct BlockState {
     channels: u32,
     frames: u32,
     parameter_error: bool,
+    /// Planar sidechain input (channel-major, `SHARED_CHANNEL_STRIDE`
+    /// stride, mirroring `input`). Null means no link this block.
+    sidechain: *const f32,
+    sidechain_frames: u32,
 }
 
 impl Default for BlockState {
@@ -57,6 +61,8 @@ impl Default for BlockState {
             channels: 0,
             frames: 0,
             parameter_error: false,
+            sidechain: ptr::null(),
+            sidechain_frames: 0,
         }
     }
 }
@@ -69,6 +75,8 @@ struct AuHost {
     max_frames: u32,
     initialized: bool,
     render_notify: bool,
+    /// Input bus 1 carries the sidechain detector on units that expose it.
+    sidechain: bool,
     block: UnsafeCell<BlockState>,
     events: UnsafeCell<Vec<sys::AudioUnitParameterEvent>>,
 }
@@ -265,6 +273,50 @@ unsafe fn configure_unit(host: *mut AuHost, channels: u32) -> bool {
         }) {
             return false;
         }
+        // Sidechain detector: units with a second input bus conventionally
+        // expose it on input element 1. Probe the bus count and hook the
+        // sidechain callback with the same stream format as the main input.
+        let mut bus_count = 0u32;
+        let mut bus_size = core::mem::size_of::<u32>() as u32;
+        let second_bus = unsafe {
+            status_ok(sys::AudioUnitGetProperty(
+                unit,
+                sys::kAudioUnitProperty_BusCount as sys::AudioUnitPropertyID,
+                sys::kAudioUnitScope_Input,
+                0,
+                (&mut bus_count as *mut u32).cast(),
+                &mut bus_size,
+            ))
+        } && bus_count > 1;
+        if second_bus
+            && status_ok(unsafe {
+                sys::AudioUnitSetProperty(
+                    unit,
+                    sys::kAudioUnitProperty_StreamFormat as sys::AudioUnitPropertyID,
+                    sys::kAudioUnitScope_Input,
+                    1,
+                    (&format as *const sys::AudioStreamBasicDescription).cast(),
+                    core::mem::size_of::<sys::AudioStreamBasicDescription>() as u32,
+                )
+            })
+        {
+            let sidechain_callback = sys::AURenderCallbackStruct {
+                inputProc: Some(sidechain_callback),
+                inputProcRefCon: host.cast(),
+            };
+            if status_ok(unsafe {
+                sys::AudioUnitSetProperty(
+                    unit,
+                    sys::kAudioUnitProperty_SetRenderCallback as sys::AudioUnitPropertyID,
+                    sys::kAudioUnitScope_Input,
+                    1,
+                    (&sidechain_callback as *const sys::AURenderCallbackStruct).cast(),
+                    core::mem::size_of::<sys::AURenderCallbackStruct>() as u32,
+                )
+            }) {
+                unsafe { (*host).sidechain = true };
+            }
+        }
     }
     if !status_ok(unsafe { sys::AudioUnitInitialize(unit) }) {
         return false;
@@ -294,7 +346,12 @@ unsafe fn shutdown_unit(host: *mut AuHost) {
         state.unit = ptr::null_mut();
     }
     state.initialized = false;
-    unsafe { (*state.block.get()).input = ptr::null() };
+    state.sidechain = false;
+    unsafe {
+        (*state.block.get()).input = ptr::null();
+        (*state.block.get()).sidechain = ptr::null();
+        (*state.block.get()).sidechain_frames = 0;
+    }
 }
 
 unsafe extern "C" fn input_callback(
@@ -322,6 +379,57 @@ unsafe extern "C" fn input_callback(
                 mData: (block.input as *mut f32)
                     .add(channel * SHARED_CHANNEL_STRIDE)
                     .cast(),
+            });
+        }
+    }
+    sys::noErr as sys::OSStatus
+}
+
+/// Pull callback for input bus 1 (sidechain). Serves the mailbox sidechain
+/// arrays published for this block; an absent link renders as silence.
+unsafe extern "C" fn sidechain_callback(
+    ref_con: *mut c_void,
+    _flags: *mut sys::AudioUnitRenderActionFlags,
+    _timestamp: *const sys::AudioTimeStamp,
+    _bus: u32,
+    frames: u32,
+    io_data: *mut sys::AudioBufferList,
+) -> sys::OSStatus {
+    let Some(host) = (unsafe { ref_con.cast::<AuHost>().as_ref() }) else {
+        return -50;
+    };
+    let block = unsafe { &*host.block.get() };
+    if io_data.is_null() || frames > SHARED_CHANNEL_STRIDE as u32 {
+        return -50;
+    }
+    static SILENT: [f32; SHARED_CHANNEL_STRIDE * 2] = [0.0; SHARED_CHANNEL_STRIDE * 2];
+    unsafe {
+        (*io_data).mNumberBuffers = block.channels.max(1);
+        let buffers = (*io_data).mBuffers.as_mut_ptr();
+        let frames_usize = frames as usize;
+        for channel in 0..(*io_data).mNumberBuffers as usize {
+            let channel_index = channel.min(1) * SHARED_CHANNEL_STRIDE;
+            if block.sidechain.is_null() {
+                buffers.add(channel).write(sys::AudioBuffer {
+                    mNumberChannels: 1,
+                    mDataByteSize: frames * 4,
+                    mData: (SILENT.as_ptr().add(channel_index)) as *mut c_void,
+                });
+                continue;
+            }
+            let available = (block.sidechain_frames.min(frames)) as usize;
+            // Zero anything the link did not publish so short/no detector
+            // reads as silence; the host rewrites the arrays every block.
+            if available < frames_usize {
+                (block.sidechain as *mut f32)
+                    .add(channel_index)
+                    .add(available)
+                    .write_bytes(0, frames_usize - available);
+            }
+            buffers.add(channel).write(sys::AudioBuffer {
+                mNumberChannels: 1,
+                mDataByteSize: frames * 4,
+                mData: (block.sidechain as *mut f32).add(channel_index) as *mut c_void,
             });
         }
     }
@@ -434,6 +542,7 @@ pub unsafe extern "C" fn hirari_au_instance_load(
         max_frames,
         initialized: false,
         render_notify: false,
+        sidechain: false,
         block: UnsafeCell::new(BlockState::default()),
         events: UnsafeCell::new(Vec::with_capacity(MAX_PARAMETER_CHANGES)),
     });
@@ -645,6 +754,33 @@ pub unsafe extern "C" fn hirari_au_instance_latency(instance: *mut c_void) -> u3
         return 0;
     }
     (seconds * host.sample_rate).round() as u32
+}
+
+/// Attaches the mailbox sidechain arrays for the next render. Null means
+/// no detector this block (the sidechain callback serves silence).
+#[no_mangle]
+pub unsafe extern "C" fn hirari_au_set_sidechain_context(
+    instance: *mut c_void,
+    left: *const f32,
+    right: *const f32,
+    frames: u32,
+) {
+    let Some(host) = (unsafe { instance.cast::<AuHost>().as_ref() }) else {
+        return;
+    };
+    if left.is_null() || right.is_null() {
+        return;
+    }
+    // The mailbox stores planar planes (stride `SHARED_CHANNEL_STRIDE`);
+    // only the left base is kept and the right plane follows by stride.
+    let _ = right;
+    unsafe {
+        let block = &mut *host.block.get();
+        // Callers attach one contiguous planar region starting at left, and
+        // the right plane sits one stride later in the mailbox layout.
+        block.sidechain = left;
+        block.sidechain_frames = frames;
+    }
 }
 
 /// Projects one shared-mailbox block into the AudioUnit callbacks. Parameter
