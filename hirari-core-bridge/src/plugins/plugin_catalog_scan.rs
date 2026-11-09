@@ -1,3 +1,54 @@
+/// One-shot parameter discovery through the packaged worker's `--params`
+/// probe. Returns the worker's JSON line when it exits cleanly with a
+/// parseable document; `None` covers missing workers, load failures and
+/// malformed output alike.
+pub(crate) fn probe_worker_parameters(path: &str) -> Option<String> {
+    if path.trim().is_empty() {
+        return None;
+    }
+    let mut candidates = Vec::new();
+    if let Some(configured) = std::env::var_os("HIRARI_PLUGIN_HOST_BIN") {
+        candidates.push(PathBuf::from(configured));
+    }
+    candidates.extend([
+        PathBuf::from("build-tools/hirari-plugin-host-worker"),
+        PathBuf::from("/usr/local/bin/hirari-plugin-host-worker"),
+    ]);
+    if let Ok(executable) = std::env::current_exe() {
+        if let Some(parent) = executable.parent() {
+            candidates.push(parent.join("hirari-plugin-host-worker"));
+            candidates.push(parent.join("Contents/MacOS/hirari-plugin-host-worker"));
+            if let Some(contents) = parent.parent() {
+                candidates.push(contents.join("MacOS/hirari-plugin-host-worker"));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    for candidate in candidates {
+        if !seen.insert(candidate.clone()) {
+            continue;
+        }
+        let Ok(output) = std::process::Command::new(candidate)
+            .arg("--params")
+            .arg(path)
+            .output()
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
+        }
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&output.stdout) else {
+            continue;
+        };
+        if value.get("parameters").is_some_and(serde_json::Value::is_array) {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+
 fn quarantine_file() -> PathBuf {
     if let Some(path) = std::env::var_os("HIRARI_PLUGIN_QUARANTINE_FILE") {
         return PathBuf::from(path);

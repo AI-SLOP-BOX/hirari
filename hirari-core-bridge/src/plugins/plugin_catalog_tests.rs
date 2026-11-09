@@ -5,6 +5,27 @@ mod tests {
     };
 
     #[test]
+    fn parameter_probe_reads_the_worker_json() {
+        let worker = std::path::PathBuf::from(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../target/release/hirari-plugin-host-worker"
+        ));
+        if !worker.exists() {
+            return;
+        }
+        std::env::set_var("HIRARI_PLUGIN_HOST_BIN", &worker);
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../build-tools/minimal-gain.clap"
+        );
+        let probed = super::probe_worker_parameters(fixture);
+        assert!(
+            probed.is_some_and(|json| json.starts_with("{\"parameters\":")),
+            "probe must return the worker's JSON document"
+        );
+    }
+
+    #[test]
     fn aliases_ignore_spaces_and_punctuation() {
         assert_eq!(normalized("Surge XT"), "surgext");
         assert_eq!(normalized("Vital.vst3"), "vitalvst3");

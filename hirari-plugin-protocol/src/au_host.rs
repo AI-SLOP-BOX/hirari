@@ -509,6 +509,117 @@ pub unsafe extern "C" fn hirari_au_instance_reset(
     status_ok(unsafe { sys::AudioUnitReset(host.unit, sys::kAudioUnitScope_Global, 0) })
 }
 
+/// Number of parameters advertised by the unit.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_au_instance_parameter_count(instance: *mut c_void) -> u32 {
+    let Some(host) = (unsafe { instance.cast::<AuHost>().as_ref() }) else {
+        return 0;
+    };
+    if host.unit.is_null() {
+        return 0;
+    }
+    let mut first_id = 0u32;
+    let mut size = core::mem::size_of::<u32>() as u32;
+    let status = unsafe {
+        sys::AudioUnitGetProperty(
+            host.unit,
+            sys::kAudioUnitProperty_ParameterList as sys::AudioUnitPropertyID,
+            sys::kAudioUnitScope_Global,
+            0,
+            (&mut first_id as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    if !status_ok(status) || size % 4 != 0 {
+        return 0;
+    }
+    size / 4
+}
+
+/// Fills `out` for the `index`-th parameter in the unit's list.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_au_instance_parameter_info(
+    instance: *mut c_void,
+    index: u32,
+    out: *mut crate::mailbox::PluginParameterInfo,
+) -> bool {
+    let Some(host) = (unsafe { instance.cast::<AuHost>().as_ref() }) else {
+        return false;
+    };
+    if host.unit.is_null() || out.is_null() {
+        return false;
+    }
+    let count = hirari_au_instance_parameter_count(instance);
+    if index >= count {
+        return false;
+    }
+    let mut ids = vec![0u32; count as usize];
+    let mut size = (count * 4) as u32;
+    let status = unsafe {
+        sys::AudioUnitGetProperty(
+            host.unit,
+            sys::kAudioUnitProperty_ParameterList as sys::AudioUnitPropertyID,
+            sys::kAudioUnitScope_Global,
+            0,
+            ids.as_mut_ptr().cast(),
+            &mut size,
+        )
+    };
+    if !status_ok(status) {
+        return false;
+    }
+    let id = ids[index as usize];
+    let mut info = sys::AudioUnitParameterInfo::default();
+    let mut info_size = core::mem::size_of::<sys::AudioUnitParameterInfo>() as u32;
+    let status = unsafe {
+        sys::AudioUnitGetProperty(
+            host.unit,
+            sys::kAudioUnitProperty_ParameterInfo as sys::AudioUnitPropertyID,
+            sys::kAudioUnitScope_Global,
+            id,
+            (&mut info as *mut sys::AudioUnitParameterInfo).cast(),
+            &mut info_size,
+        )
+    };
+    if !status_ok(status) {
+        return false;
+    }
+    let filled = unsafe { &mut *out };
+    filled.id = id;
+    filled.min_value = f64::from(info.minValue);
+    filled.max_value = f64::from(info.maxValue);
+    filled.default_value = f64::from(info.defaultValue);
+    filled.flags = if info.flags & sys::kAudioUnitParameterFlag_IsWritable != 0 {
+        1
+    } else {
+        2
+    };
+    let name_bytes = info
+        .name
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .take(crate::mailbox::PARAMETER_NAME_BYTES - 1)
+        .collect::<Vec<_>>();
+    filled.name[..name_bytes.len()].copy_from_slice(&name_bytes);
+    if !info.unitName.is_null() {
+        let mut buffer = [0u8; crate::mailbox::PARAMETER_UNIT_BYTES];
+        let ok = unsafe {
+            sys::CFStringGetCString(
+                info.unitName,
+                buffer.as_mut_ptr().cast::<i8>(),
+                buffer.len() as i64,
+                sys::kCFStringEncodingUTF8,
+            )
+        };
+        if ok != 0 {
+            let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+            filled.unit[..len].copy_from_slice(&buffer[..len]);
+        }
+    }
+    true
+}
+
 /// Processor latency in samples via `kAudioUnitProperty_Latency` (seconds).
 #[no_mangle]
 pub unsafe extern "C" fn hirari_au_instance_latency(instance: *mut c_void) -> u32 {

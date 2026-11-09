@@ -154,6 +154,21 @@ impl HirariCore {
         .unwrap_or_else(|_| "{\"code\":\"diagnostic_serialization_failed\"}".to_owned())
     }
 
+    /// One-shot parameter discovery for a plugin bundle: spawns the packaged
+    /// worker's `--params` probe and returns its JSON document. The probe
+    /// runs on the control thread; realtime paths never spawn it.
+    pub fn probe_plugin_parameters_json(&self, path: &str) -> String {
+        match crate::plugin_catalog::probe_worker_parameters(path) {
+            Some(json) => json,
+            None => serde_json::json!({
+                "ok": false,
+                "code": "parameter_probe_unavailable",
+                "path": path,
+            })
+            .to_string(),
+        }
+    }
+
     pub fn add_sandboxed_plugin(&self, track_id: u32, path: &str) -> bool {
         let admission = Self::plugin_path_admission(path);
         if matches!(

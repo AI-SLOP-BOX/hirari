@@ -183,6 +183,30 @@ struct LatencyExtension {
     get: Option<unsafe extern "C" fn(*const Plugin) -> u32>,
 }
 
+const PARAMS_EXTENSION_ID: &[u8] = b"clap.params\0";
+
+/// `clap.plugin.params` extension (core-abis).
+#[repr(C)]
+struct ParamsExtension {
+    get_count: Option<unsafe extern "C" fn(*const Plugin) -> u32>,
+    get_info: Option<unsafe extern "C" fn(*const Plugin, u32, *mut ClapParamInfo) -> bool>,
+}
+
+#[repr(C)]
+struct ClapParamInfo {
+    id: u32,
+    flags: u32,
+    name: *const c_char,
+    module: *const c_char,
+    default_value: f64,
+    min_value: f64,
+    max_value: f64,
+    cookies: *const c_void,
+}
+
+const CLAP_PARAM_IS_AUTOMATABLE: u32 = 1;
+const CLAP_PARAM_IS_READ_ONLY: u32 = 2;
+
 const _: () = assert!(core::mem::size_of::<Host>() == 88);
 const _: () = assert!(core::mem::size_of::<Descriptor>() == 80);
 const _: () = assert!(core::mem::size_of::<Plugin>() == 96);
@@ -459,6 +483,83 @@ pub unsafe extern "C" fn hirari_clap_instance_latency(instance: *const c_void) -
         Some(get) => get(plugin),
         None => 0,
     }
+}
+
+fn params_extension(instance: *const c_void) -> Option<(*const Plugin, *const ParamsExtension)> {
+    if instance.is_null() {
+        return None;
+    }
+    let plugin = unsafe { (*instance.cast::<ClapInstance>()).plugin };
+    if plugin.is_null() {
+        return None;
+    }
+    let get_extension = unsafe { (*plugin).get_extension? };
+    let extension = unsafe { get_extension(plugin, PARAMS_EXTENSION_ID.as_ptr().cast::<c_char>()) };
+    if extension.is_null() {
+        return None;
+    }
+    Some((plugin, extension.cast::<ParamsExtension>()))
+}
+
+/// Number of parameters advertised by the `clap.params` extension.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_parameter_count(instance: *const c_void) -> u32 {
+    let Some((plugin, extension)) = params_extension(instance) else {
+        return 0;
+    };
+    match unsafe { (*extension).get_count } {
+        Some(get_count) => unsafe { get_count(plugin) },
+        None => 0,
+    }
+}
+
+/// Fills `out` for the `index`-th parameter.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_parameter_info(
+    instance: *const c_void,
+    index: u32,
+    out: *mut crate::mailbox::PluginParameterInfo,
+) -> bool {
+    let Some((plugin, extension)) = params_extension(instance) else {
+        return false;
+    };
+    if out.is_null() {
+        return false;
+    }
+    let Some(get_info) = (unsafe { (*extension).get_info }) else {
+        return false;
+    };
+    let mut info = ClapParamInfo {
+        id: 0,
+        flags: 0,
+        name: ptr::null(),
+        module: ptr::null(),
+        default_value: 0.0,
+        min_value: 0.0,
+        max_value: 0.0,
+        cookies: ptr::null_mut(),
+    };
+    if !unsafe { get_info(plugin, index, &mut info) } {
+        return false;
+    }
+    let filled = unsafe { &mut *out };
+    filled.id = info.id;
+    filled.min_value = info.min_value;
+    filled.max_value = info.max_value;
+    filled.default_value = info.default_value;
+    filled.flags = if info.flags & CLAP_PARAM_IS_AUTOMATABLE != 0 {
+        1
+    } else if info.flags & CLAP_PARAM_IS_READ_ONLY != 0 {
+        2
+    } else {
+        0
+    };
+    if !info.name.is_null() {
+        let bytes = unsafe { CStr::from_ptr(info.name) }.to_bytes();
+        let take = bytes.len().min(crate::mailbox::PARAMETER_NAME_BYTES - 1);
+        filled.name[..take].copy_from_slice(&bytes[..take]);
+    }
+    true
 }
 
 #[no_mangle]

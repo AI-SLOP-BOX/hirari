@@ -13,6 +13,38 @@ pub const MAX_MIDI_EVENTS: usize = 1024;
 pub const MAX_PARAMETER_CHANGES: usize = 4096;
 pub const MAX_MIDI_PAYLOAD_BYTES: usize = 256;
 pub const MAX_STATE_BYTES: usize = crate::MAX_STATE_BYTES;
+/// Fixed widths for the parameter-discovery probe payload.
+pub const PARAMETER_NAME_BYTES: usize = 64;
+pub const PARAMETER_UNIT_BYTES: usize = 32;
+
+/// One discovered plugin parameter, filled by a format adapter's
+/// enumeration entry points and serialized by the `--params` probe.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct PluginParameterInfo {
+    pub id: u32,
+    /// bit 0: automatable; bit 1: read-only.
+    pub flags: u32,
+    pub min_value: f64,
+    pub max_value: f64,
+    pub default_value: f64,
+    pub name: [u8; PARAMETER_NAME_BYTES],
+    pub unit: [u8; PARAMETER_UNIT_BYTES],
+}
+
+impl Default for PluginParameterInfo {
+    fn default() -> Self {
+        Self {
+            id: 0,
+            flags: 0,
+            min_value: 0.0,
+            max_value: 0.0,
+            default_value: 0.0,
+            name: [0; PARAMETER_NAME_BYTES],
+            unit: [0; PARAMETER_UNIT_BYTES],
+        }
+    }
+}
 /// Bounded ring for completed SysEx/MIDI 2.0 messages that cannot fit in the
 /// legacy 256-byte event slot.
 pub const EXTENDED_RING_BYTES: usize = crate::RING_STORAGE_BYTES;

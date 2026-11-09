@@ -15,6 +15,7 @@ use crate::mailbox::{self, SharedAudioBlock};
 #[cfg(target_os = "macos")]
 use crate::au_host::{
     hirari_au_instance_destroy, hirari_au_instance_latency, hirari_au_instance_load,
+    hirari_au_instance_parameter_count, hirari_au_instance_parameter_info,
     hirari_au_instance_reset, hirari_au_process_block, hirari_au_state_block,
 };
 #[cfg(vst3_sdk)]
@@ -27,6 +28,12 @@ extern "C" {
     ) -> *mut c_void;
     fn hirari_worker_vst3_destroy(instance: *mut c_void);
     fn hirari_worker_vst3_latency(instance: *mut c_void) -> u32;
+    fn hirari_worker_vst3_parameter_count(instance: *mut c_void) -> u32;
+    fn hirari_worker_vst3_parameter_info(
+        instance: *mut c_void,
+        index: u32,
+        out: *mut crate::mailbox::PluginParameterInfo,
+    ) -> bool;
     fn hirari_worker_vst3_reset(
         instance: *mut c_void,
         sample_rate: f64,
@@ -47,6 +54,7 @@ use crate::clap_events::{
 };
 use crate::clap_loader::{
     hirari_clap_instance_destroy, hirari_clap_instance_latency, hirari_clap_instance_load,
+    hirari_clap_instance_parameter_count, hirari_clap_instance_parameter_info,
     hirari_clap_instance_plugin, hirari_clap_instance_reset, hirari_clap_instance_state,
     hirari_plugin_resolve_image_path, hirari_plugin_resolved_image_free,
 };
@@ -293,6 +301,135 @@ extern "C" fn backend_process(
     }
 }
 
+fn json_escape(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() + 2);
+    for &byte in bytes {
+        match byte {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            0x00..=0x1F => out.push_str(&format!("\\u{byte:04x}")),
+            _ => out.push(byte as char),
+        }
+    }
+    out
+}
+
+fn probe_print(parameters: &[crate::mailbox::PluginParameterInfo]) {
+    let mut line = String::from("{\"parameters\":[");
+    for (index, info) in parameters.iter().enumerate() {
+        if index > 0 {
+            line.push(',');
+        }
+        let name_len = info
+            .name
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(info.name.len());
+        let unit_len = info
+            .unit
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(info.unit.len());
+        line.push_str(&format!(
+            "{{\"id\":{},\"name\":\"{}\",\"unit\":\"{}\",\"min\":{},\"max\":{},\"default\":{},\"flags\":{}}}",
+            info.id,
+            json_escape(&info.name[..name_len]),
+            json_escape(&info.unit[..unit_len]),
+            info.min_value,
+            info.max_value,
+            info.default_value,
+            info.flags,
+        ));
+    }
+    line.push_str("]}\n");
+    unsafe {
+        write(1, line.as_ptr().cast::<c_void>(), line.len());
+    }
+}
+
+/// `--params` probe body. Returns the process exit status.
+unsafe fn run_params_probe(path: &str) -> i32 {
+    let lower = path.to_ascii_lowercase();
+    let mut midi_instrument = false;
+    let mut parameters: Vec<crate::mailbox::PluginParameterInfo> = Vec::new();
+    if lower.ends_with(".vst3") {
+        #[cfg(vst3_sdk)]
+        unsafe {
+            let cpath = CString::new(path).unwrap_or_default();
+            let instance =
+                hirari_worker_vst3_load(cpath.as_ptr(), 48_000.0, 512, &mut midi_instrument);
+            if instance.is_null() {
+                return 2;
+            }
+            let count = hirari_worker_vst3_parameter_count(instance).min(65_536);
+            for index in 0..count {
+                let mut info = crate::mailbox::PluginParameterInfo::default();
+                if hirari_worker_vst3_parameter_info(instance, index, &mut info) {
+                    parameters.push(info);
+                }
+            }
+            hirari_worker_vst3_destroy(instance);
+        }
+        #[cfg(not(vst3_sdk))]
+        {
+            return 2;
+        }
+    } else if lower.ends_with(".clap") {
+        unsafe {
+            let cpath = CString::new(path).unwrap_or_default();
+            let image = resolve_plugin_image(cpath.as_ptr()).unwrap_or(cpath.clone());
+            let mut instance: *mut c_void = core::ptr::null_mut();
+            let result = hirari_clap_instance_load(
+                image.as_ptr(),
+                cpath.as_ptr(),
+                48_000.0,
+                1,
+                512,
+                &mut instance,
+                &mut midi_instrument,
+            );
+            if result != 0 || instance.is_null() {
+                return 2;
+            }
+            let count = hirari_clap_instance_parameter_count(instance as *const c_void).min(65_536);
+            for index in 0..count {
+                let mut info = crate::mailbox::PluginParameterInfo::default();
+                if hirari_clap_instance_parameter_info(instance as *const c_void, index, &mut info)
+                {
+                    parameters.push(info);
+                }
+            }
+            hirari_clap_instance_destroy(instance);
+        }
+    } else if lower.ends_with(".component") {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            let cpath = CString::new(path).unwrap_or_default();
+            let instance =
+                hirari_au_instance_load(cpath.as_ptr(), 48_000.0, 512, 2, &mut midi_instrument);
+            if instance.is_null() {
+                return 2;
+            }
+            let count = hirari_au_instance_parameter_count(instance).min(65_536);
+            for index in 0..count {
+                let mut info = crate::mailbox::PluginParameterInfo::default();
+                if hirari_au_instance_parameter_info(instance, index, &mut info) {
+                    parameters.push(info);
+                }
+            }
+            hirari_au_instance_destroy(instance);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return 2;
+        }
+    } else {
+        return 2;
+    }
+    probe_print(&parameters);
+    0
+}
+
 unsafe fn resolve_plugin_image(plugin_path: *const c_char) -> Option<CString> {
     let resolved = unsafe { hirari_plugin_resolve_image_path(plugin_path) };
     if resolved.is_null() {
@@ -319,6 +456,20 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
                 )
             };
             return 0;
+        }
+    }
+    // One-shot parameter discovery probe: `--params <plugin-path>` loads
+    // the plugin, enumerates its parameters and prints one JSON line, then
+    // exits. It never maps the shared mailbox, so control-plane callers can
+    // run it synchronously without realtime constraints.
+    if argc >= 3 && !argv.is_null() {
+        let mode = unsafe { *argv.add(1) };
+        if !mode.is_null() && unsafe { CStr::from_ptr(mode) }.to_bytes() == b"--params" {
+            let path = unsafe { *argv.add(2) };
+            if path.is_null() {
+                return 2;
+            }
+            return unsafe { run_params_probe(CStr::from_ptr(path).to_str().unwrap_or("")) };
         }
     }
     let mut options: WorkerLaunchOptions = unsafe { core::mem::zeroed() };

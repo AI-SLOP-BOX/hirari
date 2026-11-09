@@ -39,6 +39,44 @@ extern "C" uint32_t hirari_worker_vst3_latency(void* instance) {
     return runtime ? runtime->latencySamples() : 0;
 }
 
+namespace {
+// Mirrors Rust `mailbox::PluginParameterInfo` (hirari-plugin-protocol).
+struct ParameterInfoOut {
+    uint32_t id = 0;
+    uint32_t flags = 0;
+    double minValue = 0.0;
+    double maxValue = 0.0;
+    double defaultValue = 0.0;
+    uint8_t name[64]{};
+    uint8_t unit[32]{};
+};
+} // namespace
+
+extern "C" uint32_t hirari_worker_vst3_parameter_count(void* instance) {
+    auto* runtime = static_cast<Hirari::Core::Plugins::SandboxVST3::Runtime*>(instance);
+    return runtime ? runtime->parameterCount() : 0;
+}
+
+extern "C" bool hirari_worker_vst3_parameter_info(void* instance, uint32_t index,
+                                                  ParameterInfoOut* out) {
+    auto* runtime = static_cast<Hirari::Core::Plugins::SandboxVST3::Runtime*>(instance);
+    if (!runtime || !out) return false;
+    Hirari::Core::Plugins::SandboxVST3::Runtime::ParameterRecord record;
+    if (!runtime->parameterInfo(index, record)) return false;
+    out->id = record.id;
+    out->flags = record.flags;
+    out->minValue = record.minValue;
+    out->maxValue = record.maxValue;
+    out->defaultValue = record.defaultValue;
+    const auto copy = [](uint8_t* dest, size_t capacity, const std::string& value) {
+        const auto take = std::min(capacity - 1, value.size());
+        std::memcpy(dest, value.data(), take);
+    };
+    copy(out->name, sizeof(out->name), record.name);
+    copy(out->unit, sizeof(out->unit), record.unit);
+    return true;
+}
+
 extern "C" void hirari_worker_vst3_destroy(void* instance) {
     delete static_cast<Hirari::Core::Plugins::SandboxVST3::Runtime*>(instance);
 }

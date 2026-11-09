@@ -33,6 +33,10 @@ production support.
   sandbox nodes, the host copies the published source with link level
   into the mailbox, and the VST3 adapter feeds it into the second input
   bus. CLAP/AU adapters currently ignore the arrays.
+- Parameter discovery probe. The worker gained a one-shot `--params`
+  mode that loads a plugin and enumerates its parameters (CLAP params
+  extension, AU parameter list/info, VST3 edit controller), printing one
+  JSON line; the bridge exposes it for catalog and UI use.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

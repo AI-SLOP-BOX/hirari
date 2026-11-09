@@ -98,6 +98,57 @@ public:
         return latency > 0 ? static_cast<uint32_t>(latency) : 0;
     }
 
+    uint32_t parameterCount() const noexcept {
+        if (!m_ready || !m_controller) return 0;
+        const auto count = m_controller->getParameterCount();
+        return count > 0 ? static_cast<uint32_t>(count) : 0;
+    }
+
+    struct ParameterRecord {
+        uint32_t id = 0;
+        uint32_t flags = 0;
+        double minValue = 0.0;
+        double maxValue = 1.0;
+        double defaultValue = 0.0;
+        std::string name;
+        std::string unit;
+    };
+
+    bool parameterInfo(uint32_t index, ParameterRecord& record) const noexcept {
+        if (!m_ready || !m_controller || index >= parameterCount()) return false;
+        Steinberg::Vst::ParameterInfo info{};
+        if (m_controller->getParameterInfo(static_cast<Steinberg::int32>(index), info) !=
+            Steinberg::kResultOk)
+            return false;
+        record.id = static_cast<uint32_t>(info.id);
+        record.flags = (info.flags & Steinberg::Vst::ParameterInfo::kCanAutomate) ? 1u : 2u;
+        const double steps =
+            info.stepCount > 0 ? static_cast<double>(info.stepCount) : 1.0;
+        record.minValue = 0.0;
+        record.maxValue = steps;
+        record.defaultValue = info.defaultNormalizedValue * steps;
+        const auto toUtf8 = [](const Steinberg::Vst::TChar* text) {
+            std::string out;
+            for (const auto* p = text; *p != 0 && out.size() < 120; ++p) {
+                const auto c = static_cast<uint32_t>(*p);
+                if (c < 0x80) {
+                    out.push_back(static_cast<char>(c));
+                } else if (c < 0x800) {
+                    out.push_back(static_cast<char>(0xC0 | (c >> 6)));
+                    out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+                } else {
+                    out.push_back(static_cast<char>(0xE0 | (c >> 12)));
+                    out.push_back(static_cast<char>(0x80 | ((c >> 6) & 0x3F)));
+                    out.push_back(static_cast<char>(0x80 | (c & 0x3F)));
+                }
+            }
+            return out;
+        };
+        record.name = toUtf8(info.title);
+        record.unit = toUtf8(info.units);
+        return true;
+    }
+
     bool isMidiInstrument() const noexcept {
         return m_component &&
             m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput) == 0 &&
