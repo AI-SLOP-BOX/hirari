@@ -18,6 +18,7 @@ extern "C" {
         midi_instrument: *mut bool,
     ) -> *mut std::ffi::c_void;
     fn hirari_au_instance_destroy(instance: *mut std::ffi::c_void);
+    fn hirari_au_instance_latency(instance: *mut std::ffi::c_void) -> u32;
     fn hirari_au_instance_reset(
         instance: *mut std::ffi::c_void,
         sample_rate: f64,
@@ -55,6 +56,10 @@ fn load_render_state_cycle() {
     let mut midi = false;
     let instance = unsafe { hirari_au_instance_load(path.as_ptr(), 48_000.0, 512, 2, &mut midi) };
     assert!(!instance.is_null(), "AudioDSP.component failed to load");
+    // Latency query must answer without crashing (AudioDSP reports zero;
+    // oversampling units report a positive value via the same path).
+    let latency = unsafe { hirari_au_instance_latency(instance) };
+    assert!(latency < 48_000, "AudioDSP latency out of range: {latency}");
     assert!(unsafe { hirari_au_instance_reset(instance, 48_000.0, 1, 512) });
 
     let mut input = vec![0.0f32; 8192 * 2];
