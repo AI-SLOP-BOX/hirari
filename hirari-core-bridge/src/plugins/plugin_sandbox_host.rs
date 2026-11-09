@@ -1528,6 +1528,10 @@ impl SandboxHost {
         self.latency_samples.load(Ordering::Acquire)
     }
 
+    fn plugin_path(&self) -> String {
+        lock_control(&self.control).plugin_path.clone()
+    }
+
     fn set_sidechain_context(&self, gate: *mut c_void, track: u32, plugin: u32) {
         self.sidechain_gate.store(gate, Ordering::Release);
         self.sidechain_track.store(track, Ordering::Relaxed);
@@ -2005,6 +2009,43 @@ mod path_policy_tests {
     }
 }
 
+/// Parses one `--params` probe document into validated parameter records.
+/// Malformed entries are skipped; the probe stays fail-open (an empty list
+/// just means "no discovery", never a load failure).
+pub(crate) fn parse_discovered_parameters(
+    json: &str,
+) -> Vec<crate::plugin_parameters::PluginParameter> {
+    let Ok(document) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let Some(parameters) = document.get("parameters").and_then(|value| value.as_array()) else {
+        return Vec::new();
+    };
+    parameters
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id")?.as_u64()? as u32;
+            let name = entry.get("name")?.as_str()?.to_owned();
+            let unit = entry.get("unit")?.as_str().unwrap_or("").to_owned();
+            let min = entry.get("min")?.as_f64().unwrap_or(0.0);
+            let max = entry.get("max")?.as_f64().unwrap_or(1.0);
+            let default = entry.get("default")?.as_f64().unwrap_or(0.0);
+            let flags = entry.get("flags")?.as_u64().unwrap_or(0);
+            let parameter = crate::plugin_parameters::PluginParameter {
+                id,
+                name,
+                unit,
+                min,
+                max,
+                default,
+                automatable: flags & 1 != 0,
+                read_only: flags & 2 != 0,
+            };
+            parameter.validate().then_some(parameter)
+        })
+        .collect()
+}
+
 fn worker_format(plugin_path: &str, requested_format: &str) -> String {
     if requested_format.is_empty() || requested_format == "auto" {
         format_for_path(plugin_path).to_string()
@@ -2056,6 +2097,9 @@ pub mod chain {
         /// Control-plane lifecycle serialization. `process` deliberately never
         /// takes it: audio callbacks must not wait for worker control.
         lifecycle: Mutex<()>,
+        /// Discovery-probe cache: parameter metadata from the first probe
+        /// for this node's plugin, cloned for UI/automation reads.
+        parameters: Mutex<Option<Vec<crate::plugin_parameters::PluginParameter>>>,
     }
 
     impl Drop for SandboxNode {
@@ -2077,6 +2121,7 @@ pub mod chain {
             Box::new(Self {
                 host,
                 lifecycle: Mutex::new(()),
+                parameters: Mutex::new(None),
             })
         }
 
@@ -2172,6 +2217,42 @@ pub mod chain {
 
         pub fn latency_samples(&self) -> u32 {
             self.host.latency_samples()
+        }
+
+        fn discovered_parameters(&self) -> Vec<crate::plugin_parameters::PluginParameter> {
+            if let Some(cached) = self.parameters.lock().ok().and_then(|guard| guard.clone()) {
+                return cached;
+            }
+            let path = self.host.plugin_path();
+            let probed = crate::plugin_catalog::probe_worker_parameters(&path)
+                .map(|json| super::parse_discovered_parameters(&json))
+                .unwrap_or_default();
+            // Seed the value cache with the probe defaults so control-plane
+            // reads answer like a built-in host would, before any edit.
+            for parameter in &probed {
+                if parameter.max > parameter.min {
+                    let default = (parameter.default - parameter.min)
+                        / (parameter.max - parameter.min);
+                    let _ =
+                        self.host.remember_parameter(parameter.id, default.clamp(0.0, 1.0));
+                }
+            }
+            if let Ok(mut guard) = self.parameters.lock() {
+                let _ = guard.insert(probed.clone());
+            }
+            probed
+        }
+
+        pub fn parameter_count(&self) -> u32 {
+            self.discovered_parameters().len() as u32
+        }
+
+        pub fn parameter_name(&self, parameter_id: u32) -> String {
+            self.discovered_parameters()
+                .into_iter()
+                .find(|parameter| parameter.id == parameter_id)
+                .map(|parameter| parameter.name)
+                .unwrap_or_default()
         }
 
         pub fn set_sidechain_context(&self, gate: *mut c_void, track: u32, plugin: u32) {

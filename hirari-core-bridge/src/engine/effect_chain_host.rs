@@ -726,6 +726,16 @@ pub unsafe extern "C" fn hirari_effect_chain_parameter_count(
     entry_node(host, index).map_or(0, |node| node.num_parameters())
 }
 
+/// Display name for one sandbox parameter, from the discovery probe cache.
+pub(crate) fn sandbox_parameter_name(chain: *const c_void, index: u32, parameter_id: u32) -> String {
+    let Some(host) = (unsafe { host(chain.cast_mut()) }) else {
+        return String::new();
+    };
+    entry_node(host, index)
+        .map(|node| node.parameter_name(parameter_id))
+        .unwrap_or_default()
+}
+
 /// Applies sample-accurate plugin automation inside one reader generation.
 #[no_mangle]
 pub unsafe extern "C" fn hirari_effect_chain_parameter_automation(

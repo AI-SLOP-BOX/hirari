@@ -37,6 +37,9 @@ production support.
   mode that loads a plugin and enumerates its parameters (CLAP params
   extension, AU parameter list/info, VST3 edit controller), printing one
   JSON line; the bridge exposes it for catalog and UI use.
+- Sandbox chain nodes cache probe results, so parameter counts, names
+  and defaults now flow to the UI snapshot and automation lanes for
+  external plugins; writes already flowed through the mailbox.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

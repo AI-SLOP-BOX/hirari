@@ -234,7 +234,16 @@ impl ChainNode {
     pub fn num_parameters(&self) -> u32 {
         match &self.kind {
             NodeKind::Internal(host) => unsafe { hirari_native_plugin_host_parameter_count(*host) },
-            NodeKind::Sandbox(_) => 0,
+            NodeKind::Sandbox(node) => node.parameter_count(),
+        }
+    }
+
+    /// Display name for one parameter. Built-ins resolve through the effect
+    /// table elsewhere; sandbox nodes answer from the discovery probe.
+    pub fn parameter_name(&self, parameter_id: u32) -> String {
+        match &self.kind {
+            NodeKind::Internal(_) => String::new(),
+            NodeKind::Sandbox(node) => node.parameter_name(parameter_id),
         }
     }
 

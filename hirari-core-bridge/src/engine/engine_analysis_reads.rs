@@ -370,7 +370,7 @@ pub fn plugin_parameter_name(
     }
     let kind = unsafe { effect_chain_host::hirari_effect_chain_node_kind(chain, plugin_index) };
     if kind == crate::effect_chain_nodes::SANDBOX_KIND {
-        return String::new();
+        return effect_chain_host::sandbox_parameter_name(chain, plugin_index, parameter_id);
     }
     let name = crate::builtin_effect_names::hirari_builtin_effect_parameter_name(kind, parameter_id);
     if name.is_null() {
