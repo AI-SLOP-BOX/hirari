@@ -14,8 +14,8 @@ use crate::mailbox::{self, SharedAudioBlock};
 
 #[cfg(target_os = "macos")]
 use crate::au_host::{
-    hirari_au_instance_destroy, hirari_au_instance_load, hirari_au_instance_reset,
-    hirari_au_process_block, hirari_au_state_block,
+    hirari_au_instance_destroy, hirari_au_instance_latency, hirari_au_instance_load,
+    hirari_au_instance_reset, hirari_au_process_block, hirari_au_state_block,
 };
 #[cfg(vst3_sdk)]
 extern "C" {
@@ -26,6 +26,7 @@ extern "C" {
         midi_instrument: *mut bool,
     ) -> *mut c_void;
     fn hirari_worker_vst3_destroy(instance: *mut c_void);
+    fn hirari_worker_vst3_latency(instance: *mut c_void) -> u32;
     fn hirari_worker_vst3_reset(
         instance: *mut c_void,
         sample_rate: f64,
@@ -45,9 +46,9 @@ use crate::clap_events::{
     hirari_clap_state_block,
 };
 use crate::clap_loader::{
-    hirari_clap_instance_destroy, hirari_clap_instance_load, hirari_clap_instance_plugin,
-    hirari_clap_instance_reset, hirari_clap_instance_state, hirari_plugin_resolve_image_path,
-    hirari_plugin_resolved_image_free,
+    hirari_clap_instance_destroy, hirari_clap_instance_latency, hirari_clap_instance_load,
+    hirari_clap_instance_plugin, hirari_clap_instance_reset, hirari_clap_instance_state,
+    hirari_plugin_resolve_image_path, hirari_plugin_resolved_image_free,
 };
 use crate::worker_runtime::{
     hirari_plugin_worker_apply_limits, hirari_plugin_worker_load_failure,
@@ -549,10 +550,25 @@ pub unsafe fn worker_entry(argc: i32, argv: *const *const c_char) -> i32 {
     } else {
         FORMAT_NONE
     };
+    // Publish the processor's reported latency for host-side PDC before
+    // READY, while the shared block is still exclusively owned here.
+    let latency_samples = match context.format {
+        FORMAT_CLAP => unsafe {
+            hirari_clap_instance_latency(context.clap_instance as *const c_void)
+        },
+        #[cfg(target_os = "macos")]
+        FORMAT_AUDIO_UNIT => unsafe { hirari_au_instance_latency(context.au_instance) },
+        #[cfg(vst3_sdk)]
+        FORMAT_VST3 => unsafe { hirari_worker_vst3_latency(context.vst3_instance) },
+        _ => 0,
+    };
     unsafe {
         (*context.mailbox)
             .midi_instrument
             .store(u8::from(midi_instrument), Ordering::Release);
+        (*context.mailbox)
+            .plugin_latency_samples
+            .store(latency_samples, Ordering::Release);
     }
     debug_log("sending ready");
     if !unsafe { send_status(status_fd, STATUS_READY) } {

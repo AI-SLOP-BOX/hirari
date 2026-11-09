@@ -66,6 +66,7 @@ pub unsafe extern "C" fn hirari_plugin_resolved_image_free(path: *mut c_char) {
 
 const PLUGIN_FACTORY_ID: &[u8] = b"clap.plugin-factory\0";
 const STATE_EXTENSION_ID: &[u8] = b"clap.state\0";
+const LATENCY_EXTENSION_ID: &[u8] = b"clap.plugin.latency\0";
 const HOST_NAME: &[u8] = b"hirari-sandbox\0";
 const HOST_VENDOR: &[u8] = b"Hirari\0";
 const HOST_URL: &[u8] = b"\0";
@@ -175,6 +176,11 @@ struct Entry {
 struct StateExtension {
     save: Option<unsafe extern "C" fn(*const Plugin, *const c_void) -> bool>,
     load: Option<unsafe extern "C" fn(*const Plugin, *const c_void) -> bool>,
+}
+
+#[repr(C)]
+struct LatencyExtension {
+    get: Option<unsafe extern "C" fn(*const Plugin) -> u32>,
 }
 
 const _: () = assert!(core::mem::size_of::<Host>() == 88);
@@ -426,6 +432,32 @@ pub unsafe extern "C" fn hirari_clap_instance_state(instance: *const c_void) -> 
         ptr::null()
     } else {
         (*instance.cast::<ClapInstance>()).state.cast()
+    }
+}
+
+/// Processor latency in samples via the `clap.plugin.latency` extension.
+/// Plugins without the extension report zero.
+#[no_mangle]
+pub unsafe extern "C" fn hirari_clap_instance_latency(instance: *const c_void) -> u32 {
+    if instance.is_null() {
+        return 0;
+    }
+    let plugin = (*instance.cast::<ClapInstance>()).plugin;
+    if plugin.is_null() {
+        return 0;
+    }
+    let get_extension = match (*plugin).get_extension {
+        Some(get_extension) => get_extension,
+        None => return 0,
+    };
+    let extension = get_extension(plugin, LATENCY_EXTENSION_ID.as_ptr().cast::<c_char>())
+        .cast::<LatencyExtension>();
+    if extension.is_null() {
+        return 0;
+    }
+    match (*extension).get {
+        Some(get) => get(plugin),
+        None => 0,
     }
 }
 

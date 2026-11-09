@@ -101,6 +101,7 @@ Notes:
 | E5 | `3218953` | Engine: 2× oversampling in the tube saturator using the existing all-pass oversampler. |
 | E6 | `e89148d` | Engine: LUFS-target normalization for queued offline exports — the orchestrator now measures gated integrated LUFS and applies the delivery gain (peak-capped) instead of plain peak normalization when `normalize` is set. |
 | E7 | `1d73b48` | Engine: project-end freeze now renders a 2 s processor tail beyond the last region, and unfreezing resets the live processors so stale delay/reverb state cannot leak back. |
+| E8 | (this work) | Engine: external plugin latency now reaches PDC. The mailbox ABI (v6) carries `plugin_latency_samples`; workers query it per format (CLAP latency extension, AU `kAudioUnitProperty_Latency`, VST3 `getLatencySamples`), the host captures it at READY, and the chain node reports it to the PDC solve. |
 | P1 | `b524bed` | Plugin: VST3 fixture compatibility now covers Surge XT effects plus the Vital instrument path (MIDI note-on produces audible output). |
 | R1 | `fad1332` (AmeUI) | Filed Hirari pt.6 requests: TimelineView controlled zoom/offset binding, marker/loop/selection edit events, and beat/bar ruler grids. |
 

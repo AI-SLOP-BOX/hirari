@@ -34,6 +34,11 @@ extern "C" void* hirari_worker_vst3_load(const char* path, double sampleRate,
     return runtime.release();
 }
 
+extern "C" uint32_t hirari_worker_vst3_latency(void* instance) {
+    auto* runtime = static_cast<Hirari::Core::Plugins::SandboxVST3::Runtime*>(instance);
+    return runtime ? runtime->latencySamples() : 0;
+}
+
 extern "C" void hirari_worker_vst3_destroy(void* instance) {
     delete static_cast<Hirari::Core::Plugins::SandboxVST3::Runtime*>(instance);
 }

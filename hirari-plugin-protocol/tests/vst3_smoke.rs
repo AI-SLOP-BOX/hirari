@@ -17,6 +17,7 @@ extern "C" {
         midi_instrument: *mut bool,
     ) -> *mut std::ffi::c_void;
     fn hirari_worker_vst3_destroy(instance: *mut std::ffi::c_void);
+    fn hirari_worker_vst3_latency(instance: *mut std::ffi::c_void) -> u32;
     fn hirari_worker_vst3_reset(
         instance: *mut std::ffi::c_void,
         sample_rate: f64,
@@ -58,6 +59,9 @@ fn load_render_state_cycle() {
     let mut midi = false;
     let instance = unsafe { hirari_worker_vst3_load(path.as_ptr(), 48_000.0, 512, &mut midi) };
     assert!(!instance.is_null(), "VST3 fixture failed to load");
+    // Latency query must answer without crashing (Surge reports a small
+    // oversampling latency; the value is bounded by the block size shape).
+    let _ = unsafe { hirari_worker_vst3_latency(instance) };
     assert!(unsafe { hirari_worker_vst3_reset(instance, 48_000.0, 1, 512) });
 
     let mut block: Box<SharedAudioBlock> = unsafe { Box::new_zeroed().assume_init() };

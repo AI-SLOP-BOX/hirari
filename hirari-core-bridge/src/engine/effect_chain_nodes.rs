@@ -241,7 +241,7 @@ impl ChainNode {
     pub fn latency_samples(&self) -> u32 {
         match &self.kind {
             NodeKind::Internal(host) => unsafe { hirari_native_plugin_host_latency_samples(*host) },
-            NodeKind::Sandbox(_) => 0,
+            NodeKind::Sandbox(node) => node.latency_samples(),
         }
     }
 

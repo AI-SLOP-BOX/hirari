@@ -509,6 +509,33 @@ pub unsafe extern "C" fn hirari_au_instance_reset(
     status_ok(unsafe { sys::AudioUnitReset(host.unit, sys::kAudioUnitScope_Global, 0) })
 }
 
+/// Processor latency in samples via `kAudioUnitProperty_Latency` (seconds).
+#[no_mangle]
+pub unsafe extern "C" fn hirari_au_instance_latency(instance: *mut c_void) -> u32 {
+    let Some(host) = (unsafe { instance.cast::<AuHost>().as_ref() }) else {
+        return 0;
+    };
+    if host.unit.is_null() || !host.sample_rate.is_finite() || host.sample_rate <= 0.0 {
+        return 0;
+    }
+    let mut seconds = 0.0f64;
+    let mut size = core::mem::size_of::<f64>() as u32;
+    let status = unsafe {
+        sys::AudioUnitGetProperty(
+            host.unit,
+            sys::kAudioUnitProperty_Latency as sys::AudioUnitPropertyID,
+            sys::kAudioUnitScope_Global,
+            0,
+            (&mut seconds as *mut f64).cast(),
+            &mut size,
+        )
+    };
+    if !status_ok(status) || !seconds.is_finite() || seconds <= 0.0 {
+        return 0;
+    }
+    (seconds * host.sample_rate).round() as u32
+}
+
 /// Projects one shared-mailbox block into the AudioUnit callbacks. Parameter
 /// changes are scheduled at their exact offsets immediately before
 /// `AudioUnitRender`; the input callback only fills channel pointers.

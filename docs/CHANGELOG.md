@@ -22,6 +22,11 @@ production support.
   delay/reverb state cannot leak into unfrozen playback.
 - VST3 fixture compatibility now also covers the Vital instrument path:
   a MIDI note-on produces audible output through the SDK adapter.
+- External plugin latency now feeds PDC. Workers query each format's
+  reported latency (CLAP latency extension, AU latency property, VST3
+  `getLatencySamples`) and publish it through the sandbox mailbox; the
+  chain reports it to the compensation solve. The mailbox ABI is bumped
+  to version 6.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.

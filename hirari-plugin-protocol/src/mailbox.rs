@@ -16,7 +16,7 @@ pub const MAX_STATE_BYTES: usize = crate::MAX_STATE_BYTES;
 /// Bounded ring for completed SysEx/MIDI 2.0 messages that cannot fit in the
 /// legacy 256-byte event slot.
 pub const EXTENDED_RING_BYTES: usize = crate::RING_STORAGE_BYTES;
-pub const AUDIO_BLOCK_PROTOCOL_VERSION: u32 = 5;
+pub const AUDIO_BLOCK_PROTOCOL_VERSION: u32 = 6;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -82,11 +82,14 @@ pub struct SharedAudioBlock {
     pub parameter_change: [WireParameterChange; MAX_PARAMETER_CHANGES],
     pub output_midi: [WireMidiEvent; MAX_MIDI_EVENTS],
     pub state: [u8; MAX_STATE_BYTES],
+    /// Processor latency in samples, as reported by the format adapter at
+    /// load time. The host reads it once after READY and feeds it into PDC.
+    pub plugin_latency_samples: AtomicU32,
 }
 
 // The host allocates exactly this many bytes for the mailbox, so a layout
 // change here must be made together with the request/response framing.
-const _: () = assert!(core::mem::size_of::<SharedAudioBlock>() == 9_142_656);
+const _: () = assert!(core::mem::size_of::<SharedAudioBlock>() == 9_142_720);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, request_sequence) == 8);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, heartbeat) == 24);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, frames) == 32);
@@ -103,6 +106,7 @@ const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, midi) == 4_325_760
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, parameter_change) == 4_604_288);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, output_midi) == 4_669_824);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, state) == 4_948_352);
+const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, plugin_latency_samples) == 9_142_656);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, input) % 64 == 0);
 const _: () = assert!(core::mem::offset_of!(SharedAudioBlock, extended_midi) % 64 == 0);
 

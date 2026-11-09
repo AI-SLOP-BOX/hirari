@@ -92,6 +92,12 @@ public:
         return true;
     }
 
+    uint32_t latencySamples() const noexcept {
+        if (!m_ready || !m_processor) return 0;
+        const auto latency = m_processor->getLatencySamples();
+        return latency > 0 ? static_cast<uint32_t>(latency) : 0;
+    }
+
     bool isMidiInstrument() const noexcept {
         return m_component &&
             m_component->getBusCount(Steinberg::Vst::kAudio, Steinberg::Vst::kInput) == 0 &&

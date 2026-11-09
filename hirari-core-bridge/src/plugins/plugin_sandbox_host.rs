@@ -169,6 +169,9 @@ pub struct SandboxHost {
     consecutive_overruns: AtomicU32,
     prepared_rate_bits: AtomicU64,
     prepared_block: AtomicU32,
+    /// Processor latency in samples, published by the worker at load time
+    /// and read by the PDC solve through the chain node.
+    latency_samples: AtomicU32,
     parameter_cache: crate::plugin_parameter_snapshot::Snapshot,
 }
 
@@ -259,6 +262,7 @@ impl SandboxHost {
             consecutive_overruns: AtomicU32::new(0),
             prepared_rate_bits: AtomicU64::new(normalized_rate.to_bits()),
             prepared_block: AtomicU32::new(max_block_size.clamp(1, MAX_FRAMES as u32)),
+            latency_samples: AtomicU32::new(0),
             parameter_cache: crate::plugin_parameter_snapshot::Snapshot::new(),
         })
     }
@@ -529,6 +533,15 @@ impl SandboxHost {
             }
             return false;
         }
+        // The worker publishes its reported latency before READY, while the
+        // host still owns the mapping exclusively.
+        let shared = self.shared();
+        let latency = if shared.is_null() {
+            0
+        } else {
+            unsafe { (*shared).plugin_latency_samples.load(Ordering::Acquire) }
+        };
+        self.latency_samples.store(latency, Ordering::Release);
 
         self.audio_state_mut().reset_for_new_worker();
         self.process_alive.store(true, Ordering::SeqCst);
@@ -1469,6 +1482,10 @@ impl SandboxHost {
         unsafe { (*shared).midi_instrument.load(Ordering::Acquire) != 0 }
     }
 
+    fn latency_samples(&self) -> u32 {
+        self.latency_samples.load(Ordering::Acquire)
+    }
+
     fn set_state(&self, data: &[u8]) -> bool {
         let mut control = lock_control(&self.control);
         let mut state = lock_control(&self.state);
@@ -2103,6 +2120,10 @@ pub mod chain {
 
         pub fn is_midi_instrument(&self) -> bool {
             self.host.is_midi_instrument()
+        }
+
+        pub fn latency_samples(&self) -> u32 {
+            self.host.latency_samples()
         }
 
         /// One realtime block. A false return tells the chain traversal to keep

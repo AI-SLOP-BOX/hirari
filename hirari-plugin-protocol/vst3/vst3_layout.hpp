@@ -31,7 +31,7 @@ inline constexpr uint32_t kMaxParameterChanges = 4096;
 inline constexpr uint32_t kMaxMidiPayloadBytes = 256;
 inline constexpr uint32_t kMaxStateBytes = 4u * 1024u * 1024u;
 inline constexpr uint32_t kStateProtocolVersion = 1u;
-inline constexpr uint32_t kAudioBlockProtocolVersion = 5u;
+inline constexpr uint32_t kAudioBlockProtocolVersion = 6u;
 // RING_STORAGE_BYTES in mailbox.rs: 4 slots * (16 + 1024*1024) + 128.
 inline constexpr std::size_t kRingStorageBytes = 4u * (16u + 1024u * 1024u) + 128u;
 
@@ -89,6 +89,7 @@ struct SharedAudioBlock {
     ParameterChange parameterChange[kMaxParameterChanges]{};
     MidiEvent outputMidi[kMaxMidiEvents]{};
     alignas(64) uint8_t state[kMaxStateBytes]{};
+    std::atomic<uint32_t> pluginLatencySamples{0};
 };
 
 static_assert(offsetof(SharedAudioBlock, requestSequence) == 8);
@@ -106,6 +107,7 @@ static_assert(offsetof(SharedAudioBlock, midi) == 4'325'760);
 static_assert(offsetof(SharedAudioBlock, parameterChange) == 4'604'288);
 static_assert(offsetof(SharedAudioBlock, outputMidi) == 4'669'824);
 static_assert(offsetof(SharedAudioBlock, state) == 4'948'352);
+static_assert(offsetof(SharedAudioBlock, pluginLatencySamples) == 9'142'656);
 static_assert(offsetof(SharedAudioBlock, input) % 64 == 0);
 static_assert(offsetof(SharedAudioBlock, extendedMidi) % 64 == 0);
 
