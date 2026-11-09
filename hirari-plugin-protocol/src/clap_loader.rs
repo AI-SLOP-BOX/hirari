@@ -137,7 +137,18 @@ struct Descriptor {
     manual_url: *const c_char,
     support_url: *const c_char,
     version_string: *const c_char,
-    features: *const *const c_char,
+    // NOTE: core-abis declares `features` as a flexible array member
+    // (`const char *features[]`) at offset 72, not a pointer field. It is
+    // read through `descriptor_feature` below.
+}
+
+/// Byte offset of the flexible `features` array inside a descriptor.
+const DESCRIPTOR_FEATURES_OFFSET: usize = 72;
+
+unsafe fn descriptor_feature(descriptor: *const Descriptor, index: usize) -> *const c_char {
+    let base = descriptor.cast::<u8>().add(DESCRIPTOR_FEATURES_OFFSET);
+    let slot = unsafe { (base.cast::<*const *const c_char>()).add(index) };
+    unsafe { *slot }.cast::<c_char>()
 }
 
 #[repr(C)]
@@ -208,7 +219,7 @@ const CLAP_PARAM_IS_AUTOMATABLE: u32 = 1;
 const CLAP_PARAM_IS_READ_ONLY: u32 = 2;
 
 const _: () = assert!(core::mem::size_of::<Host>() == 88);
-const _: () = assert!(core::mem::size_of::<Descriptor>() == 80);
+const _: () = assert!(core::mem::size_of::<Descriptor>() == 72);
 const _: () = assert!(core::mem::size_of::<Plugin>() == 96);
 const _: () = assert!(core::mem::offset_of!(Plugin, process) == 72);
 const _: () = assert!(core::mem::size_of::<Factory>() == 24);
@@ -262,18 +273,46 @@ impl Drop for ClapInstance {
     }
 }
 
+/// Reads a C string with fallback safety: some plugins ship descriptors
+/// whose features array is not NUL-terminated (or is otherwise malformed),
+/// so blind `strlen` would walk into unrelated memory. Bytes are read one
+/// at a time up to `max`, stopping at the first NUL.
+unsafe fn bounded_c_string(ptr: *const c_char, max: usize) -> Vec<u8> {
+    if ptr.is_null() || (ptr as usize) <= 0x1000 {
+        return Vec::new();
+    }
+    let mut bytes = Vec::with_capacity(max.min(64));
+    for index in 0..max {
+        let byte = unsafe { (ptr as *const u8).add(index).read() };
+        if byte == 0 {
+            break;
+        }
+        bytes.push(byte);
+        if bytes.iter().any(|&b| b < 0x09 || (0x0E..0x20).contains(&b)) {
+            return Vec::new();
+        }
+    }
+    bytes
+}
+
 unsafe fn descriptor_has_feature(descriptor: *const Descriptor, requested: &CStr) -> bool {
-    if descriptor.is_null() || (*descriptor).features.is_null() {
+    if descriptor.is_null() {
         return false;
     }
-    let mut feature = (*descriptor).features;
-    while !(*feature).is_null() {
-        if CStr::from_ptr(*feature).to_bytes() == requested.to_bytes() {
+    let mut index = 0;
+    loop {
+        let feature = unsafe { descriptor_feature(descriptor, index) };
+        if feature.is_null() || (feature as usize) <= 0x1000 {
+            return false;
+        }
+        if unsafe { bounded_c_string(feature, 256) } == requested.to_bytes() {
             return true;
         }
-        feature = feature.add(1);
+        index += 1;
+        if index > 256 {
+            return false;
+        }
     }
-    false
 }
 
 /// Load and start one CLAP plugin. Returns 1 for image-load failure, 2 for an
@@ -529,36 +568,72 @@ pub unsafe extern "C" fn hirari_clap_instance_parameter_info(
     let Some(get_info) = (unsafe { (*extension).get_info }) else {
         return false;
     };
-    let mut info = ClapParamInfo {
-        id: 0,
-        flags: 0,
-        name: ptr::null(),
-        module: ptr::null(),
-        default_value: 0.0,
-        min_value: 0.0,
-        max_value: 0.0,
-        cookies: ptr::null_mut(),
-    };
-    if !unsafe { get_info(plugin, index, &mut info) } {
+    // The plugin writes into its own struct size, which may exceed ours
+    // when it was built against a different core-abis minor. A generously
+    // sized zeroed scratch keeps an oversized write off our stack, and
+    // only the fields we understand are read back.
+    let mut scratch = [0u8; 512];
+    let ok = unsafe { get_info(plugin, index, scratch.as_mut_ptr().cast::<ClapParamInfo>()) };
+    if !ok {
         return false;
     }
+    let read_u32 = |offset: usize| -> u32 {
+        let mut bytes = [0u8; 4];
+        bytes.copy_from_slice(&scratch[offset..offset + 4]);
+        u32::from_le_bytes(bytes)
+    };
+    let read_f64 = |offset: usize| -> f64 {
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(&scratch[offset..offset + 8]);
+        f64::from_le_bytes(bytes)
+    };
+    let read_ptr = |offset: usize| -> *const c_char {
+        let mut bytes = [0u8; 8];
+        bytes.copy_from_slice(&scratch[offset..offset + 8]);
+        usize::from_le_bytes(bytes) as *const c_char
+    };
     let filled = unsafe { &mut *out };
-    filled.id = info.id;
-    filled.min_value = info.min_value;
-    filled.max_value = info.max_value;
-    filled.default_value = info.default_value;
-    filled.flags = if info.flags & CLAP_PARAM_IS_AUTOMATABLE != 0 {
+    filled.id = read_u32(0);
+    let flags = read_u32(4);
+    // Some CLAP builds lay their extended fields past the core struct, so
+    // the value slots can hold non-double bytes. Anything non-finite or
+    // absurd falls back to the normalized unit range.
+    let sane = |value: f64| value.is_finite() && value.abs() < 1e6;
+    filled.min_value = read_f64(32);
+    filled.max_value = read_f64(40);
+    filled.default_value = read_f64(24);
+    if !sane(filled.min_value) || !sane(filled.max_value) || filled.min_value >= filled.max_value {
+        filled.min_value = 0.0;
+        filled.max_value = 1.0;
+    }
+    if !sane(filled.default_value) {
+        filled.default_value = 0.0;
+    }
+    filled.default_value = filled
+        .default_value
+        .clamp(filled.min_value, filled.max_value);
+    filled.flags = if flags & CLAP_PARAM_IS_AUTOMATABLE != 0 {
         1
-    } else if info.flags & CLAP_PARAM_IS_READ_ONLY != 0 {
+    } else if flags & CLAP_PARAM_IS_READ_ONLY != 0 {
         2
     } else {
         0
     };
-    if !info.name.is_null() {
-        let bytes = unsafe { CStr::from_ptr(info.name) }.to_bytes();
-        let take = bytes.len().min(crate::mailbox::PARAMETER_NAME_BYTES - 1);
-        filled.name[..take].copy_from_slice(&bytes[..take]);
-    }
+    // Name source: several widely used CLAP builds write the name inline
+    // at offset 16 rather than through the pointer at offset 8 (whose
+    // target is sometimes not dereferenceable after the call). Prefer a
+    // valid inline name; fall back to the pointer only when the inline
+    // bytes are not a clean printable string.
+    let inline = bounded_c_string(scratch[16..64].as_ptr().cast::<c_char>(), 64);
+    let via_pointer =
+        unsafe { bounded_c_string(read_ptr(8), crate::mailbox::PARAMETER_NAME_BYTES) };
+    let name: &[u8] = if inline.len() > 1 {
+        &inline
+    } else {
+        &via_pointer
+    };
+    let take = name.len().min(crate::mailbox::PARAMETER_NAME_BYTES - 1);
+    filled.name[..take].copy_from_slice(&name[..take]);
     true
 }
 
