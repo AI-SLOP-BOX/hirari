@@ -136,6 +136,16 @@ Not yet (suggested order):
    default entry in `hirari-ui/src/main.rs`, delete the Slint stack,
    and drop the `slint-wgpu` feature wiring.
 
+## Upstream continuity (2026-11-09)
+
+The AmeUI side may get a new maintainer, so API conventions can shift
+(release cadence, widget patterns, even the `.ame` idioms). Until the
+new owner settles, treat freshly landed APIs as volatile: verify every
+adoption against a clean AmeUI HEAD, keep the neutral layer
+(`ui/arrange_model.rs`) thin and backend-agnostic, and record adopted
+status in `AmeUI/REQUESTS.md` so a convention change is visible in the
+diff before Hirari follows it.
+
 ## Framework discoveries (verified 2026-11-08)
 
 Already available in AmeUI, no request needed: native menu bar
