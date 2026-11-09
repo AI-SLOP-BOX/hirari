@@ -40,6 +40,13 @@ production support.
 - Sandbox chain nodes cache probe results, so parameter counts, names
   and defaults now flow to the UI snapshot and automation lanes for
   external plugins; writes already flowed through the mailbox.
+- CLAP hosting compatibility on real plugins. The descriptor `features`
+  array was modeled as a pointer field instead of core-abis' flexible
+  array member, which misaligned every lookup after the minimal fixture;
+  feature and parameter strings are now read with bounded fallback
+  checks, and param records land in a scratch sized for other core-abis
+  minors. Surge XT and Vital now load and enumerate through the same
+  paths the worker uses in production.
 - Reproducible Rust toolchain selection and one-command developer setup.
 - Strict dependency lockfile use in CI.
 - Public contribution and security policies.
