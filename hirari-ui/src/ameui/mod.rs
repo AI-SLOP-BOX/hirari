@@ -273,6 +273,10 @@ pub struct HirariAmeApp {
     moufu_has_outbound: std::sync::atomic::AtomicBool,
     /// Moufu card toggle.
     show_moufu: State<bool>,
+    /// Loudness snapshots polled from the engine (mastering readouts).
+    integrated_lufs: State<f32>,
+    true_peak_l: State<f32>,
+    true_peak_r: State<f32>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -434,6 +438,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         moufu_remote_versions: std::sync::Mutex::new(std::collections::HashMap::new()),
         moufu_has_outbound: std::sync::atomic::AtomicBool::new(false),
         show_moufu: context.state(false),
+        integrated_lufs: context.state(-120.0f32),
+        true_peak_l: context.state(-120.0f32),
+        true_peak_r: context.state(-120.0f32),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
@@ -868,6 +875,9 @@ impl HirariAmeApp {
             .set(core.samples_to_beats(core.get_playhead()));
 
         let loudness = core.get_master_loudness();
+        self.integrated_lufs.set(loudness.integrated);
+        self.true_peak_l.set(loudness.true_peak_l);
+        self.true_peak_r.set(loudness.true_peak_r);
         let peak = 10.0f32
             .powf(loudness.true_peak_l / 20.0)
             .max(10.0f32.powf(loudness.true_peak_r / 20.0))
@@ -4675,6 +4685,23 @@ impl App for HirariAmeApp {
             return View::VStack(vec![project_bar, genesis]);
         }
 
+        let integrated_lufs = self.integrated_lufs.get();
+        let true_peak_l = self.true_peak_l.get();
+        let true_peak_r = self.true_peak_r.get();
+        let integrated_label = if integrated_lufs <= -119.0 {
+            "— LUFS".to_owned()
+        } else {
+            format!("{integrated_lufs:.1} LUFS")
+        };
+        let master_card = View::Card(vec![View::HStack(vec![
+            View::Text("MASTER".to_owned()),
+            View::Caption(format!("GAIN {:.2}", self.master_gain.get())),
+            View::Caption(integrated_label),
+            View::Caption(format!(
+                "TP L {true_peak_l:.1} dBTP · R {true_peak_r:.1} dBTP"
+            )),
+            View::Caption("Target −14 LUFS / −1 dBTP".to_owned()),
+        ])]);
         let mut views = vec![project_bar];
         if self.show_diagnostics.get() {
             views.push(diagnostics_card);
@@ -4686,6 +4713,7 @@ impl App for HirariAmeApp {
             export_card,
             transport,
             meter,
+            master_card,
             audio_card,
             arrange_toolbar,
             View::canvas("waveform").frame(None, Some(168)),
