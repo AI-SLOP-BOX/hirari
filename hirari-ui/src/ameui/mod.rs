@@ -242,6 +242,10 @@ pub struct HirariAmeApp {
     /// Caption shown inside the export card (render state / progress /
     /// stem counts).
     render_caption: State<String>,
+    /// System diagnostics panel toggle (Slint diagnostics page).
+    show_diagnostics: State<bool>,
+    /// Accumulated AU watchdog trips (engine polls since connect).
+    watchdog_trips: State<u32>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -377,6 +381,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         export_tail_index: context.state(2u32),
         stem_export_active: context.state(false),
         render_caption: context.state(String::new()),
+        show_diagnostics: context.state(false),
+        watchdog_trips: context.state(0u32),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
@@ -546,6 +552,12 @@ impl HirariAmeApp {
             return;
         };
         self.poll_render();
+        // Diagnostics counters accumulate from the engine every tick.
+        self.watchdog_trips.set(
+            self.watchdog_trips
+                .get()
+                .saturating_add(core.take_watchdog_trips()),
+        );
         self.playing.set(core.is_playing());
         self.audio_ready.set(core.is_audio_device_ready());
         self.io_latency_ms
@@ -2515,11 +2527,23 @@ impl App for HirariAmeApp {
                     new_status.set("NEW PROJECT".to_owned());
                 }
             });
+        let diagnostics_open_for_button = self.show_diagnostics.clone();
+        let diagnostics_button = ButtonView::new(if self.show_diagnostics.get() {
+            "SYSTEMS CLOSE"
+        } else {
+            "SYSTEM"
+        })
+        .action_id("diagnostics.toggle")
+        .secondary()
+        .on_press(move |_| {
+            diagnostics_open_for_button.set(!diagnostics_open_for_button.get());
+        });
         let project_bar = View::Card(vec![View::HStack(vec![
             View::Text("PROJECT".to_owned()),
             open_button.into(),
             save_button.into(),
             new_button.into(),
+            diagnostics_button.into(),
             View::Caption(status.clone()),
         ])]);
 
@@ -2632,6 +2656,63 @@ impl App for HirariAmeApp {
             cancel_button.into(),
             View::Caption(self.render_caption.get()),
         ])]);
+
+        // Diagnostics card (Slint diagnostics page parity): engine, audio
+        // drops/overruns, plugin sandbox health and range overflow.
+        // AboutSlint attribution is intentionally not ported.
+        let diagnostics_card = if let Some(core) = &self.core {
+            let health = core.runtime_health_snapshot();
+            let state = core.runtime_health_status_text();
+            let overruns: u32 = core
+                .sandbox_snapshots()
+                .iter()
+                .map(|snapshot| snapshot.mailbox_overruns)
+                .sum();
+            let drops = core.get_dropped_input_blocks();
+            let failures = health.sandbox_failures;
+            let watchdog = self.watchdog_trips.get();
+            let recover_core = self.core.clone();
+            let recover_status = self.status.clone();
+            let recover_button = ButtonView::new("RECOVER")
+                .action_id("diagnostics.recover")
+                .secondary()
+                .on_press(move |_| {
+                    if let Some(core) = &recover_core {
+                        let recovered = core.recover_sandboxed_plugins();
+                        recover_status.set(format!(
+                            "RECOVERY REQUESTED · {recovered} PLUGIN(S) RECOVERED"
+                        ));
+                    }
+                });
+            let cpu = health.dsp_load.clamp(0.0, 4.0) * 25.0;
+            let range_label = if health.audio_range_overflow {
+                "RANGE OVERFLOW"
+            } else {
+                "RANGE OK"
+            };
+            let mut rows = vec![
+                View::Text(format!("SYSTEM · {state}")),
+                View::HStack(vec![
+                    View::Caption(format!("CPU {cpu:.0}%")),
+                    View::Caption(format!("DROP {drops}")),
+                    View::Caption(format!("OVERRUN {overruns}")),
+                    View::Caption(format!("FAIL {failures}")),
+                    View::Caption(format!("WATCHDOG {watchdog}")),
+                    View::Caption(range_label.to_owned()),
+                    recover_button.into(),
+                ]),
+            ];
+            if health.audio_silent_fallback
+                || matches!(health.audio_driver_status, "start-failed" | "unavailable")
+            {
+                rows.push(View::Caption(
+                    "No audio path — check device, sample rate, buffer, cable.".to_owned(),
+                ));
+            }
+            View::Card(rows)
+        } else {
+            View::Card(vec![View::Text("SYSTEM · no engine".to_owned())])
+        };
 
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
@@ -4065,8 +4146,11 @@ impl App for HirariAmeApp {
             return View::VStack(vec![project_bar, genesis]);
         }
 
-        let mut views = vec![
-            project_bar,
+        let mut views = vec![project_bar];
+        if self.show_diagnostics.get() {
+            views.push(diagnostics_card);
+        }
+        views.extend([
             export_card,
             transport,
             meter,
@@ -4075,7 +4159,7 @@ impl App for HirariAmeApp {
             View::canvas("waveform").frame(None, Some(168)),
             arrange_timeline,
             View::canvas("arrange").grow(3),
-        ];
+        ]);
         if let Some(inspector) = inspector {
             views.push(inspector);
         }
