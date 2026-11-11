@@ -74,6 +74,8 @@ use crate::ui_shared::arrange_model::{
     ARRANGE_ZOOM_MIN,
 };
 use crate::ui_shared::gpu_canvas::PlotFrameStore;
+use crate::ui_shared::moufu_connection::{load_moufu_address, save_moufu_address};
+use crate::ui_shared::moufu_preview::{accept_moufu_version, linked_project_preview};
 use crate::ui_shared::plot_raster;
 use crate::ui_shared::render_ops::{
     cancellation_status, kick_stem, prepare_rejected, render_format_label, render_tail_seconds,
@@ -82,6 +84,10 @@ use crate::ui_shared::render_ops::{
 use crate::ui_shared::render_path::default_render_output_path;
 use crate::ui_shared::template_starter::create_template_project;
 use hirari_core_bridge::project_contracts::MidiNoteContract;
+use hirari_moufu_adapter::{
+    LinkStatus, MoufuEvent, HIRARI_PROJECT_DATA_TYPE, HIRARI_PROJECT_ENTITY,
+};
+use std::sync::atomic::Ordering;
 
 /// Snap divisions offered by the toolbar picker (Slint `snap_val`
 /// denominators; the step is 4 beats / division, so 1/16 snaps to 0.25).
@@ -246,6 +252,27 @@ pub struct HirariAmeApp {
     show_diagnostics: State<bool>,
     /// Accumulated AU watchdog trips (engine polls since connect).
     watchdog_trips: State<u32>,
+    /// Moufu Hub current address typed in the link card; empty until
+    /// configured. Persisted via ui_shared::moufu_connection.
+    moufu_address: State<String>,
+    moufu_status: State<String>,
+    moufu_entity_labels: State<Vec<String>>,
+    moufu_entity_ids: State<Vec<String>>,
+    moufu_entity_selected: State<u32>,
+    moufu_link_labels: State<Vec<String>>,
+    moufu_link_ids: State<Vec<String>>,
+    moufu_link_selected: State<u32>,
+    moufu_preview: State<String>,
+    moufu_remote_source: State<String>,
+    /// Moufu connector; None in smoke/headless mode.
+    moufu_publisher: Option<hirari_moufu_adapter::MoufuPublisher>,
+    moufu_outbound_link_ids: std::sync::Mutex<std::collections::HashSet<String>>,
+    moufu_last_revision: std::sync::Mutex<Option<u64>>,
+    moufu_remote_versions: std::sync::Mutex<std::collections::HashMap<String, (u64, bool)>>,
+    /// Outbound link gating the cadenced snapshot publication.
+    moufu_has_outbound: std::sync::atomic::AtomicBool,
+    /// Moufu card toggle.
+    show_moufu: State<bool>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -383,6 +410,30 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         render_caption: context.state(String::new()),
         show_diagnostics: context.state(false),
         watchdog_trips: context.state(0u32),
+        moufu_address: context.state(load_moufu_address().unwrap_or_default()),
+        moufu_status: context.state("MOUFU NOT CONFIGURED".to_owned()),
+        moufu_entity_labels: context.state(Vec::new()),
+        moufu_entity_ids: context.state(Vec::new()),
+        moufu_entity_selected: context.state(0u32),
+        moufu_link_labels: context.state(Vec::new()),
+        moufu_link_ids: context.state(Vec::new()),
+        moufu_link_selected: context.state(0u32),
+        moufu_preview: context.state("No linked project state received.".to_owned()),
+        moufu_remote_source: context.state(String::new()),
+        // The connector is started with the same env var+settings the Slint
+        // app honors (HIRARI_MOUFU_ADDR, else the persisted address).
+        moufu_publisher: hirari_moufu_adapter::MoufuPublisher::start_from_env().map(|publisher| {
+            let address = load_moufu_address().unwrap_or_default();
+            if !address.trim().is_empty() {
+                let _ = publisher.set_address(Some(address.trim()));
+            }
+            publisher
+        }),
+        moufu_outbound_link_ids: std::sync::Mutex::new(std::collections::HashSet::new()),
+        moufu_last_revision: std::sync::Mutex::new(None),
+        moufu_remote_versions: std::sync::Mutex::new(std::collections::HashMap::new()),
+        moufu_has_outbound: std::sync::atomic::AtomicBool::new(false),
+        show_moufu: context.state(false),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
@@ -547,11 +598,258 @@ impl HirariAmeApp {
         }
     }
 
+    /// Moufu connector poll. Same event discipline as the Slint dock's live
+    /// link timer: publish the snapshot when it changes while an outbound
+    /// link is registered, and mirror the queue effects into the card.
+    /// Runs every 8th tick (~250ms) so the drain does not contend with the
+    /// 30 Hz engine poll.
+    fn poll_moufu(&mut self) {
+        let Some(publisher) = self.moufu_publisher.clone() else {
+            return;
+        };
+        if self.tick % 8 != 0 {
+            return;
+        }
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        if self.moufu_has_outbound.load(Ordering::Acquire) {
+            let revision = core.project_layout_revision();
+            let should_publish = self
+                .moufu_last_revision
+                .lock()
+                .map(|last| *last != Some(revision))
+                .unwrap_or(true);
+            if should_publish {
+                crate::ui_shared::moufu_layout::publish_project_snapshot(
+                    &publisher,
+                    &core,
+                    Vec::new(),
+                    true,
+                );
+                if let Ok(mut last) = self.moufu_last_revision.lock() {
+                    *last = Some(revision);
+                }
+            }
+        }
+        for event in publisher.drain_events() {
+            match event {
+                MoufuEvent::ConnectionConfigured { enabled } => {
+                    self.moufu_outbound_link_ids
+                        .lock()
+                        .map(|mut set| set.clear())
+                        .unwrap_or(());
+                    self.moufu_has_outbound.store(false, Ordering::Release);
+                    self.moufu_last_revision
+                        .lock()
+                        .map(|mut rev| *rev = None)
+                        .unwrap_or(());
+                    self.moufu_remote_versions
+                        .lock()
+                        .map(|mut remote| remote.clear())
+                        .unwrap_or(());
+                    self.moufu_entity_labels.set(Vec::new());
+                    self.moufu_entity_ids.set(Vec::new());
+                    self.moufu_link_labels.set(Vec::new());
+                    self.moufu_link_ids.set(Vec::new());
+                    self.moufu_entity_selected.set(0);
+                    self.moufu_link_selected.set(0);
+                    self.moufu_remote_source.set(String::new());
+                    self.moufu_preview
+                        .set("No linked project state received.".to_owned());
+                    self.moufu_status.set(if enabled {
+                        "MOUFU CONNECTING".to_owned()
+                    } else {
+                        "MOUFU NOT CONFIGURED".to_owned()
+                    });
+                }
+                MoufuEvent::Connected { server_version } => {
+                    log::info!("Connected to Moufu server {server_version}");
+                    self.moufu_status.set("MOUFU CONNECTED".to_owned());
+                    let _ = publisher.list_entities();
+                    let _ = publisher.list_links();
+                }
+                MoufuEvent::Disconnected { reason } => {
+                    log::debug!("Moufu reconnect scheduled: {reason}");
+                    self.moufu_outbound_link_ids
+                        .lock()
+                        .map(|mut set| set.clear())
+                        .unwrap_or(());
+                    self.moufu_has_outbound.store(false, Ordering::Release);
+                    self.moufu_last_revision
+                        .lock()
+                        .map(|mut rev| *rev = None)
+                        .unwrap_or(());
+                    self.moufu_status.set("MOUFU RECONNECTING".to_owned());
+                    self.status
+                        .set(format!("MOUFU INTERRUPTED; RETRYING: {reason}"));
+                }
+                MoufuEvent::EntityList(entities) => {
+                    let project_entities: Vec<_> = entities
+                        .iter()
+                        .filter(|entity| {
+                            entity.data_type == HIRARI_PROJECT_DATA_TYPE
+                                && entity.id.0 != HIRARI_PROJECT_ENTITY
+                        })
+                        .collect();
+                    let labels: Vec<String> = project_entities
+                        .iter()
+                        .map(|entity| {
+                            format!("{} · {} · {}", entity.source_app, entity.name, entity.id.0)
+                        })
+                        .collect();
+                    let ids: Vec<String> = project_entities
+                        .iter()
+                        .map(|entity| entity.id.0.clone())
+                        .collect();
+                    let count = labels.len();
+                    if !labels.is_empty() {
+                        self.moufu_entity_selected.set(0);
+                    }
+                    self.moufu_entity_labels.set(labels);
+                    self.moufu_entity_ids.set(ids);
+                    self.moufu_status
+                        .set(format!("MOUFU CONNECTED · {count} PROJECT ENTITIES"));
+                }
+                MoufuEvent::LinkList(links) => {
+                    let outbound: HashSet<String> = links
+                        .iter()
+                        .filter(|link| {
+                            link.source_entity.0 == HIRARI_PROJECT_ENTITY
+                                && link.target_entity.0 != HIRARI_PROJECT_ENTITY
+                                && link.status == LinkStatus::Active
+                        })
+                        .map(|link| link.link_id.to_string())
+                        .collect();
+                    let had_new = outbound.iter().any(|id| {
+                        self.moufu_outbound_link_ids
+                            .lock()
+                            .map(|set| !set.contains(id))
+                            .unwrap_or(true)
+                    });
+                    if had_new {
+                        // A freshly linked peer needs the current snapshot
+                        // even when the project has not moved.
+                        let _ = publisher.republish_latest_layout();
+                        if let Ok(mut rev) = self.moufu_last_revision.lock() {
+                            *rev = Some(core.project_layout_revision());
+                        }
+                    }
+                    if outbound.is_empty() {
+                        self.moufu_last_revision
+                            .lock()
+                            .map(|mut rev| *rev = None)
+                            .unwrap_or(());
+                    }
+                    if let Ok(mut set) = self.moufu_outbound_link_ids.lock() {
+                        *set = outbound.clone();
+                    }
+                    self.moufu_has_outbound
+                        .store(!outbound.is_empty(), Ordering::Release);
+                    let relevant: Vec<_> = links
+                        .iter()
+                        .filter(|link| {
+                            link.source_entity.0 == HIRARI_PROJECT_ENTITY
+                                || link.target_entity.0 == HIRARI_PROJECT_ENTITY
+                        })
+                        .collect();
+                    let labels: Vec<String> = relevant
+                        .iter()
+                        .map(|link| {
+                            format!(
+                                "{} → {} · {:?}",
+                                link.source_entity.0, link.target_entity.0, link.status
+                            )
+                        })
+                        .collect();
+                    let ids: Vec<String> = relevant
+                        .iter()
+                        .map(|link| link.link_id.to_string())
+                        .collect();
+                    let count = labels.len();
+                    if !labels.is_empty() {
+                        self.moufu_link_selected.set(0);
+                    }
+                    // Forget snapshots for sources whose links went away.
+                    let inbound_sources: HashSet<&str> = links
+                        .iter()
+                        .filter(|link| {
+                            link.target_entity.0 == HIRARI_PROJECT_ENTITY
+                                && link.status == LinkStatus::Active
+                        })
+                        .map(|link| link.source_entity.0.as_str())
+                        .collect();
+                    if let Ok(mut versions) = self.moufu_remote_versions.lock() {
+                        versions.retain(|source, _| inbound_sources.contains(source.as_str()));
+                    }
+                    self.moufu_entity_ids.get();
+                    let remote_source = self.moufu_remote_source.get();
+                    if !remote_source.is_empty()
+                        && !inbound_sources.contains(remote_source.as_str())
+                    {
+                        self.moufu_remote_source.set(String::new());
+                        self.moufu_preview
+                            .set("No active inbound project link.".to_owned());
+                    }
+                    self.moufu_link_labels.set(labels);
+                    self.moufu_link_ids.set(ids);
+                    self.moufu_status
+                        .set(format!("MOUFU CONNECTED · {count} PROJECT LINKS"));
+                }
+                MoufuEvent::EntityUpdated(change) => {
+                    let accepted = self
+                        .moufu_remote_versions
+                        .lock()
+                        .map(|mut versions| {
+                            accept_moufu_version(
+                                &mut versions,
+                                &change.entity_id.0,
+                                change.version,
+                                change.is_transient,
+                            )
+                        })
+                        .unwrap_or(false);
+                    if accepted {
+                        let (source, preview) = linked_project_preview(
+                            &change.entity_id.0,
+                            change.version,
+                            change.is_transient,
+                            &change.payload,
+                        );
+                        self.moufu_remote_source.set(source);
+                        self.moufu_preview.set(preview);
+                    }
+                }
+                MoufuEvent::EntityState {
+                    entity_id,
+                    version,
+                    payload,
+                } => {
+                    let accepted = self
+                        .moufu_remote_versions
+                        .lock()
+                        .map(|mut versions| {
+                            accept_moufu_version(&mut versions, &entity_id.0, version, false)
+                        })
+                        .unwrap_or(false);
+                    if accepted {
+                        let (source, preview) =
+                            linked_project_preview(&entity_id.0, version, false, &payload);
+                        self.moufu_remote_source.set(source);
+                        self.moufu_preview.set(preview);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn poll_engine(&mut self) {
         let Some(core) = self.core.clone() else {
             return;
         };
         self.poll_render();
+        self.poll_moufu();
         // Diagnostics counters accumulate from the engine every tick.
         self.watchdog_trips.set(
             self.watchdog_trips
@@ -2538,12 +2836,24 @@ impl App for HirariAmeApp {
         .on_press(move |_| {
             diagnostics_open_for_button.set(!diagnostics_open_for_button.get());
         });
+        let moufu_open_for_button = self.show_moufu.clone();
+        let moufu_button = ButtonView::new(if self.show_moufu.get() {
+            "MOUFU CLOSE"
+        } else {
+            "MOUFU"
+        })
+        .action_id("moufu.toggle")
+        .secondary()
+        .on_press(move |_| {
+            moufu_open_for_button.set(!moufu_open_for_button.get());
+        });
         let project_bar = View::Card(vec![View::HStack(vec![
             View::Text("PROJECT".to_owned()),
             open_button.into(),
             save_button.into(),
             new_button.into(),
             diagnostics_button.into(),
+            moufu_button.into(),
             View::Caption(status.clone()),
         ])]);
 
@@ -2712,6 +3022,225 @@ impl App for HirariAmeApp {
             View::Card(rows)
         } else {
             View::Card(vec![View::Text("SYSTEM · no engine".to_owned())])
+        };
+
+        // Moufu card (Slint moufu_link_page parity): Hub address,
+        // connect/disconnect, entity share/receive, links list and
+        // read-only linked-project preview.
+        let moufu_card = {
+            let address_state = self.moufu_address.clone();
+            let address_change = address_state.clone();
+            let address_field = TextFieldView::new(
+                self.moufu_address.get(),
+                "Moufu Hub address (e.g. 127.0.0.1:9478)",
+            )
+            .change_action_id("moufu.address_change")
+            .submit_action_id("moufu.address_change")
+            .on_change(move |value| address_change.set(value))
+            .on_submit(|| {});
+            let connect_state = self.moufu_address.clone();
+            let connect_publisher = self.moufu_publisher.clone();
+            let connect_status = self.moufu_status.clone();
+            let connect_button = ButtonView::new("CONNECT")
+                .action_id("moufu.connect")
+                .primary()
+                .on_press(move |_| {
+                    let address = connect_state.get().trim().to_owned();
+                    if address.len() > 1024 {
+                        connect_status.set("MOUFU ADDRESS IS TOO LONG".to_owned());
+                        return;
+                    }
+                    match &connect_publisher {
+                        Some(publisher) => {
+                            let target = (!address.is_empty()).then_some(address.as_str());
+                            match publisher.set_address(target) {
+                                Ok(()) => {
+                                    let _ = save_moufu_address(&address);
+                                    connect_status.set(if address.is_empty() {
+                                        "MOUFU NOT CONFIGURED".to_owned()
+                                    } else {
+                                        "MOUFU CONNECTING".to_owned()
+                                    });
+                                }
+                                Err(error) => {
+                                    connect_status
+                                        .set(format!("MOUFU CONFIGURATION FAILED: {error}"));
+                                }
+                            }
+                        }
+                        None => connect_status.set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                    }
+                });
+            let disconnect_state = self.moufu_address.clone();
+            let disconnect_publisher = self.moufu_publisher.clone();
+            let disconnect_status = self.moufu_status.clone();
+            let disconnect_button =
+                ButtonView::new("DISCONNECT")
+                    .action_id("moufu.disconnect")
+                    .secondary()
+                    .on_press(move |_| {
+                        disconnect_state.set(String::new());
+                        let _ = save_moufu_address("");
+                        match &disconnect_publisher {
+                            Some(publisher) => match publisher.set_address(None) {
+                                Ok(()) => disconnect_status.set("MOUFU NOT CONFIGURED".to_owned()),
+                                Err(error) => disconnect_status
+                                    .set(format!("MOUFU DISCONNECT FAILED: {error}")),
+                            },
+                            None => disconnect_status
+                                .set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                        }
+                    });
+            let refresh_publisher = self.moufu_publisher.clone();
+            let refresh_status = self.moufu_status.clone();
+            let refresh_button = ButtonView::new("REFRESH")
+                .action_id("moufu.refresh")
+                .secondary()
+                .on_press(move |_| match &refresh_publisher {
+                    Some(publisher) => {
+                        let entities = publisher.list_entities();
+                        let links = publisher.list_links();
+                        if let Err(error) = entities.and(links) {
+                            refresh_status.set(format!("MOUFU REFRESH FAILED: {error}"));
+                        }
+                    }
+                    None => refresh_status.set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                });
+            let entity_labels = self.moufu_entity_labels.get();
+            let entity_count = entity_labels.len() as u32;
+            let entity_index = self
+                .moufu_entity_selected
+                .get()
+                .min(entity_count.saturating_sub(1));
+            let entity_name = entity_labels
+                .get(entity_index as usize)
+                .cloned()
+                .unwrap_or_else(|| "no entities".to_owned());
+            let cycle_label = format!("ENT {entity_index}/{}", entity_count.max(1));
+            let entity_selected_state = self.moufu_entity_selected.clone();
+            let entity_cycle_button = ButtonView::new(cycle_label)
+                .action_id("moufu.entity_cycle")
+                .secondary()
+                .on_press(move |_| {
+                    if entity_count > 0 {
+                        entity_selected_state.set((entity_selected_state.get() + 1) % entity_count);
+                    }
+                });
+            let share_publisher = self.moufu_publisher.clone();
+            let share_ids = self.moufu_entity_ids.clone();
+            let share_selected = self.moufu_entity_selected.clone();
+            let share_status = self.moufu_status.clone();
+            let share_button = ButtonView::new("SHARE")
+                .action_id("moufu.share")
+                .secondary()
+                .on_press(move |_| {
+                    let ids = share_ids.get();
+                    let target = ids.get(share_selected.get() as usize).cloned();
+                    let Some(target) = target else { return };
+                    match &share_publisher {
+                        Some(publisher) => {
+                            if let Err(error) =
+                                publisher.create_link(HIRARI_PROJECT_ENTITY, &target)
+                            {
+                                share_status.set(format!("MOUFU SHARE FAILED: {error}"));
+                            }
+                        }
+                        None => share_status.set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                    }
+                });
+            let receive_publisher = self.moufu_publisher.clone();
+            let receive_ids = self.moufu_entity_ids.clone();
+            let receive_selected = self.moufu_entity_selected.clone();
+            let receive_status = self.moufu_status.clone();
+            let receive_button = ButtonView::new("RECEIVE")
+                .action_id("moufu.receive")
+                .secondary()
+                .on_press(move |_| {
+                    let ids = receive_ids.get();
+                    let source = ids.get(receive_selected.get() as usize).cloned();
+                    let Some(source) = source else { return };
+                    match &receive_publisher {
+                        Some(publisher) => {
+                            if let Err(error) =
+                                publisher.create_link(&source, HIRARI_PROJECT_ENTITY)
+                            {
+                                receive_status.set(format!("MOUFU RECEIVE FAILED: {error}"));
+                            }
+                        }
+                        None => receive_status.set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                    }
+                });
+            let link_labels = self.moufu_link_labels.get();
+            let link_count = link_labels.len() as u32;
+            let link_index = self
+                .moufu_link_selected
+                .get()
+                .min(link_count.saturating_sub(1));
+            let link_name = link_labels
+                .get(link_index as usize)
+                .cloned()
+                .unwrap_or_else(|| "no links".to_owned());
+            let link_cycle = format!("LINK {link_index}/{}", link_count.max(1));
+            let link_selected_state = self.moufu_link_selected.clone();
+            let link_cycle_button = ButtonView::new(link_cycle)
+                .action_id("moufu.link_cycle")
+                .secondary()
+                .on_press(move |_| {
+                    if link_count > 0 {
+                        link_selected_state.set((link_selected_state.get() + 1) % link_count);
+                    }
+                });
+            let unlink_publisher = self.moufu_publisher.clone();
+            let unlink_ids = self.moufu_link_ids.clone();
+            let unlink_selected = self.moufu_link_selected.clone();
+            let unlink_status = self.moufu_status.clone();
+            let unlink_button = ButtonView::new("REMOVE LINK")
+                .action_id("moufu.unlink")
+                .secondary()
+                .on_press(move |_| {
+                    let ids = unlink_ids.get();
+                    let link_id = ids.get(unlink_selected.get() as usize).cloned();
+                    let Some(link_id) = link_id else { return };
+                    match &unlink_publisher {
+                        Some(publisher) => {
+                            if let Err(error) = publisher.destroy_link(&link_id) {
+                                unlink_status.set(format!("MOUFU REMOVE LINK FAILED: {error}"));
+                            }
+                        }
+                        None => unlink_status.set("MOUFU UNAVAILABLE IN THIS RUN MODE".to_owned()),
+                    }
+                });
+            View::Card(vec![
+                View::Text("MOUFU HUB".to_owned()),
+                View::HStack(vec![
+                    address_field.into(),
+                    connect_button.into(),
+                    disconnect_button.into(),
+                    refresh_button.into(),
+                ]),
+                View::Caption(self.moufu_status.get()),
+                View::HStack(vec![
+                    View::Caption(format!("ENT: {entity_name}")),
+                    entity_cycle_button.into(),
+                    share_button.into(),
+                    receive_button.into(),
+                ]),
+                View::HStack(vec![
+                    View::Caption(format!("LINK: {link_name}")),
+                    link_cycle_button.into(),
+                    unlink_button.into(),
+                ]),
+                View::Caption(if self.moufu_remote_source.get().is_empty() {
+                    self.moufu_preview.get()
+                } else {
+                    format!("{}
+{}", self.moufu_remote_source.get(), self.moufu_preview.get())
+                }),
+                View::Caption(
+                    "Project names/notes/markers sync both ways; file paths and plugin state stay local. Connect only to a trusted Hub."
+                        .to_owned(),
+                ),
+            ])
         };
 
         let play_core = self.core.clone();
@@ -4149,6 +4678,9 @@ impl App for HirariAmeApp {
         let mut views = vec![project_bar];
         if self.show_diagnostics.get() {
             views.push(diagnostics_card);
+        }
+        if self.show_moufu.get() {
+            views.push(moufu_card);
         }
         views.extend([
             export_card,
