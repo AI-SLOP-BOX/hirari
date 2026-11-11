@@ -317,6 +317,14 @@ pub struct HirariAmeApp {
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
+    /// Send matrix panel (Slint aux sends / audio routing parity):
+    /// source/bus selectors, gain, pre/post, enable.
+    show_sends: State<bool>,
+    send_source: State<u32>,
+    send_dest: State<u32>,
+    send_gain: State<f32>,
+    send_pre: State<bool>,
+    send_enabled: State<bool>,
     /// Video monitor (Slint Z_VideoMonitor parity): raw RGBA frames from
     /// the engine, uploaded to a reusable canvas texture on the draw path
     /// (not on the poll), revision-tracked like the waveform upload.
@@ -488,6 +496,12 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         video_frame: None,
         video_size: None,
         video_revision: std::sync::Mutex::new(0),
+        show_sends: context.state(false),
+        send_source: context.state(0u32),
+        send_dest: context.state(0u32),
+        send_gain: context.state(0.5f32),
+        send_pre: context.state(false),
+        send_enabled: context.state(false),
         show_video: context.state(false),
         arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0),
         piano_geometry: piano_roll_geometry(0.0, 0.0, 128.0, &[]),
@@ -986,6 +1000,53 @@ impl HirariAmeApp {
             self.audio_devices.set(devices);
         }
         // Library imports complete asynchronously; same ticket poll.
+        if self.show_sends.get() {
+            if let Ok(routes) = serde_json::from_str::<serde_json::Value>(&core.audio_routes_json())
+            {
+                if let Some(routes) = routes.as_array() {
+                    let source_id = self
+                        .tracks
+                        .get()
+                        .get(self.send_source.get() as usize)
+                        .map(|t| t.id)
+                        .unwrap_or(0);
+                    let dest_id = self
+                        .tracks
+                        .get()
+                        .iter()
+                        .filter(|t| t.kind == "Bus")
+                        .nth(self.send_dest.get() as usize)
+                        .map(|t| t.id)
+                        .unwrap_or(0);
+                    let route = routes.iter().find(|route| {
+                        route
+                            .get("send")
+                            .and_then(serde_json::Value::as_bool)
+                            .unwrap_or(false)
+                            && route.get("source_id").and_then(serde_json::Value::as_u64)
+                                == Some(u64::from(source_id))
+                            && route
+                                .get("destination_id")
+                                .and_then(serde_json::Value::as_u64)
+                                == Some(u64::from(dest_id))
+                    });
+                    if let Some(route) = route {
+                        self.send_enabled.set(true);
+                        if let Some(gain) = route.get("gain").and_then(serde_json::Value::as_f64) {
+                            self.send_gain.set(gain.clamp(0.0, 1.0) as f32);
+                        }
+                        self.send_pre.set(
+                            route
+                                .get("pre_fader")
+                                .and_then(serde_json::Value::as_bool)
+                                .unwrap_or(false),
+                        );
+                    } else {
+                        self.send_enabled.set(false);
+                    }
+                }
+            }
+        }
         if let Some(ticket) = self
             .library_ticket
             .lock()
@@ -2935,6 +2996,17 @@ impl App for HirariAmeApp {
         .on_press(move |_| {
             diagnostics_open_for_button.set(!diagnostics_open_for_button.get());
         });
+        let sends_open_for_button = self.show_sends.clone();
+        let sends_button = ButtonView::new(if self.show_sends.get() {
+            "SENDS CLOSE"
+        } else {
+            "SENDS"
+        })
+        .action_id("sends.toggle")
+        .secondary()
+        .on_press(move |_| {
+            sends_open_for_button.set(!sends_open_for_button.get());
+        });
         let moufu_open_for_button = self.show_moufu.clone();
         let moufu_button = ButtonView::new(if self.show_moufu.get() {
             "MOUFU CLOSE"
@@ -2953,6 +3025,7 @@ impl App for HirariAmeApp {
             new_button.into(),
             diagnostics_button.into(),
             moufu_button.into(),
+            sends_button.into(),
             View::Caption(status.clone()),
         ])]);
 
@@ -3551,6 +3624,141 @@ impl App for HirariAmeApp {
             ]),
             View::Caption(format!("BPM {:.1}", self.tempo.get())),
         ]);
+
+        // SENDS card (Slint audio routing / aux sends parity): source
+        // cycler, destination bus cycler, gain slider with live apply,
+        // pre/post toggle and send enable.
+        let sends_card = {
+            let tracks_for_sends = self.tracks.get();
+            let source_count = tracks_for_sends.len() as u32;
+            let bus_count = tracks_for_sends
+                .iter()
+                .filter(|track| track.kind == "Bus")
+                .count() as u32;
+            let source_index = if source_count == 0 {
+                0
+            } else {
+                (self.send_source.get() as usize) % source_count as usize
+            };
+            let dest_index = if bus_count == 0 {
+                0
+            } else {
+                (self.send_dest.get() as usize) % bus_count as usize
+            };
+            let source_label = tracks_for_sends
+                .get(source_index)
+                .map(|track| track.name.clone())
+                .unwrap_or_else(|| "NO SOURCE".to_owned());
+            let source_id = tracks_for_sends
+                .get(source_index)
+                .map(|track| track.id)
+                .unwrap_or(0);
+            let dest_track = tracks_for_sends
+                .iter()
+                .filter(|track| track.kind == "Bus")
+                .nth(dest_index);
+            let dest_label = dest_track
+                .map(|track| track.name.clone())
+                .unwrap_or_else(|| "NO BUS".to_owned());
+            let dest_id = dest_track.map(|track| track.id).unwrap_or(0);
+            let s_idx = self.send_source.clone();
+            let send_source_button = ButtonView::new(format!("SRC: {source_label}"))
+                .action_id("sends.source_cycle")
+                .secondary()
+                .on_press(move |_| {
+                    if source_count > 0 {
+                        s_idx.set((s_idx.get() + 1) % source_count);
+                    }
+                });
+            let d_idx = self.send_dest.clone();
+            let send_dest_button = ButtonView::new(format!("-> {dest_label}"))
+                .action_id("sends.dest_cycle")
+                .secondary()
+                .on_press(move |_| {
+                    if bus_count > 0 {
+                        d_idx.set((d_idx.get() + 1) % bus_count);
+                    }
+                });
+            let gain_state = self.send_gain.clone();
+            let gain_apply_core = self.core.clone();
+            let gain_source = source_id;
+            let gain_dest = dest_id;
+            let gain_enabled = self.send_enabled.clone();
+            let gain_pre = self.send_pre.clone();
+            let gain_slider = SliderView::new(self.send_gain.get(), 0.0, 1.0)
+                .action_id("sends.gain")
+                .on_change(move |value| {
+                    let value = value.clamp(0.0, 1.0);
+                    gain_state.set(value);
+                    // Live-apply on change, like the Slint aux-sends panel.
+                    if let Some(core) = &gain_apply_core {
+                        let _ = core.set_send_route(
+                            gain_source,
+                            gain_dest,
+                            value,
+                            gain_pre.get(),
+                            gain_enabled.get(),
+                        );
+                    }
+                });
+            let pre_state = self.send_pre.clone();
+            let pre_apply_core = self.core.clone();
+            let pre_source = source_id;
+            let pre_dest = dest_id;
+            let pre_gain = self.send_gain.clone();
+            let pre_enabled = self.send_enabled.clone();
+            let send_pre_button = ButtonView::new(if self.send_pre.get() { "PRE" } else { "POST" })
+                .action_id("sends.pre_toggle")
+                .secondary()
+                .on_press(move |_| {
+                    let next = !pre_state.get();
+                    pre_state.set(next);
+                    if let Some(core) = &pre_apply_core {
+                        let _ = core.set_send_route(
+                            pre_source,
+                            pre_dest,
+                            pre_gain.get(),
+                            next,
+                            pre_enabled.get(),
+                        );
+                    }
+                });
+            let enable_core = self.core.clone();
+            let enable_source = source_id;
+            let enable_dest = dest_id;
+            let enable_gain = self.send_gain.clone();
+            let enable_pre = self.send_pre.clone();
+            let enable_state = self.send_enabled.clone();
+            let enable_button = ButtonView::new(if self.send_enabled.get() {
+                "SEND ON"
+            } else {
+                "SEND OFF"
+            })
+            .action_id("sends.enable_toggle")
+            .primary()
+            .on_press(move |_| {
+                let next = !enable_state.get();
+                enable_state.set(next);
+                if let Some(core) = &enable_core {
+                    let _ = core.set_send_route(
+                        enable_source,
+                        enable_dest,
+                        enable_gain.get(),
+                        enable_pre.get(),
+                        next,
+                    );
+                }
+            });
+            View::Card(vec![View::HStack(vec![
+                View::Text("SENDS".to_owned()),
+                send_source_button.into(),
+                send_dest_button.into(),
+                View::Caption("GAIN".to_owned()),
+                gain_slider.into(),
+                send_pre_button.into(),
+                enable_button.into(),
+            ])])
+        };
 
         let video_card = View::Card(vec![View::HStack(vec![
             View::Text("VIDEO".to_owned()),
@@ -5013,6 +5221,9 @@ impl App for HirariAmeApp {
         }
         if self.show_moufu.get() {
             views.push(moufu_card);
+        }
+        if self.show_sends.get() {
+            views.push(sends_card);
         }
         views.extend([
             export_card,
