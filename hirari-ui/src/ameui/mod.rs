@@ -270,6 +270,9 @@ pub struct HirariAmeApp {
     moufu_last_revision: std::sync::Mutex<Option<u64>>,
     moufu_remote_versions: std::sync::Mutex<std::collections::HashMap<String, (u64, bool)>>,
     /// Outbound link gating the cadenced snapshot publication.
+    /// Pending video load; set by the LOAD VIDEO dialog, drained by the
+    /// poll via `core.load_video`.
+    pending_video_load: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     moufu_has_outbound: std::sync::atomic::AtomicBool,
     /// Moufu card toggle.
     show_moufu: State<bool>,
@@ -306,6 +309,15 @@ pub struct HirariAmeApp {
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
+    /// Video monitor (Slint Z_VideoMonitor parity): raw RGBA frames from
+    /// the engine, uploaded to a reusable canvas texture on the draw path
+    /// (not on the poll), revision-tracked like the waveform upload.
+    video_image: Option<CanvasTexture>,
+    video_reusable: Option<wgpu::Texture>,
+    video_frame: Option<Vec<u8>>,
+    video_size: Option<(u32, u32)>,
+    video_revision: std::sync::Mutex<u64>,
+    show_video: State<bool>,
     /// Last drawn arrange layout, used to map pointer x back to a beat.
     arrange_geometry: ArrangeCanvasGeometry,
     piano_geometry: PianoRollGeometry,
@@ -436,6 +448,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         moufu_outbound_link_ids: std::sync::Mutex::new(std::collections::HashSet::new()),
         moufu_last_revision: std::sync::Mutex::new(None),
         moufu_remote_versions: std::sync::Mutex::new(std::collections::HashMap::new()),
+        pending_video_load: std::sync::Arc::new(std::sync::Mutex::new(None)),
         moufu_has_outbound: std::sync::atomic::AtomicBool::new(false),
         show_moufu: context.state(false),
         integrated_lufs: context.state(-120.0f32),
@@ -458,6 +471,12 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
+        video_image: None,
+        video_reusable: None,
+        video_frame: None,
+        video_size: None,
+        video_revision: std::sync::Mutex::new(0),
+        show_video: context.state(false),
         arrange_geometry: arrange_canvas_geometry(0.0, 0.0, 128.0, 0, 1.0, 0.0),
         piano_geometry: piano_roll_geometry(0.0, 0.0, 128.0, &[]),
         piano_edit: None,
@@ -602,6 +621,49 @@ impl HirariAmeApp {
                 ));
             }
             _ => {}
+        }
+    }
+
+    /// Video frame poll (control rate, follows playhead): requests the
+    /// frame for the playhead position and stashes it in `self.video_frame`
+    /// when a new revision lands. The actual texture upload happens on the
+    /// draw path, like the waveform.
+    fn poll_video(&mut self) {
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        if !self.show_video.get() {
+            return;
+        }
+        let sample_rate = core.get_sample_rate().max(1.0);
+        let seconds = core.get_playhead() as f64 / sample_rate;
+        let _ = core.request_video_frame(seconds);
+        let revision = core.get_video_frame_revision();
+        let mut last = self
+            .video_revision
+            .lock()
+            .map(|mut last| *last)
+            .unwrap_or(0);
+        if revision == 0 || revision == last {
+            return;
+        }
+        let frame = core.get_video_frame();
+        if frame.len() < 8 {
+            return;
+        }
+        let width = u32::from_le_bytes(frame[0..4].try_into().unwrap_or([0; 4]));
+        let height = u32::from_le_bytes(frame[4..8].try_into().unwrap_or([0; 4]));
+        let expected = (width as usize)
+            .saturating_mul(height as usize)
+            .saturating_mul(4);
+        if width == 0 || height == 0 || width > 8192 || height > 8192 || frame.len() != expected + 8
+        {
+            return;
+        }
+        self.video_frame = Some(frame[8..].to_vec());
+        self.video_size = Some((width, height));
+        if let Ok(mut slot) = self.video_revision.lock() {
+            *slot = revision;
         }
     }
 
@@ -857,6 +919,25 @@ impl HirariAmeApp {
         };
         self.poll_render();
         self.poll_moufu();
+        if let Some(path) = self
+            .pending_video_load
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            if core.load_video(&path.to_string_lossy()) {
+                self.status.set(format!(
+                    "VIDEO LOADED: {}",
+                    std::path::Path::new(&path)
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+                ));
+            } else {
+                self.status.set("VIDEO LOAD FAILED".to_owned());
+            }
+        }
+        self.poll_video();
         // Diagnostics counters accumulate from the engine every tick.
         self.watchdog_trips.set(
             self.watchdog_trips
@@ -3253,6 +3334,41 @@ impl App for HirariAmeApp {
             ])
         };
 
+        // Video card (Slint media/video_monitor parity): toggle and load.
+        // Frame display fans out through the video canvas; revision-tracked.
+        let video_open = self.show_video.clone();
+        let video_toggle = ButtonView::new(if self.show_video.get() {
+            "HIDE VIDEO"
+        } else {
+            "SHOW VIDEO"
+        })
+        .action_id("video.toggle")
+        .secondary()
+        .on_press(move |_| {
+            video_open.set(!video_open.get());
+        });
+        let video_pending = self.pending_video_load.clone();
+        let video_load = ButtonView::new("LOAD VIDEO")
+            .action_id("video.load")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .add_filter("Video file", &["mov", "mp4", "mkv", "webm", "avi"]);
+                let pending = video_pending.clone();
+                dialog.pick_file_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
+            });
+        let video_card = View::Card(vec![View::HStack(vec![
+            View::Text("VIDEO".to_owned()),
+            video_load.into(),
+            video_toggle.into(),
+        ])]);
+
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
         let play_button = ButtonView::new(if playing { "Playing" } else { "Play" })
@@ -4715,8 +4831,14 @@ impl App for HirariAmeApp {
             meter,
             master_card,
             audio_card,
+            video_card,
             arrange_toolbar,
             View::canvas("waveform").frame(None, Some(168)),
+            if self.show_video.get() {
+                View::canvas("video").frame(None, Some(200))
+            } else {
+                View::Caption(String::new())
+            },
             arrange_timeline,
             View::canvas("arrange").grow(3),
         ]);
@@ -4947,6 +5069,57 @@ impl App for HirariAmeApp {
         }
         if canvas_id == "piano" {
             self.draw_piano(scene, bounds, context);
+            return;
+        }
+        if canvas_id == "video" {
+            let Some(frame) = self.video_frame.take() else {
+                return;
+            };
+            let Some((width, height)) = self.video_size else {
+                return;
+            };
+            let texture = self.video_reusable.take().unwrap_or_else(|| {
+                context.create_render_target(
+                    width,
+                    height,
+                    Some("hirari-video"),
+                    wgpu::TextureUsages::COPY_DST,
+                )
+            });
+            context.queue().write_texture(
+                texture.as_image_copy(),
+                &frame,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            if let Some(image) = &self.video_image {
+                match context.replace_texture(image, texture) {
+                    Ok(previous) => self.video_reusable = Some(previous),
+                    Err(error) => {
+                        eprintln!("could not refresh video canvas: {error}");
+                        return;
+                    }
+                }
+            } else {
+                match context.register_texture(texture) {
+                    Ok(image) => self.video_image = Some(image),
+                    Err(error) => {
+                        eprintln!("could not register video canvas: {error}");
+                        return;
+                    }
+                }
+            }
+            if let Some(image) = &self.video_image {
+                context.draw_texture(scene, image, bounds);
+            }
             return;
         }
         if canvas_id != "waveform" {
