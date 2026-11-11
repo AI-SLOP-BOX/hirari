@@ -68,9 +68,9 @@ approx. effort and status. Each item = one AmeUI slice.
 | P2 | Diagnostics / health dashboard | `ui/diagnostics/*` | **done** (`281c610`) — SYSTEM card: health line, dsp_load %, drops/overruns/failures/watchdog, range overflow, silent-fallback hint, RECOVER |
 | P3 | Full mixer / smart controls / console variants | `ui/mixer/*` (188 files large) `full_mixer.slint`, `smart_controls.slint`, `console_*` | partial (strips) |
 | P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | not started |
-| P5 | Moufu link page | `moufu_link_page.slint` | partial (engine handshake strings) |
+| P5 | Moufu link page | `moufu_link_page.slint` | **done** (`8a9b06f`) — address persistence + connect/refresh/share/receive/unlink, read-only preview, queue-safe revisioned publish |
 | P6 | Preferences / setup pages | `ui/audio_settings.rs`, `ui/setup*`, `ui/preferences*` | partial (audio card) |
-| P7 | Mastering page | `pages/mastering_page.slint` | not started |
+| P7 | Mastering page | `pages/mastering_page.slint` | **partial done** (`608e9e9`) — MASTER card with integrated LUFS, true peak L/R, gain, delivery target. Static module tiles + GPU curves not ported. |
 | P8 | Flex pitch / flex edit | `ui/flex*`, `editor/*` | not started |
 | P9 | Comping (take lanes) | `ui/comp*`, `editor/comping*` | not started (engine comping works, UI in Slint only) |
 | P10 | Track stacks / global tracks | `pages/workflow_pages.slint` | not started |
