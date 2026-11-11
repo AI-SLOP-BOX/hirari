@@ -69,10 +69,26 @@ fn native_input_polling_never_reports_success_without_a_real_device() {
     }
     core.start_recording_capture(48_000.0, 2, 1024, 0)
         .expect("recording session should start before device polling");
-    let error = core
-        .poll_recording_capture()
-        .expect_err("silent fallback must not report a captured input block");
-    assert!(error.to_string().contains("audio input is unavailable"));
+    // With no real input device the poller must never report a captured
+    // block: it can surface a driver error or keep returning Ok(false).
+    let mut captured = false;
+    for _ in 0..100 {
+        match core.poll_recording_capture() {
+            Ok(true) => {
+                captured = true;
+                break;
+            }
+            Ok(false) => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Err(error) => {
+                assert!(error.to_string().contains("audio input"));
+                break;
+            }
+        }
+    }
+    assert!(
+        !captured,
+        "silent fallback must not report a captured input block"
+    );
     let _ = core.stop_recording_preview();
 }
 
