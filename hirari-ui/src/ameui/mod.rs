@@ -639,11 +639,7 @@ impl HirariAmeApp {
         let seconds = core.get_playhead() as f64 / sample_rate;
         let _ = core.request_video_frame(seconds);
         let revision = core.get_video_frame_revision();
-        let mut last = self
-            .video_revision
-            .lock()
-            .map(|mut last| *last)
-            .unwrap_or(0);
+        let last = self.video_revision.lock().map(|last| *last).unwrap_or(0);
         if revision == 0 || revision == last {
             return;
         }
