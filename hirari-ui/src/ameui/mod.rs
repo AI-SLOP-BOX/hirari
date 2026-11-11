@@ -1643,28 +1643,6 @@ impl HirariAmeApp {
         self.arrange_zoom.set(zoom_new);
         self.arrange_scroll_beats.set(scroll_new.max(0.0));
     }
-
-    fn on_canvas_gesture(&mut self, canvas_id: &str, event: CanvasGestureEvent) -> bool {
-        if canvas_id != "arrange" {
-            return false;
-        }
-        match event.gesture {
-            CanvasGestureKind::Pinch { delta, .. } => {
-                self.zoom_arrange_at(event.x as f32, (1.0 + delta) as f32);
-                true
-            }
-            CanvasGestureKind::Pan { delta_x, .. } => {
-                let px_per_beat = self.arrange_geometry.px_per_beat;
-                if px_per_beat > 0.0 {
-                    let delta_beats = (delta_x / f64::from(px_per_beat)) as f32;
-                    self.arrange_scroll_beats
-                        .set((self.arrange_scroll_beats.get() - delta_beats).max(0.0));
-                }
-                true
-            }
-            CanvasGestureKind::Rotate { .. } => false,
-        }
-    }
 }
 
 impl App for HirariAmeApp {
@@ -1778,6 +1756,28 @@ impl App for HirariAmeApp {
                 .set(offset.clamp(0.0, max_offset) as f32);
         }
         true
+    }
+
+    fn on_canvas_gesture(&mut self, canvas_id: &str, event: CanvasGestureEvent) -> bool {
+        if canvas_id != "arrange" {
+            return false;
+        }
+        match event.gesture {
+            CanvasGestureKind::Pinch { delta, .. } => {
+                self.zoom_arrange_at(event.x as f32, (1.0 + delta) as f32);
+                true
+            }
+            CanvasGestureKind::Pan { delta_x, .. } => {
+                let px_per_beat = self.arrange_geometry.px_per_beat;
+                if px_per_beat > 0.0 {
+                    let delta_beats = (delta_x / f64::from(px_per_beat)) as f32;
+                    self.arrange_scroll_beats
+                        .set((self.arrange_scroll_beats.get() - delta_beats).max(0.0));
+                }
+                true
+            }
+            CanvasGestureKind::Rotate { .. } => false,
+        }
     }
 
     /// Redraws canvases only when their inputs changed, using the landed
