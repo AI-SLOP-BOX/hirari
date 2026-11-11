@@ -80,9 +80,9 @@ approx. effort and status. Each item = one AmeUI slice.
 | P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | engine refs present |
 | P15 | Notation / score | `editor/notation_hub.slint` | not started |
 | P16 | Synth panel (/ sound_design) | `editor/synth_panel.slint` | not started |
-| P17 | Video monitor | `media/video_monitor.slint` | engine video refs present |
+| P17 | Video monitor | `media/video_monitor.slint` | **part done** (`1bd92d1`) — LOAD/SHOW/HIDE + frame upload path; frame timing wired |
 | P18 | Advanced automation | `editor/advanced_automation.slint` | partial (overlay edit) |
-| P19 | Global tempo editor | `editor/global_tempo_editor.slint` | not started |
+| P19 | Global tempo editor | `editor/global_tempo_editor.slint` | **partial done** (`5153234`) — BPM±/tap/time-signature/event list; knob widget + curve canvas not ported |
 | P20 | Spotlight command palette | `navigation/spotlight.slint` | not started |
 | P21 | Workflow pages remainder (flex/global/midi learn) | `pages/workflow_pages.slint` | remaining |
 | P22 | Assistant view (if any remains post-delete) | — | n/a |
