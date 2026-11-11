@@ -64,8 +64,8 @@ approx. effort and status. Each item = one AmeUI slice.
 
 | # | Surface | Slint refs | AmeUI status |
 |---|---|---|---|
-| P1 | Export dialog (render + LUFS target + freeze) | `ui/render.rs`, `dialogs/export_dialog.slint`, LUFS normalize queued export | not started |
-| P2 | Diagnostics / health dashboard | `ui/diagnostics/*` (page, telemetry, history_and_analysis, ambient_status, analysis_meters, project_sharding, zero_point_meter, sentinel_ring) | not started (AmeUI shows bits in audio card) |
+| P1 | Export dialog (render + LUFS target + freeze) | `ui/render.rs`, `dialogs/export_dialog.slint`, LUFS normalize queued export | **partial done** (`dea76d0`) — RENDER/STEMS/MIDI/CANCEL in AmeUI; LUFS QUEUED-DELIVERY intentionally deferred to a delivery dialog. |
+| P2 | Diagnostics / health dashboard | `ui/diagnostics/*` | **done** (`281c610`) — SYSTEM card: health line, dsp_load %, drops/overruns/failures/watchdog, range overflow, silent-fallback hint, RECOVER |
 | P3 | Full mixer / smart controls / console variants | `ui/mixer/*` (188 files large) `full_mixer.slint`, `smart_controls.slint`, `console_*` | partial (strips) |
 | P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | not started |
 | P5 | Moufu link page | `moufu_link_page.slint` | partial (engine handshake strings) |
