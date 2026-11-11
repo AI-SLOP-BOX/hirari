@@ -3,5 +3,5 @@
 pub mod arrange_model;
 pub mod gpu_canvas;
 pub mod plot_raster;
-pub mod template_starter;
 pub mod recent_projects;
+pub mod template_starter;

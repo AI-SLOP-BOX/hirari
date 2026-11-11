@@ -1,6 +1,6 @@
+use crate::ui_shared::template_starter::create_template_project;
 use hirari_core_bridge::HirariCore;
 use slint::{Model, VecModel};
-use crate::ui_shared::template_starter::create_template_project;
 
 use std::cell::RefCell;
 use std::rc::Rc;

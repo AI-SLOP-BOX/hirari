@@ -19,18 +19,32 @@ jobs:
           components: rustfmt
       - name: Verify checkout contains buildable source directories
         run: ./scripts/verify_repository_health.sh
+      # The ame-ui path dependency is a private, unpublished crate; GitHub
+      # hosts cannot check it out. Hirari's AmeUI build gate lives in
+      # scripts/verify_ameui.sh on the internal Linux CI. Here we build the
+      # legacy Slint path via a manifest-only placeholder so the workspace
+      # resolves for everyone else. The committed lockfile cannot describe
+      # the placeholder (its dependency clauses differ intentionally), so
+      # this job does not use --locked; lockfile strictness is enforced by
+      # the internal CI instead.
+      - name: Provide a manifest-only placeholder for the private AmeUI crate
+        run: ./scripts/ensure_ameui_stub.sh
       - name: Verify formatting
         run: cargo fmt --all -- --check
-      - name: Compile with the committed lockfile
-        run: cargo check --workspace --locked
+      - name: Compile with the placeholder workspace
+        run: |
+          cargo check --workspace --no-default-features
+          cargo check -p hirari-ui --no-default-features --features slint-wgpu
       - name: Run the serialized workspace suite
         env:
           RUST_TEST_THREADS: "1"
           HIRARI_NATIVE_TEST_ISOLATION: "1"
-        run: cargo test --workspace --all-targets --locked -- --test-threads=1
+        run: |
+          cargo test --workspace --all-targets --no-default-features -- --test-threads=1
+          cargo test -p hirari-ui --no-default-features --features slint-wgpu -- --test-threads=1
       - name: Compare Rust DSP output with frozen C++ references
         run: >-
-          cargo test -p hirari-core-bridge --lib --locked
+          cargo test -p hirari-core-bridge --lib
           --features dsp-differential-reference differential_tests
           -- --test-threads=1
 
@@ -43,7 +57,14 @@ jobs:
           toolchain: 1.98.0
       - name: Install build tools
         run: brew install cmake ffmpeg
+      # The AmeUI sibling it needs does not exist on public runners; build
+      # and sign the legacy Slint bundle instead (same as the pre-AmeUI
+      # default) so this job keeps reflecting the distributable.
+      - name: Provide a manifest-only placeholder for the private AmeUI crate
+        run: ./scripts/ensure_ameui_stub.sh
       - name: Build the application bundle
+        env:
+          HIRARI_UI_FEATURES: "--no-default-features --features slint-wgpu"
         run: ./scripts/build_app.sh
       - name: Verify headless readiness
         run: HIRARI_HEADLESS=1 "packaging/Hirari DAW.app/Contents/MacOS/Hirari DAW"

@@ -4,7 +4,7 @@
 //! input shell; a platform surface adapter can later borrow the device and
 //! render into a child surface without changing the PlotFrame contract.
 
-use super::gpu_canvas::PlotFrame;
+use crate::ui_shared::gpu_canvas::PlotFrame;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]

@@ -162,7 +162,9 @@ fn main() {
     }
     #[cfg(all(not(feature = "ameui"), not(feature = "slint-wgpu")))]
     {
-        eprintln!("HIRARI | no UI backend configured; enable `ameui` (recommended) or `slint-wgpu`.");
+        eprintln!(
+            "HIRARI | no UI backend configured; enable `ameui` (recommended) or `slint-wgpu`."
+        );
         std::process::exit(1);
     }
 }

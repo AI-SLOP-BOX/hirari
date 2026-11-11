@@ -1,6 +1,5 @@
 pub mod app;
 pub mod arrange;
-pub mod arrange_model;
 pub mod articulation_commands;
 pub mod audio_import;
 pub mod audio_settings;
@@ -13,7 +12,6 @@ pub mod editing_commands;
 pub mod editor;
 #[cfg(feature = "egui-canvas")]
 pub mod egui_canvas;
-pub mod gpu_canvas;
 pub mod locale;
 pub mod midi;
 pub mod midi_commands;
@@ -22,7 +20,6 @@ pub mod misc;
 pub mod mixer;
 pub mod operation_gate;
 #[cfg(any(feature = "slint-wgpu", feature = "ameui"))]
-pub mod plot_raster;
 pub mod plugin;
 pub mod plugin_commands;
 pub mod plugin_polling;

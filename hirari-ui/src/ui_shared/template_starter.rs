@@ -53,4 +53,3 @@ fn create_native_template(
     }
     Ok(())
 }
-

@@ -22,7 +22,10 @@ APP_DIR="$STAGED_APP"
 CONTENTS_DIR="$APP_DIR/Contents"
 BIN_DIR="$CONTENTS_DIR/MacOS"
 
-cargo build --release -p hirari-ui --manifest-path "$ROOT_DIR/Cargo.toml"
+# Optional extra feature flags (word-split, no quoting): forks and hosts
+# without the private AmeUI sibling build `--no-default-features --features
+# slint-wgpu` so the bundle still packages the legacy surface.
+cargo build --release -p hirari-ui --manifest-path "$ROOT_DIR/Cargo.toml" ${HIRARI_UI_FEATURES:-}
 
 # Build the isolated plugin worker from the same source revision as the app.
 # This prevents stale or missing worker binaries from making a packaged app

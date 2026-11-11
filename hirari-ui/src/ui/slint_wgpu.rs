@@ -7,9 +7,11 @@
 //! The pixel rasterizers live in [`super::plot_raster`] so the AmeUI Canvas
 //! path uploads the identical bytes during the backend migration.
 
-use super::gpu_canvas::PlotFrameStore;
-use super::plot_raster::{meter_rgba, piano_rgba, spectrum_rgba, waveform_rgba, HEIGHT, WIDTH};
 use crate::slint_ui::AppWindow;
+use crate::ui_shared::gpu_canvas::PlotFrameStore;
+use crate::ui_shared::plot_raster::{
+    meter_rgba, piano_rgba, spectrum_rgba, waveform_rgba, HEIGHT, WIDTH,
+};
 use slint::wgpu_29::wgpu::util::DeviceExt;
 use slint::ComponentHandle;
 use std::cell::RefCell;
