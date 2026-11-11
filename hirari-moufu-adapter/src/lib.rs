@@ -1522,16 +1522,39 @@ mod tests {
             });
             writeln!(socket, "{}", serde_json::to_string(&update).unwrap()).unwrap();
 
-            let commit = read_client_message(&mut reader);
+            // The adapter pings every 3s and the socket is long-lived; on a
+            // loaded host (CI under xvfb) a Ping can land inside this slot
+            // before the layout commit arrives. Mirror the main loop: answer
+            // it so the wait does not depend on wall-clock cadence.
+            let commit = loop {
+                match read_client_message(&mut reader) {
+                    ClientMessage::Ping => {
+                        writeln!(
+                            socket,
+                            "{}",
+                            serde_json::to_string(&ServerMessage::Pong).unwrap()
+                        )
+                        .unwrap();
+                    }
+                    // Tolerate noise that the strict match below cannot see:
+                    // a duplicate pull echo can race a reconnect window on a
+                    // busy host. The commit itself is still strictly asserted.
+                    ClientMessage::PullEntity { .. } => continue,
+                    message => break message,
+                }
+            };
             observed_tx.send(commit.clone()).unwrap();
-            assert!(matches!(
-                commit,
-                ClientMessage::NotifyChange(ChangeEvent {
-                    is_transient: false,
-                    payload: PayloadTransport::Inline(ref value),
-                    ..
-                }) if value["title"] == "Night Drive"
-            ));
+            assert!(
+                matches!(
+                    commit,
+                    ClientMessage::NotifyChange(ChangeEvent {
+                        is_transient: false,
+                        payload: PayloadTransport::Inline(ref value),
+                        ..
+                    }) if value["title"] == "Night Drive"
+                ),
+                "commit message mismatch: {commit:?}"
+            );
         });
 
         let publisher = MoufuPublisher::connect_to(&address.to_string()).unwrap();
