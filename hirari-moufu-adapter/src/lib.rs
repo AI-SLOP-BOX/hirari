@@ -1401,13 +1401,18 @@ mod tests {
 
     #[test]
     fn publisher_registers_hirari_and_sends_live_project_snapshot() {
+        // The whole handshake chain is processed on real threads and the timers
+        // below bound them, not correctness. The internal Linux CI runs under
+        // xvfb alongside a full build fleet and routinely takes several
+        // seconds longer than an idle developer machine.
+        let deadline = Duration::from_secs(15);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let (observed_tx, observed_rx) = channel();
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
             socket
-                .set_read_timeout(Some(Duration::from_secs(5)))
+                .set_read_timeout(Some(deadline))
                 .unwrap();
             let mut reader = BufReader::new(socket.try_clone().unwrap());
             let handshake = read_client_message(&mut reader);
@@ -1563,12 +1568,12 @@ mod tests {
             true,
         );
 
-        let handshake = observed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let handshake = observed_rx.recv_timeout(deadline).unwrap();
         assert!(matches!(
             handshake,
             ClientMessage::Handshake { app_name, .. } if app_name == "Hirari"
         ));
-        let registration = observed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let registration = observed_rx.recv_timeout(deadline).unwrap();
         assert!(matches!(
             registration,
             ClientMessage::RegisterEntity(EntityDescriptor {
@@ -1579,7 +1584,7 @@ mod tests {
         ));
         let mut received_connected = false;
         let mut received_update = false;
-        let event_deadline = Instant::now() + Duration::from_secs(5);
+        let event_deadline = Instant::now() + deadline;
         while Instant::now() < event_deadline && !received_update {
             if let Some(event) = publisher.recv_event_timeout(Duration::from_millis(100)) {
                 match event {
@@ -1597,7 +1602,7 @@ mod tests {
         }
         assert!(received_connected);
         assert!(received_update);
-        let event = observed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let event = observed_rx.recv_timeout(deadline).unwrap();
         assert!(matches!(
             event,
             ClientMessage::NotifyChange(ChangeEvent {
@@ -1615,7 +1620,7 @@ mod tests {
             r#"{"title":"Night Drive","tracks":[{"name":"Vocal","path":"/Users/private/voice.wav","frozen_path":"/Users/private/frozen.wav","plugin_state_hex":["secret"],"volume":0.8}]}"#,
             false,
         );
-        let committed = observed_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let committed = observed_rx.recv_timeout(deadline).unwrap();
         assert!(matches!(
             committed,
             ClientMessage::NotifyChange(ChangeEvent {
