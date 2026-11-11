@@ -3760,7 +3760,7 @@ impl App for HirariAmeApp {
                     .secondary()
                     .on_press(move |_| {
                         if let Ok(mut slot) = open_pending.lock() {
-                            *slot = Some(path.clone());
+                            *slot = Some(std::path::PathBuf::from(path.clone()));
                         }
                     });
                 recent_buttons.push(button.into());
