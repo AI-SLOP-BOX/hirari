@@ -108,6 +108,8 @@ Notes:
 | E12 | (this work) | Engine: AU sidechain delivery. The worker probes `kAudioUnitProperty_BusCount` on input; units with a second bus get a sidechain pull callback fed from the mailbox arrays (silence when unlinked). |
 | P1 | `b524bed` | Plugin: VST3 fixture compatibility now covers Surge XT effects plus the Vital instrument path (MIDI note-on produces audible output). |
 | R1 | `fad1332` (AmeUI) | Filed Hirari pt.6 requests: TimelineView controlled zoom/offset binding, marker/loop/selection edit events, and beat/bar ruler grids. |
+| 52 | `75543f0` | TimelineView adopted as the arrange ruler (beats-domain, controlled zoom/offset, header indent 104, markers, scrub seeks the engine playhead). The canvas keeps lanes/clips. |
+| 53 | `87f4bb4` | AmeUI home page: template starters (`INIT_*` parity), recent projects list, opens/saves/hides the workspace; recent-project open uses the existing native-dialog pending path. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 
