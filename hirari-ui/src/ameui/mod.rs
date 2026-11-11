@@ -75,6 +75,7 @@ use crate::ui::arrange_model::{
 };
 use crate::ui::gpu_canvas::PlotFrameStore;
 use crate::ui::plot_raster;
+use crate::ui::templates::create_template_project;
 use hirari_core_bridge::project_contracts::MidiNoteContract;
 
 /// Snap divisions offered by the toolbar picker (Slint `snap_val`
@@ -189,6 +190,7 @@ fn notes_to_contracts(core: &HirariCore, notes: &[PianoNote]) -> Vec<MidiNoteCon
 
 pub struct HirariAmeApp {
     core: Option<Rc<HirariCore>>,
+    show_genesis: State<bool>,
     plots: PlotFrameStore,
     playing: State<bool>,
     loop_enabled: State<bool>,
@@ -335,6 +337,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         device_index: context.state(0u32),
         master_peak: context.state(0.0f32),
         master_gain: context.state(1.0f32),
+        show_genesis: context.state(true),
         tracks: context.state(Vec::<ArrangeTrack>::new()),
         markers: context.state(Vec::<ArrangeMarker>::new()),
         measure_starts: context.state(Vec::<MeasureStart>::new()),
@@ -535,6 +538,7 @@ impl HirariAmeApp {
             if core.load_project(&path) {
                 *self.project_path.borrow_mut() = Some(path.clone());
                 self.selected_clip.set(None);
+                self.show_genesis.set(false);
                 self.status.set(format!(
                     "OPENED {}",
                     std::path::Path::new(&path)
@@ -1768,7 +1772,8 @@ impl App for HirariAmeApp {
             } else {
                 event.delta_y
             };
-            let offset = f64::from(self.arrange_scroll_beats.get()) - delta / f64::from(geometry.px_per_beat);
+            let offset = f64::from(self.arrange_scroll_beats.get())
+                - delta / f64::from(geometry.px_per_beat);
             self.arrange_scroll_beats
                 .set(offset.clamp(0.0, max_offset) as f32);
         }
@@ -2317,6 +2322,7 @@ impl App for HirariAmeApp {
         let new_path = self.project_path.clone();
         let new_selected = self.selected_clip.clone();
         let new_status = self.status.clone();
+        let new_show_genesis = self.show_genesis.clone();
         let new_button = ButtonView::new("New")
             .action_id("project.new")
             .secondary()
@@ -2325,6 +2331,7 @@ impl App for HirariAmeApp {
                     core.new_project();
                     *new_path.borrow_mut() = None;
                     new_selected.set(None);
+                    new_show_genesis.set(true);
                     new_status.set("NEW PROJECT".to_owned());
                 }
             });
@@ -3691,6 +3698,82 @@ impl App for HirariAmeApp {
             let _ = core.upsert_marker(marker.id, &marker.label, beat, "#646496");
         });
         let arrange_timeline: View = arrange_timeline.into();
+
+        if self.show_genesis.get() {
+            let mut template_buttons = Vec::new();
+            for (label, template) in [
+                ("ELECTRONIC", "ELECTRONIC"),
+                ("CINEMATIC SCORE", "CINEMATIC SCORE"),
+                ("ATMOS MASTERING", "ATMOS MASTERING"),
+                ("VOICE-OVER PRO", "VOICE-OVER PRO"),
+            ] {
+                let template_core = self.core.clone();
+                let template_selected = self.selected_clip.clone();
+                let template_status = self.status.clone();
+                let template_show = self.show_genesis.clone();
+                let template_name = template.to_string();
+                let button = ButtonView::new(label)
+                    .action_id(format!("genesis.template.{label}"))
+                    .secondary()
+                    .on_press(move |_| {
+                        let Some(core) = &template_core else { return };
+                        match create_template_project(core, &template_name) {
+                            Ok(()) => {
+                                template_selected.set(None);
+                                template_show.set(false);
+                                template_status.set(format!("STARTED {template_name}"));
+                            }
+                            Err(error) => {
+                                template_status.set(format!("TEMPLATE FAILED: {error}"));
+                            }
+                        }
+                    });
+                template_buttons.push(button.into());
+            }
+            let blank_core = self.core.clone();
+            let blank_selected = self.selected_clip.clone();
+            let blank_status = self.status.clone();
+            let blank_show = self.show_genesis.clone();
+            let blank_button = ButtonView::new("BLANK")
+                .action_id("genesis.template.BLANK")
+                .secondary()
+                .on_press(move |_| {
+                    if let Some(core) = &blank_core {
+                        core.new_project();
+                        blank_selected.set(None);
+                        blank_show.set(false);
+                        blank_status.set("NEW PROJECT".to_owned());
+                    }
+                });
+            template_buttons.push(blank_button.into());
+            let mut recent_buttons: Vec<View> = Vec::new();
+            for project in crate::slint_ui::load_recent_projects() {
+                let open_pending = self.pending_open.clone();
+                let path = project.path.to_string();
+                let file_name = std::path::Path::new(&path)
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("Project")
+                    .to_owned();
+                let button = ButtonView::new(file_name)
+                    .action_id("genesis.recent")
+                    .secondary()
+                    .on_press(move |_| {
+                        if let Ok(mut slot) = open_pending.lock() {
+                            *slot = Some(path.clone());
+                        }
+                    });
+                recent_buttons.push(button.into());
+            }
+            let genesis = View::Card(vec![
+                View::Text("HIRARI".to_owned()),
+                View::Caption("Pick a starting point or open a recent project".to_owned()),
+                View::HStack(template_buttons),
+                View::Caption("RECENT PROJECTS".to_owned()),
+                View::HStack(recent_buttons),
+            ]);
+            return View::VStack(vec![project_bar, genesis]);
+        }
 
         let mut views = vec![
             project_bar,

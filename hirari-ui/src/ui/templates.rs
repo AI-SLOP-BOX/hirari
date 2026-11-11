@@ -6,6 +6,37 @@ use std::rc::Rc;
 use crate::slint_ui::{store_onboarding_progress, sync_tracks_from_engine, AppWindow, Z_Track};
 use crate::ui::operation_gate::{OperationGate, OperationKind};
 
+/// Creates a fresh project seeded with the named template's tracks. Shared by
+/// the Slint INIT_* flow and the AmeUI home page. The previous unsaved
+/// project is abandoned (a new one is created) but any persisted MIDI
+/// sidecar on disk is left alone.
+pub(crate) fn create_template_project(core: &HirariCore, template: &str) -> Result<(), String> {
+    let template_tracks: &[(&str, u32)] = match template {
+        "CINEMATIC SCORE" => &[
+            ("Orchestra", 3),
+            ("Strings", 2),
+            ("Brass", 2),
+            ("Percussion", 2),
+            ("Piano", 1),
+        ],
+        "ATMOS MASTERING" => &[
+            ("Mix Bus", 3),
+            ("Atmos Bed", 0),
+            ("Dialogue", 0),
+            ("Master", 3),
+        ],
+        "VOICE-OVER PRO" => &[("Voice", 4), ("Music Bed", 0), ("Print Master", 3)],
+        _ => &[
+            ("Drums", 2),
+            ("Bass", 2),
+            ("Synth Lead", 2),
+            ("Pads", 2),
+            ("Main Out", 3),
+        ],
+    };
+    create_native_template(core, template_tracks)
+}
+
 fn create_native_template(
     core: &HirariCore,
     template_tracks: &[(&str, u32)],
@@ -54,30 +85,7 @@ pub(crate) fn handle_command(
     // persisted MIDI sidecar still belongs to that project and must survive.
     last_saved_path.borrow_mut().take();
     *session_recovery_path.borrow_mut() = crate::slint_ui::new_session_recovery_path();
-    let template_tracks: &[(&str, u32)] = match template {
-        "CINEMATIC SCORE" => &[
-            ("Orchestra", 3),
-            ("Strings", 2),
-            ("Brass", 2),
-            ("Percussion", 2),
-            ("Piano", 1),
-        ],
-        "ATMOS MASTERING" => &[
-            ("Mix Bus", 3),
-            ("Atmos Bed", 0),
-            ("Dialogue", 0),
-            ("Master", 3),
-        ],
-        "VOICE-OVER PRO" => &[("Voice", 4), ("Music Bed", 0), ("Print Master", 3)],
-        _ => &[
-            ("Drums", 2),
-            ("Bass", 2),
-            ("Synth Lead", 2),
-            ("Pads", 2),
-            ("Main Out", 3),
-        ],
-    };
-    if let Err(error) = create_native_template(core, template_tracks) {
+    if let Err(error) = create_template_project(core, template) {
         core.new_project();
         crate::ui::track_model::reset_project_scoped_track_overlays(tracks);
         let _ = sync_native_template(tracks, core);
