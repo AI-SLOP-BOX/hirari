@@ -67,7 +67,7 @@ approx. effort and status. Each item = one AmeUI slice.
 | P1 | Export dialog (render + LUFS target + freeze) | `ui/render.rs`, `dialogs/export_dialog.slint`, LUFS normalize queued export | **partial done** (`dea76d0`) — RENDER/STEMS/MIDI/CANCEL in AmeUI; LUFS QUEUED-DELIVERY intentionally deferred to a delivery dialog. |
 | P2 | Diagnostics / health dashboard | `ui/diagnostics/*` | **done** (`281c610`) — SYSTEM card: health line, dsp_load %, drops/overruns/failures/watchdog, range overflow, silent-fallback hint, RECOVER |
 | P3 | Full mixer / smart controls / console variants | `ui/mixer/*` (188 files large) `full_mixer.slint`, `smart_controls.slint`, `console_*` | partial (strips) |
-| P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | not started |
+| P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | **part done** (`160fee4`) — sends card (source/bus/gain/pre-post/live apply) |
 | P5 | Moufu link page | `moufu_link_page.slint` | **done** (`8a9b06f`) — address persistence + connect/refresh/share/receive/unlink, read-only preview, queue-safe revisioned publish |
 | P6 | Preferences / setup pages | `ui/audio_settings.rs`, `ui/setup*`, `ui/preferences*` | partial (audio card) |
 | P7 | Mastering page | `pages/mastering_page.slint` | **partial done** (`608e9e9`) — MASTER card with integrated LUFS, true peak L/R, gain, delivery target. Static module tiles + GPU curves not ported. |
@@ -76,7 +76,7 @@ approx. effort and status. Each item = one AmeUI slice.
 | P10 | Track stacks / global tracks | `pages/workflow_pages.slint` | not started |
 | P11 | Step sequencer / drums | `pages/workflow_pages.slint`, `drums` view | engine has step seq; Mikboix UI only |
 | P12 | MIDI learn | `pages/workflow_pages.slint` | engine refs (MIDI learn) in bridge |
-| P13 | OpenUtau editor | `editor/openutau_editor.slint` | engine refs present (43); UI port needed |
+| P13 | OpenUtau editor | `editor/openutau_editor.slint` | **partial done** (`337f762`) — open/launch/import/vocal-track creation; tuning worker not ported |
 | P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | engine refs present |
 | P15 | Notation / score | `editor/notation_hub.slint` | not started |
 | P16 | Synth panel (/ sound_design) | `editor/synth_panel.slint` | not started |

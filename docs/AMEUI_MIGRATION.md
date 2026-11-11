@@ -115,6 +115,8 @@ Notes:
  53 | `87f4bb4` | AmeUI home page: template starters (`INIT_*` parity), recent projects list, opens/saves/hides the workspace; recent-project open uses the existing native-dialog pending path. |
 | 57 | `8a9b06f` | AmeUI Moufu Hub card (P5): address field persisted, CONNECT/DISCONNECT/REFRESH, entity share/receive/unlink, read-only linked preview via shared `ui_shared::moufu_preview`; publisher snapshot publish through shared `ui_shared::moufu_layout` (no recording-input channel tags yet — engine/model gap). |
 | 59 | `1bd92d1` | AmeUI video monitor slice (P17 part 1): VIDEO card with LOAD VIDEO + SHOW/HIDE toggle; control-rate poll tracks playhead revision; texture uploaded on the draw path like the waveform. |
+| 61 | `337f762` | AmeUI OpenUtau vocal score card (P13): OPEN USTX / LAUNCH OPENUTAU (macOS `open -a`) / PICK RENDER / IMPORT VOCAL — engine-driven import through the poll, adds Vocal track + region. |
+| 62 | `160fee4` | AmeUI sends card (P4): source/bus cycler, gain slider with live apply (`set_send_route`), PRE/POST toggle, enable; state refreshed from `audio_routes_json()` at 10 Hz when the panel is open. |
 | 60 | `5153234` | AmeUI TEMPO card (P19 partial): BPM-/BPM+, TAP TEMPO (0.2-3 s deltas, EMA), time-signature cycle (4/4 3/4 6/8 7/8), engine tempo-map event list with add/remove and ramp/step toggle. |
 | 58 | `608e9e9` | AmeUI MASTER loudness card (P7): integrated LUFS + true-peak L/R polled via `get_master_loudness()`, gain and −14 LUFS/−1 dBTP delivery caption. |
 | 56 | `281c610` | AmeUI diagnostics/SYSTEM card (P2): health line, dsp_load %, drops/overruns/failures/watchdog, overflow flag, RECOVER (`recover_sandboxed_plugins`), silent-fallback guidance. Replaces part of the Slint diagnostics page. |
