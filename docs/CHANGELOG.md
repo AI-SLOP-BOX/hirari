@@ -122,6 +122,7 @@ production support.
 
 ### Changed
 
+- The default UI build is now AmeUI. `cargo build`/`cargo check` compile and boot `ui_shared` + the AmeUI surface (parity with the previous default remains partial: settings/recovery/guides screens are still Slint-only). The Slint surface is optional via `cargo --features slint-wgpu`; `cargo check --features slint-wgpu` keeps the legacy path compiling, and `build_app.sh` advertises `ui=ameui`. The Slint module tree (`ui`, `slint_ui`, `moufu`) is `cfg`-gated so default builds never run the Slint compiler or compile Slint sources.
 - The plug-in chain's read and repair surface now answers from Rust.
   `engine_analysis_reads.rs` opens the shared track session for a per-track
   read, so a parameter, its count and its bypass come straight from the chain

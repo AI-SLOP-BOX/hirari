@@ -41,7 +41,7 @@ install -m 644 "$ROOT_DIR/packaging/macos/Info.plist" "$CONTENTS_DIR/Info.plist"
 RESOURCE_MANIFEST="$CONTENTS_DIR/Resources/hirari-resources.manifest"
 printf '%s\n' \
     'hirari.resources.v1' \
-    'ui=slint-compiled' \
+    'ui=ameui' \
     'metal=optional' \
     'status=generated' > "$RESOURCE_MANIFEST"
 chmod 644 "$RESOURCE_MANIFEST"

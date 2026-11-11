@@ -1,7 +1,7 @@
 //! Main-thread engine telemetry and UI synchronization loop.
 
 use crate::slint_ui::*;
-use crate::ui::arrange_model::{
+use crate::ui_shared::arrange_model::{
     arrangement_measure_starts, arrangement_timeline_end, time_signature_at, valid_time_signatures,
     MeasureStart,
 };
@@ -468,7 +468,7 @@ pub(crate) fn install_telemetry_loop(
     render_lease: Arc<Mutex<Option<crate::ui::operation_gate::OperationLease>>>,
     recording_target: Rc<RefCell<Option<Vec<(u32, Vec<u16>)>>>>,
     peak_reset_generation: Rc<Cell<u64>>,
-    gpu_plot_store: crate::ui::gpu_canvas::PlotFrameStore,
+    gpu_plot_store: crate::ui_shared::gpu_canvas::PlotFrameStore,
 ) {
     let ui_timer_val = Arc::new(AtomicU64::new(0));
     // --- 4. ENGINE TELEMETRY LOOP ---

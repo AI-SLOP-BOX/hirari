@@ -877,7 +877,7 @@ pub fn run() {
         dawproject_import_queue.clone(),
     );
 
-    let gpu_plot_store = crate::ui::gpu_canvas::shared_store();
+    let gpu_plot_store = crate::ui_shared::gpu_canvas::shared_store();
     #[cfg(feature = "slint-wgpu")]
     if std::env::var("HIRARI_DISABLE_GPU_CANVAS").as_deref() != Ok("1") {
         if let Err(error) = crate::ui::slint_wgpu::install(&ui, gpu_plot_store.clone()) {

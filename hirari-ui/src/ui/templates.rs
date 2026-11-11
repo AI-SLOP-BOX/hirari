@@ -1,58 +1,14 @@
 use hirari_core_bridge::HirariCore;
 use slint::{Model, VecModel};
+use crate::ui_shared::template_starter::create_template_project;
+
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::slint_ui::{store_onboarding_progress, sync_tracks_from_engine, AppWindow, Z_Track};
 use crate::ui::operation_gate::{OperationGate, OperationKind};
 
-/// Creates a fresh project seeded with the named template's tracks. Shared by
-/// the Slint INIT_* flow and the AmeUI home page. The previous unsaved
-/// project is abandoned (a new one is created) but any persisted MIDI
-/// sidecar on disk is left alone.
-pub(crate) fn create_template_project(core: &HirariCore, template: &str) -> Result<(), String> {
-    let template_tracks: &[(&str, u32)] = match template {
-        "CINEMATIC SCORE" => &[
-            ("Orchestra", 3),
-            ("Strings", 2),
-            ("Brass", 2),
-            ("Percussion", 2),
-            ("Piano", 1),
-        ],
-        "ATMOS MASTERING" => &[
-            ("Mix Bus", 3),
-            ("Atmos Bed", 0),
-            ("Dialogue", 0),
-            ("Master", 3),
-        ],
-        "VOICE-OVER PRO" => &[("Voice", 4), ("Music Bed", 0), ("Print Master", 3)],
-        _ => &[
-            ("Drums", 2),
-            ("Bass", 2),
-            ("Synth Lead", 2),
-            ("Pads", 2),
-            ("Main Out", 3),
-        ],
-    };
-    create_native_template(core, template_tracks)
-}
-
-fn create_native_template(
-    core: &HirariCore,
-    template_tracks: &[(&str, u32)],
-) -> Result<(), String> {
-    core.new_project();
-    if !core.remove_track(1) {
-        return Err("starter track could not be replaced".into());
-    }
-    for &(name, track_type) in template_tracks {
-        let id = core.add_track(track_type);
-        if id == 0 || !core.set_track_name(id, name) {
-            return Err(format!("could not create template track {name}"));
-        }
-    }
-    Ok(())
-}
+// create_native_template lives in ui_shared::template_starter
 
 fn sync_native_template(tracks: &slint::VecModel<Z_Track>, core: &HirariCore) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(500);

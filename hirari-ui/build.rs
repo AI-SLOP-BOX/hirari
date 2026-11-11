@@ -45,7 +45,14 @@ fn build_failure(stage: &str, detail: impl std::fmt::Display) -> ! {
 }
 
 fn main() {
+    use std::env;
     use std::fs;
+    if env::var_os("CARGO_FEATURE_SLINT_WGPU").is_none() {
+        // The Slint surface is optional and off by default; skip the Slint
+        // compiler and generated-source rewrite entirely so a default
+        // profile never touches Slint sources.
+        return;
+    }
 
     println!("cargo:rerun-if-changed=ui/hirari_studio.slint");
     println!("cargo:rerun-if-changed=ui/arrange_dock.slint");
@@ -137,7 +144,11 @@ fn main() {
     let generated_path = generated
         .to_str()
         .unwrap_or_else(|| build_failure("compile-slint", "generated path is not UTF-8"));
-    let result = slint_build::compile(generated_path);
+    let result = if std::env::var_os("CARGO_FEATURE_SLINT_WGPU").is_some() {
+        slint_build::compile(generated_path)
+    } else {
+        Ok(())
+    };
     let _ = fs::remove_file(generated);
     if let Err(error) = result {
         build_failure("compile-slint", error);

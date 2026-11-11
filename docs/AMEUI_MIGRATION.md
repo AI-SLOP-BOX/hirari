@@ -110,6 +110,7 @@ Notes:
 | R1 | `fad1332` (AmeUI) | Filed Hirari pt.6 requests: TimelineView controlled zoom/offset binding, marker/loop/selection edit events, and beat/bar ruler grids. |
 | 52 | `75543f0` | TimelineView adopted as the arrange ruler (beats-domain, controlled zoom/offset, header indent 104, markers, scrub seeks the engine playhead). The canvas keeps lanes/clips. |
 | 53 | `87f4bb4` | AmeUI home page: template starters (`INIT_*` parity), recent projects list, opens/saves/hides the workspace; recent-project open uses the existing native-dialog pending path. |
+| 54 | (this work) | AmeUI becomes the default UI: the shipped `default` feature now enables `ameui`, with the Slint surface optional behind `slint-wgpu` (`slint`/`slint-build`/`raw-window-handle` are conditional deps; `build.rs` early-returns when `CARGO_FEATURE_SLINT_WGPU` is unset; `pub mod ui`/`slint_ui`/`moufu` are `cfg`-gated). Backends stay source-compatible: backend-neutral measure/geometry/template/recent-project code moved to `ui_shared` (`arrange_model`, `gpu_canvas`, `plot_raster`, `template_starter`, `recent_projects`). `scripts/build_app.sh` advertises `ui=ameui`. |
 
 ## Parity status (AmeUI vs Slint arrange dock)
 

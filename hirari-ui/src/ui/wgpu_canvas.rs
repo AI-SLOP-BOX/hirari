@@ -240,7 +240,7 @@ impl WgpuCanvas {
 #[cfg(test)]
 mod tests {
     use super::waveform_vertices;
-    use crate::ui::gpu_canvas::PlotFrame;
+    use crate::ui_shared::gpu_canvas::PlotFrame;
 
     #[test]
     fn waveform_vertices_are_normalized_for_gpu_clip_space() {

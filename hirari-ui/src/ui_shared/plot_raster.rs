@@ -4,7 +4,7 @@
 //! and the AmeUI Canvas upload path consume the same bytes, so the draw step
 //! stays identical while the windowing backend is migrated.
 
-use crate::ui::gpu_canvas::PlotFrame;
+use crate::ui_shared::gpu_canvas::PlotFrame;
 
 pub const WIDTH: u32 = 960;
 pub const HEIGHT: u32 = 168;
@@ -101,7 +101,7 @@ pub fn piano_rgba(frame: &PlotFrame) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::{meter_rgba, piano_rgba, spectrum_rgba, waveform_rgba, HEIGHT, WIDTH};
-    use crate::ui::gpu_canvas::PlotFrame;
+    use crate::ui_shared::gpu_canvas::PlotFrame;
 
     #[test]
     fn waveform_texture_has_stable_rgba_dimensions() {

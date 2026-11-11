@@ -45,7 +45,7 @@ fn synthesize_midi_clips(
     // further apart is a separate take and gets its own clip. The grouping
     // rule (and its sort) is shared with the AmeUI arranger via the neutral
     // arrange model.
-    let groups = crate::ui::arrange_model::group_midi_spans(
+    let groups = crate::ui_shared::arrange_model::group_midi_spans(
         spans
             .into_iter()
             .map(|span| (span.start_beat, span.end_beat))
@@ -368,7 +368,7 @@ fn sync_tracks_from_engine_with_empty_policy(
             let is_folder = layout.track_type == "FOLD" || layout.track_type == "Bus";
             // Shared with the neutral arrange model so the Slint and AmeUI
             // surfaces keep a project's lane colors identical.
-            let [r, g, b] = crate::ui::arrange_model::track_color(idx);
+            let [r, g, b] = crate::ui_shared::arrange_model::track_color(idx);
             let color = slint::Color::from_rgb_u8(r, g, b);
 
             let clips: Vec<Z_Clip> = layout

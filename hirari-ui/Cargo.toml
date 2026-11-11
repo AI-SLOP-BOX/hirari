@@ -9,8 +9,8 @@ description = "Rust and Slint desktop application for the Hirari DAW."
 [dependencies]
 # 🟢 UI LAYER
 # Slint manages the entire user surface and interaction logic.
-slint.workspace = true
-raw-window-handle.workspace = true
+slint = { workspace = true, optional = true, features = ["std", "accessibility", "renderer-femtovg", "renderer-software", "compat-1-2", "raw-window-handle-06", "unstable-wgpu-29", "backend-winit-x11"] }
+raw-window-handle = { workspace = true, optional = true }
 
 # 🟢 ENGINE BRIDGE
 # Connects the Rust UI to the Hirari runtime and native audio boundary.
@@ -29,7 +29,7 @@ sys-locale = "0.3"
 rand = { version = "0.8.6", default-features = false, features = ["std", "std_rng"] }
 
 [features]
-default = ["slint-wgpu"]
+default = ["ameui"]
 # AmeUI migration target. Off by default: the Slint surface stays the shipped
 # UI until the AmeUI port reaches parity, at which point this becomes the only
 # entry and the Slint stack is deleted. The feature is migration scaffolding,
@@ -43,7 +43,7 @@ ameui = ["dep:ame-ui", "dep:vello"]
 # builds an app whose WGPU request falls through to the OpenGL compatibility
 # check, so every launch dies with "WGPU 29.x rendering is not supported with
 # an OpenGL renderer". Keep them together.
-slint-wgpu = ["slint/unstable-wgpu-29", "slint/renderer-femtovg-wgpu"]
+slint-wgpu = ["dep:slint", "dep:raw-window-handle", "slint/unstable-wgpu-29", "slint/renderer-femtovg-wgpu"]
 # High-rate waveform/spectrum surfaces are opt-in so the normal Slint build
 # stays small. The feature uses wgpu's native Metal/DX12/Vulkan backends.
 gpu-canvas = ["dep:wgpu", "dep:bytemuck"]

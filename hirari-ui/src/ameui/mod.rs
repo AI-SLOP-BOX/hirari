@@ -65,7 +65,7 @@ use vello::kurbo::{Affine, Line, Rect, RoundedRect, Stroke};
 use vello::peniko::{Color, Fill};
 use vello::wgpu;
 
-use crate::ui::arrange_model::{
+use crate::ui_shared::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
     last_clip_end, note_at, parse_arrange_tracks, parse_audio_devices, parse_markers,
     parse_midi_notes, parse_preview_catalog, piano_roll_geometry, plugin_name, trim_edge_at,
@@ -73,9 +73,9 @@ use crate::ui::arrange_model::{
     LibraryAsset, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX,
     ARRANGE_ZOOM_MIN,
 };
-use crate::ui::gpu_canvas::PlotFrameStore;
-use crate::ui::plot_raster;
-use crate::ui::templates::create_template_project;
+use crate::ui_shared::gpu_canvas::PlotFrameStore;
+use crate::ui_shared::plot_raster;
+use crate::ui_shared::template_starter::create_template_project;
 use hirari_core_bridge::project_contracts::MidiNoteContract;
 
 /// Snap divisions offered by the toolbar picker (Slint `snap_val`
@@ -1323,8 +1323,8 @@ impl HirariAmeApp {
             let top = y0 + f64::from(geometry.y_for_lane(index));
             let inner = (lane_height - 8.0).max(4.0);
             let preview_points = |lane: u32,
-                                  points: &[crate::ui::arrange_model::AutomationPoint]|
-             -> Vec<crate::ui::arrange_model::AutomationPoint> {
+                                  points: &[crate::ui_shared::arrange_model::AutomationPoint]|
+             -> Vec<crate::ui_shared::arrange_model::AutomationPoint> {
                 let mut points = points.to_vec();
                 if let Some(edit) = &self.auto_edit {
                     if edit.track_id == track.id && edit.lane == lane {
@@ -1336,7 +1336,7 @@ impl HirariAmeApp {
                                 }
                             }
                             None => {
-                                points.push(crate::ui::arrange_model::AutomationPoint {
+                                points.push(crate::ui_shared::arrange_model::AutomationPoint {
                                     beat: edit.orig_beat.max(0.0),
                                     value: (edit.orig_value + edit.delta_value).clamp(
                                         if lane == 0 { 0.0 } else { -1.0 },
@@ -1352,7 +1352,7 @@ impl HirariAmeApp {
             };
             let volume_points = preview_points(0, &track.volume_automation);
             let pan_points = preview_points(1, &track.pan_automation);
-            let mut draw_automation = |points: &[crate::ui::arrange_model::AutomationPoint],
+            let mut draw_automation = |points: &[crate::ui_shared::arrange_model::AutomationPoint],
                                        min_value: f32,
                                        max_value: f32,
                                        color: Color| {
@@ -1439,7 +1439,7 @@ impl HirariAmeApp {
         let Some(track) = tracks.iter().find(|track| track.id == edit.track_id) else {
             return;
         };
-        let mut points: Vec<crate::ui::arrange_model::AutomationPoint> = match edit.lane {
+        let mut points: Vec<crate::ui_shared::arrange_model::AutomationPoint> = match edit.lane {
             0 => track.volume_automation.clone(),
             _ => track.pan_automation.clone(),
         };
@@ -1455,7 +1455,7 @@ impl HirariAmeApp {
                 );
             }
             None => {
-                points.push(crate::ui::arrange_model::AutomationPoint {
+                points.push(crate::ui_shared::arrange_model::AutomationPoint {
                     beat: edit.orig_beat.max(0.0),
                     value: (edit.orig_value + edit.delta_value).clamp(
                         if edit.lane == 0 { 0.0 } else { -1.0 },
@@ -1995,7 +1995,7 @@ impl App for HirariAmeApp {
                     let lane = self.auto_lane.get();
                     let mut found: Option<AutoEdit> = None;
                     if let Some(track) = tracks.get(lane_index) {
-                        let points: &[crate::ui::arrange_model::AutomationPoint] = match lane {
+                        let points: &[crate::ui_shared::arrange_model::AutomationPoint] = match lane {
                             0 => &track.volume_automation,
                             _ => &track.pan_automation,
                         };
@@ -2655,7 +2655,7 @@ impl App for HirariAmeApp {
                 let Some(track) = tracks.iter().find(|track| track.id == track_id) else {
                     return;
                 };
-                let mut points: Vec<crate::ui::arrange_model::AutomationPoint> = match lane {
+                let mut points: Vec<crate::ui_shared::arrange_model::AutomationPoint> = match lane {
                     0 => track.volume_automation.clone(),
                     _ => track.pan_automation.clone(),
                 };
@@ -3747,7 +3747,7 @@ impl App for HirariAmeApp {
                 });
             template_buttons.push(blank_button.into());
             let mut recent_buttons: Vec<View> = Vec::new();
-            for project in crate::slint_ui::load_recent_projects() {
+            for project in crate::ui_shared::recent_projects::load_recent_projects() {
                 let open_pending = self.pending_open.clone();
                 let path = project.path.to_string();
                 let file_name = std::path::Path::new(&path)
