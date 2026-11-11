@@ -1748,19 +1748,29 @@ impl App for HirariAmeApp {
             return false;
         }
         if event.modifiers.control || event.modifiers.super_key {
-            // Zoom, anchored at the pointer beat.
-            let factor = if event.delta_y > 0.0 {
-                1.25
-            } else {
-                1.0 / 1.25
-            };
+            // Zoom anchored at the pointer beat, same factor curve as the
+            // timeline ruler's wheel handling.
+            let factor = (1.0 - event.delta_y / 400.0).clamp(0.25, 4.0) as f32;
             self.zoom_arrange_at(event.x as f32, factor);
         } else {
-            // Plain wheel scrolls the timeline (DAW convention).
-            let delta_beats =
-                ((event.delta_x + event.delta_y) / f64::from(geometry.px_per_beat)) as f32;
+            // Plain wheel scrolls the timeline (DAW convention), matching
+            // the timeline ruler's scroll direction and units.
+            let timeline_end = self.timeline_end_beats.get();
+            let slot_width = (self.arrange_bounds.2 - 104.0).max(0.0);
+            let visible = if geometry.px_per_beat > 0.0 {
+                f64::from(slot_width / geometry.px_per_beat)
+            } else {
+                f64::from(timeline_end)
+            };
+            let max_offset = (f64::from(timeline_end) - visible).max(0.0);
+            let delta = if event.delta_x != 0.0 {
+                event.delta_x
+            } else {
+                event.delta_y
+            };
+            let offset = f64::from(self.arrange_scroll_beats.get()) - delta / f64::from(geometry.px_per_beat);
             self.arrange_scroll_beats
-                .set((self.arrange_scroll_beats.get() + delta_beats).max(0.0));
+                .set(offset.clamp(0.0, max_offset) as f32);
         }
         true
     }
