@@ -317,6 +317,14 @@ pub struct HirariAmeApp {
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
+    /// OpenUtau vocal score orchestration (P13). Source and render are
+    /// picked independently because the engine's import flow requires both
+    /// the score and the rendered stem; importing runs through the poll.
+    openutau_caption: State<String>,
+    openutau_source: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    openutau_render: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    pending_openutau:
+        std::sync::Arc<std::sync::Mutex<Option<(std::path::PathBuf, std::path::PathBuf)>>>,
     /// Send matrix panel (Slint aux sends / audio routing parity):
     /// source/bus selectors, gain, pre/post, enable.
     show_sends: State<bool>,
@@ -496,6 +504,10 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         video_frame: None,
         video_size: None,
         video_revision: std::sync::Mutex::new(0),
+        openutau_caption: context.state(String::new()),
+        openutau_source: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        openutau_render: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_openutau: std::sync::Arc::new(std::sync::Mutex::new(None)),
         show_sends: context.state(false),
         send_source: context.state(0u32),
         send_dest: context.state(0u32),
@@ -1161,6 +1173,49 @@ impl HirariAmeApp {
                 ));
             } else {
                 self.status.set("SAVE FAILED".to_owned());
+            }
+        }
+        // OpenUtau import: source is the UST/USTX path, render is the
+        // rendered stem; both are required by the engine's import path.
+        if let Some((source, render)) = self
+            .pending_openutau
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            let diagnostic = core.openutau_import_diagnostic_json(
+                &source.to_string_lossy(),
+                &render.to_string_lossy(),
+            );
+            let ok = serde_json::from_str::<serde_json::Value>(&diagnostic)
+                .ok()
+                .and_then(|value| value.get("ok").and_then(serde_json::Value::as_bool))
+                == Some(true);
+            if !ok {
+                self.openutau_caption
+                    .set(format!("IMPORT REJECTED: {diagnostic}"));
+            } else {
+                let track_id = core.add_track(4);
+                if track_id == 0 || !core.add_region(track_id, &render.to_string_lossy(), 0.0) {
+                    self.openutau_caption
+                        .set("OPENUTAU IMPORT FAILED: COULD NOT CREATE VOCAL REGION".to_owned());
+                } else {
+                    self.tracks.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                    self.openutau_caption.set(format!(
+                        "VOCAL IMPORTED: {} · SOURCE KEPT: {}",
+                        render
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("render"),
+                        source
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("score"),
+                    ));
+                }
             }
         }
         // MIDI export dialog result: write the .mid through the engine.
@@ -3625,6 +3680,134 @@ impl App for HirariAmeApp {
             View::Caption(format!("BPM {:.1}", self.tempo.get())),
         ]);
 
+        // OpenUtau vocal card (Slint OpenUtau editor parity): score pick
+        // + launch + render pick + import into a new Vocal track.
+        let open_score_source = self.openutau_source.clone();
+        let open_score_caption = self.openutau_caption.clone();
+        let open_score_button = ButtonView::new("OPEN USTX")
+            .action_id("openutau.open")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .add_filter("OpenUtau score", &["ustx", "ust"]);
+                let pending = open_score_source.clone();
+                let caption = open_score_caption.clone();
+                dialog.pick_file_async(move |path| {
+                    if let Some(path) = path {
+                        let name = path
+                            .file_name()
+                            .map(|v| v.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                        caption.set(format!("SCORE: {name}"));
+                    }
+                });
+            });
+        let open_score_source = self.openutau_source.clone();
+        let open_score_caption = self.openutau_caption.clone();
+        let launch_openutau = ButtonView::new("LAUNCH OPENUTAU")
+            .action_id("openutau.launch")
+            .secondary()
+            .on_press(move |_| {
+                let source = open_score_source
+                    .lock()
+                    .map(|mut slot| slot.take())
+                    .unwrap_or_default();
+                let Some(source) = source else {
+                    open_score_caption.set("PICK A SCORE FIRST".to_owned());
+                    return;
+                };
+                if let Err(error) =
+                    hirari_core_bridge::openutau::validate_source(&source.to_string_lossy())
+                {
+                    open_score_caption.set(format!("INVALID SCORE · {error}"));
+                    return;
+                }
+                let app = hirari_core_bridge::openutau::application_path();
+                if !app.is_dir() {
+                    open_score_caption.set(format!("OPENUTAU NOT FOUND · {}", app.display()));
+                    return;
+                }
+                #[cfg(target_os = "macos")]
+                let spawn_result = std::process::Command::new("open")
+                    .arg("-a")
+                    .arg(&app)
+                    .arg(&source)
+                    .spawn();
+                #[cfg(not(target_os = "macos"))]
+                let spawn_result = {
+                    open_score_caption
+                        .set("OPENUTAU LAUNCH IS MAC-ONLY · RENDER SYMLINKED BY HAND".into());
+                    return;
+                };
+                match spawn_result {
+                    Ok(_) => {
+                        open_score_caption.set(format!("OPENUTAU LAUNCHED · {}", app.display()))
+                    }
+                    Err(error) => {
+                        open_score_caption.set(format!("OPENUTAU LAUNCH FAILED: {error}"))
+                    }
+                }
+            });
+        let open_render_source = self.openutau_render.clone();
+        let open_render_caption = self.openutau_caption.clone();
+        let pick_render_button = ButtonView::new("PICK RENDER")
+            .action_id("openutau.pick_render")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .add_filter("Rendered vocal", &["wav", "aif", "aiff"]);
+                let pending = open_render_source.clone();
+                let caption = open_render_caption.clone();
+                dialog.pick_file_async(move |path| {
+                    if let Some(path) = path {
+                        let name = path
+                            .file_name()
+                            .map(|v| v.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                        caption.set(format!("RENDER: {name}"));
+                    }
+                });
+            });
+        let import_source = self.openutau_source.clone();
+        let import_render = self.openutau_render.clone();
+        let import_pending = self.pending_openutau.clone();
+        let import_caption = self.openutau_caption.clone();
+        let import_button = ButtonView::new("IMPORT VOCAL")
+            .action_id("openutau.import")
+            .primary()
+            .on_press(move |_| {
+                let source = import_source
+                    .lock()
+                    .map(|slot| slot.clone())
+                    .unwrap_or_default();
+                let render = import_render
+                    .lock()
+                    .map(|slot| slot.clone())
+                    .unwrap_or_default();
+                let (Some(source), Some(render)) = (source, render) else {
+                    import_caption.set("PICK BOTH A SCORE AND A RENDER FIRST".to_owned());
+                    return;
+                };
+                if let Ok(mut slot) = import_pending.lock() {
+                    *slot = Some((source, render));
+                }
+                import_caption.set("VOCAL IMPORT QUEUED".to_owned());
+            });
+        let openutau_card = View::Card(vec![View::HStack(vec![
+            View::Text("VOCAL SCORE".to_owned()),
+            open_score_button.into(),
+            launch_openutau.into(),
+            pick_render_button.into(),
+            import_button.into(),
+            View::Caption(self.openutau_caption.get()),
+        ])]);
+
         // SENDS card (Slint audio routing / aux sends parity): source
         // cycler, destination bus cycler, gain slider with live apply,
         // pre/post toggle and send enable.
@@ -5225,6 +5408,7 @@ impl App for HirariAmeApp {
         if self.show_sends.get() {
             views.push(sends_card);
         }
+        views.push(openutau_card);
         views.extend([
             export_card,
             tempo_card,
