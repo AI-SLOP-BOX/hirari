@@ -75,6 +75,11 @@ use crate::ui_shared::arrange_model::{
 };
 use crate::ui_shared::gpu_canvas::PlotFrameStore;
 use crate::ui_shared::plot_raster;
+use crate::ui_shared::render_ops::{
+    cancellation_status, kick_stem, prepare_rejected, render_format_label, render_tail_seconds,
+    stem_step, StemStep,
+};
+use crate::ui_shared::render_path::default_render_output_path;
 use crate::ui_shared::template_starter::create_template_project;
 use hirari_core_bridge::project_contracts::MidiNoteContract;
 
@@ -225,6 +230,18 @@ pub struct HirariAmeApp {
     auto_point: State<Option<usize>>,
     /// Track of the selected automation point (for DELETE).
     auto_track: State<u32>,
+    /// Export format (engine native numbering: 0=PCM16, 1=Wave64,
+    /// 2=Float32, 3=PCM24).
+    export_format: State<u32>,
+    /// Effect-tail preset index into `[0, 1, 2, 5, 10, 30]`f32 seconds.
+    export_tail_index: State<u32>,
+    /// Set while the stems queue is armed; the poll then watches for
+    /// engine bounce completion and advances the batch, like the
+    /// Slint render telemetry.
+    stem_export_active: State<bool>,
+    /// Caption shown inside the export card (render state / progress /
+    /// stem counts).
+    render_caption: State<String>,
     /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
@@ -294,6 +311,12 @@ pub struct HirariAmeApp {
     pending_preset: std::sync::Arc<std::sync::Mutex<Option<(std::path::PathBuf, bool, u32, u32)>>>,
     /// Chosen library folder awaiting the UI-thread scan.
     pending_library: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    /// MIDI export path; a .mid save dialog drops its path here and the
+    /// poll executes the engine export.
+    pending_midi: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
+    /// Directory output for a stem export, set by the folder picker; the
+    /// poll arms core's batch on arrival.
+    pending_stems: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     library_assets: State<Vec<LibraryAsset>>,
     library_query: State<String>,
     /// Last arrange canvas bounds, to map a file drop to lane/beat.
@@ -350,6 +373,10 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         auto_lane: context.state(0u32),
         auto_point: context.state(None),
         auto_track: context.state(0u32),
+        export_format: context.state(0u32),
+        export_tail_index: context.state(2u32),
+        stem_export_active: context.state(false),
+        render_caption: context.state(String::new()),
         selected_clip: context.state(None),
         clip_peaks: context.state(HashMap::new()),
         piano_track: context.state(0u32),
@@ -394,6 +421,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         pending_save: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_preset: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_library: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_midi: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_stems: std::sync::Arc::new(std::sync::Mutex::new(None)),
         library_assets: context.state(Vec::<LibraryAsset>::new()),
         library_query: context.state(String::new()),
         arrange_bounds: (0.0, 0.0, 0.0, 0.0),
@@ -419,10 +448,104 @@ pub fn run() {
 
 impl HirariAmeApp {
     /// Sample the engine on the UI thread and publish reactive state.
+    /// Drives the offline-render flow while a render or a stems batch is
+    /// in flight, mirroring the Slint `telemetry_render` cadence: the
+    /// engine reports bounce progress/completion and the stems queue is
+    /// advanced here, never on the UI event path.
+    fn poll_render(&mut self) {
+        let Some(core) = self.core.clone() else {
+            return;
+        };
+        let Some((state, progress)) = core.get_bounce_status() else {
+            return;
+        };
+        match state {
+            3 => {
+                if !self.stem_export_active.get() {
+                    self.render_caption.set("RENDER COMPLETE".to_owned());
+                    return;
+                }
+                match stem_step(&core.stem_batch_settle(true)) {
+                    StemStep::StemDone { rendered, total } => {
+                        match stem_step(&core.stem_batch_next()) {
+                            StemStep::Ready { output, format, .. } => {
+                                if kick_stem(&core, &output, format) {
+                                    self.render_caption.set(format!(
+                                        "STEM {rendered} OF {total} COMPLETE · NEXT QUEUED"
+                                    ));
+                                } else {
+                                    core.stem_batch_abort();
+                                    self.stem_export_active.set(false);
+                                    self.render_caption.set(format!(
+                                        "could not queue stem {} of {total}",
+                                        rendered + 1
+                                    ));
+                                }
+                            }
+                            StemStep::Failed(reason) => {
+                                core.stem_batch_abort();
+                                self.stem_export_active.set(false);
+                                self.render_caption.set(reason);
+                            }
+                            _ => {
+                                core.stem_batch_abort();
+                                self.stem_export_active.set(false);
+                                self.render_caption
+                                    .set("stem export queue is invalid".to_owned());
+                            }
+                        }
+                    }
+                    StemStep::Complete { outputs, .. } => {
+                        self.stem_export_active.set(false);
+                        self.render_caption
+                            .set(format!("STEM EXPORT COMPLETE · {} FILES", outputs.len()));
+                    }
+                    StemStep::Failed(reason) => {
+                        self.stem_export_active.set(false);
+                        self.render_caption.set(reason);
+                    }
+                    StemStep::Ready { .. } => {
+                        core.stem_batch_abort();
+                        self.stem_export_active.set(false);
+                        self.render_caption
+                            .set("stem export reported an unexpected state".to_owned());
+                    }
+                }
+            }
+            4 => {
+                if self.stem_export_active.get() {
+                    let reason = match stem_step(&core.stem_batch_settle(false)) {
+                        StemStep::Failed(reason) => reason,
+                        _ => "native stem render failed".to_owned(),
+                    };
+                    self.render_caption.set(reason);
+                } else {
+                    self.render_caption.set("RENDER FAILED".to_owned());
+                }
+                self.stem_export_active.set(false);
+            }
+            5 => {
+                if self.stem_export_active.get() {
+                    core.stem_batch_abort();
+                }
+                self.stem_export_active.set(false);
+                self.render_caption.set("RENDER CANCELLED".to_owned());
+            }
+            1 | 2 => {
+                self.render_caption.set(format!(
+                    "RENDERING {:.0}%",
+                    progress.clamp(0.0, 1.0) * 100.0
+                ));
+            }
+            _ => {}
+        }
+    }
+
     fn poll_engine(&mut self) {
         let Some(core) = self.core.clone() else {
             return;
         };
+        self.poll_render();
         self.playing.set(core.is_playing());
         self.audio_ready.set(core.is_audio_device_ready());
         self.io_latency_ms
@@ -568,6 +691,60 @@ impl HirariAmeApp {
                 ));
             } else {
                 self.status.set("SAVE FAILED".to_owned());
+            }
+        }
+        // MIDI export dialog result: write the .mid through the engine.
+        if let Some(path) = self
+            .pending_midi
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            match core.export_midi_file(&path.to_string_lossy()) {
+                Ok(count) => self.status.set(format!("MIDI EXPORTED · {count} NOTES")),
+                Err(_) => self.status.set("MIDI EXPORT FAILED".to_owned()),
+            }
+        }
+        // Stem export folder selected: arm the batch; the poll advances it
+        // once the engine reports bounce state 3 (see poll_render).
+        if let Some(dir) = self
+            .pending_stems
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            let track_ids: Vec<u32> = self.tracks.get().iter().map(|t| t.id).collect();
+            if track_ids.is_empty() {
+                self.render_caption
+                    .set("STEM EXPORT NEEDS AT LEAST ONE TRACK".to_owned());
+            } else {
+                let prepared = core.stem_batch_prepare(
+                    dir.to_string_lossy().as_ref(),
+                    self.export_format.get(),
+                    &track_ids,
+                    render_tail_seconds(self.export_tail_index.get() as i32),
+                    false,
+                    true,
+                );
+                match prepare_rejected(&prepared) {
+                    Some(reason) => self.render_caption.set(reason),
+                    None => match stem_step(&core.stem_batch_next()) {
+                        StemStep::Ready { output, format, .. } => {
+                            if kick_stem(&core, &output, format) {
+                                self.stem_export_active.set(true);
+                                self.render_caption.set("STEM EXPORT STARTED".to_owned());
+                            } else {
+                                core.stem_batch_abort();
+                                self.render_caption
+                                    .set("could not queue the first stem".to_owned());
+                            }
+                        }
+                        StemStep::Failed(reason) => self.render_caption.set(reason),
+                        _ => self
+                            .render_caption
+                            .set("stem export queue is invalid".to_owned()),
+                    },
+                }
             }
         }
     }
@@ -2346,6 +2523,116 @@ impl App for HirariAmeApp {
             View::Caption(status.clone()),
         ])]);
 
+        // Export card (Slint export dialog parity): format and tail
+        // cyclers, mix render, stem batch, MIDI export, cancel. Stems
+        // are armed by the folder-picker poll; the render poll advances
+        // the batch while the engine reports bounce state 3.
+        let export_format_state = self.export_format.clone();
+        let format_label = render_format_label(self.export_format.get());
+        let export_format_button = ButtonView::new(format!("FORMAT: {format_label}"))
+            .action_id("export.format_cycle")
+            .secondary()
+            .on_press(move |_| {
+                const FORMATS: [u32; 4] = [0, 3, 2, 1]; // PCM16, PCM24, Float32, Wave64
+                let current = export_format_state.get();
+                let index = FORMATS
+                    .iter()
+                    .position(|code| *code == current)
+                    .unwrap_or(0);
+                export_format_state.set(FORMATS[(index + 1) % FORMATS.len()]);
+            });
+        let export_tail_state = self.export_tail_index.clone();
+        let tail_label = match self.export_tail_index.get() {
+            0 => "NONE",
+            1 => "1s",
+            2 => "2s",
+            3 => "5s",
+            4 => "10s",
+            _ => "30s",
+        };
+        let export_tail_button = ButtonView::new(format!("TAIL: {tail_label}"))
+            .action_id("export.tail_cycle")
+            .secondary()
+            .on_press(move |_| {
+                export_tail_state.set((export_tail_state.get() + 1) % 6);
+            });
+        let render_core = self.core.clone();
+        let render_format = self.export_format.clone();
+        let render_tail = self.export_tail_index.clone();
+        let render_status = self.render_caption.clone();
+        let render_button = ButtonView::new("RENDER")
+            .action_id("export.render")
+            .primary()
+            .on_press(move |_| {
+                let Some(core) = &render_core else { return };
+                let path = default_render_output_path();
+                core.set_offline_render_tail_seconds(render_tail_seconds(render_tail.get() as i32));
+                if core.start_render_async_to_format(&path.to_string_lossy(), render_format.get()) {
+                    render_status.set(format!(
+                        "RENDER QUEUED: {}",
+                        std::path::Path::new(&path)
+                            .file_name()
+                            .map(|name| name.to_string_lossy().into_owned())
+                            .unwrap_or_default()
+                    ));
+                } else {
+                    render_status.set("RENDER COULD NOT BE QUEUED".to_owned());
+                }
+            });
+        let stems_pending = self.pending_stems.clone();
+        let stems_button = ButtonView::new("STEMS")
+            .action_id("export.stems")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new();
+                let pending = stems_pending.clone();
+                dialog.pick_folder_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
+            });
+        let midi_pending = self.pending_midi.clone();
+        let midi_button = ButtonView::new("MIDI")
+            .action_id("export.midi")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .set_file_name("project.mid")
+                    .add_filter("MIDI file", &["mid", "midi"]);
+                let pending = midi_pending.clone();
+                dialog.save_file_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
+            });
+        let cancel_core = self.core.clone();
+        let cancel_status = self.render_caption.clone();
+        let cancel_button = ButtonView::new("CANCEL")
+            .action_id("export.cancel")
+            .secondary()
+            .on_press(move |_| {
+                if let Some(core) = &cancel_core {
+                    let (_, message, _) = cancellation_status(core.cancel_render());
+                    cancel_status.set(message.to_owned());
+                }
+            });
+        let export_card = View::Card(vec![View::HStack(vec![
+            View::Text("EXPORT".to_owned()),
+            export_format_button.into(),
+            export_tail_button.into(),
+            render_button.into(),
+            stems_button.into(),
+            midi_button.into(),
+            cancel_button.into(),
+            View::Caption(self.render_caption.get()),
+        ])]);
+
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
         let play_button = ButtonView::new(if playing { "Playing" } else { "Play" })
@@ -3780,6 +4067,7 @@ impl App for HirariAmeApp {
 
         let mut views = vec![
             project_bar,
+            export_card,
             transport,
             meter,
             audio_card,

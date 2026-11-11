@@ -1411,9 +1411,7 @@ mod tests {
         let (observed_tx, observed_rx) = channel();
         let server = thread::spawn(move || {
             let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(deadline))
-                .unwrap();
+            socket.set_read_timeout(Some(deadline)).unwrap();
             let mut reader = BufReader::new(socket.try_clone().unwrap());
             let handshake = read_client_message(&mut reader);
             observed_tx.send(handshake.clone()).unwrap();

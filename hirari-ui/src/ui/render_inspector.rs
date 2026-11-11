@@ -1,18 +1,8 @@
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
-static NEXT_RENDER_PATH: AtomicU64 = AtomicU64::new(1);
-
-pub(crate) fn default_render_output_path() -> PathBuf {
-    let sequence = NEXT_RENDER_PATH.fetch_add(1, Ordering::Relaxed);
-    let timestamp = unix_time_millis();
-    std::env::temp_dir().join(format!(
-        "hirari_master-{}-{timestamp}-{sequence}.wav",
-        std::process::id()
-    ))
-}
+pub(crate) use crate::ui_shared::render_path::{default_render_output_path, unix_time_millis};
 
 #[cfg(test)]
 pub(crate) fn inspect_rendered_wav(path: &Path) -> String {
@@ -177,10 +167,4 @@ pub(crate) fn inspect_rendered_wav_result(path: &Path) -> Result<String, String>
         peak_db,
         file_len
     ))
-}
-
-pub(crate) fn unix_time_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis() as u64)
 }
