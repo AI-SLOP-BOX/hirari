@@ -47,12 +47,18 @@ implemented in-tree are:
   `AudioEngine` and CoreAudio-facing components, with bounded plugin workers
   and an offline WAV render path. These paths are testable, but do not promise
   universal device or plugin compatibility.
-* **UI preview**: a Slint desktop client covering the main project, arrange,
+* **UI preview**: a desktop client covering the main project, arrange,
   piano-roll, mixer, browser, and diagnostics surfaces. Several advanced edit
-  operations and production workflows are still incomplete.
-  The default desktop backend is Slint WGPU 29; dense waveform, spectrum,
-  meter, and piano-roll imagery is uploaded through the shared GPU notifier,
-  while Slint remains the layout and accessibility shell.
+  operations and production workflows are still incomplete. The default
+  surface is under migration to [AmeUI]; it builds as `default = ["ameui"]`
+  but requires the private AmeUI sources at `../AmeUI`, which are not publicly
+  cloneable. Without them, `cargo` cannot load this workspace at all. Hosts
+  without those sources run `./scripts/ensure_ameui_stub.sh` once (it creates
+  a manifest-only placeholder) and build the legacy Slint WGPU 29 surface
+  with `cargo check --no-default-features --features slint-wgpu`. Dense
+  waveform, spectrum, meter, and piano-roll imagery is uploaded through the
+  shared GPU notifier while Slint remains the layout and accessibility shell
+  on that path.
 * **Integration boundaries**: AU/CLAP/VST3 and OpenUtau adapters exist as
   capability-specific boundaries. A host-path test or installed fixture does
   not prove that every third-party plugin, native editor, voicebank, or device
@@ -125,7 +131,13 @@ governed by [CODE_OF_CONDUCT.md](./docs/CODE_OF_CONDUCT.md).
 
 ```sh
 scripts/setup_dev.sh
-cargo test --workspace --locked
+# Hirari's AmeUI surface needs the private AmeUI sources at `../AmeUI`.
+if [ -f ../AmeUI/Cargo.toml ]; then
+    cargo test --workspace --locked
+else
+    ./scripts/ensure_ameui_stub.sh
+    cargo test --workspace --no-default-features --features slint-wgpu
+fi
 scripts/build_app.sh
 open "packaging/Hirari DAW.app"
 ```

@@ -621,6 +621,15 @@ production support.
   only consumer of that plumbing and is gone. A sandbox path the copy refuses is
   skipped rather than aborting the duplicate, as before. C++ 7113 -> 7075 (-38).
 
+- Public hosts (forks, GitHub Actions) cannot check out the private `ame-ui`
+  path dependency, so before any `cargo` command there the workspace would not
+  even load. `scripts/ensure_ameui_stub.sh` generates a manifest-only
+  placeholder (exact pins derived from the committed `Cargo.lock`); the
+  GitHub workflow builds the legacy Slint backend against it (fmt/check/test
+  all green in a scratch checkout) and no longer uses `--locked` there, while
+  the internal Linux CI keeps `--locked` and remains the AmeUI verification
+  gate. `scripts/build_app.sh` honors `HIRARI_UI_FEATURES` for forks.
+
 - The project-layout gather now reads the track's own Rust storages. The host
   table shrank from 26 accessors to 11 (`begin`/`end`/count/handle/id/type/
   storage-kind/name plus the route stores and sample rate): automation lists and
