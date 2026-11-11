@@ -1511,7 +1511,11 @@ mod tests {
 
             let state = ServerMessage::EntityState {
                 entity_id: source_id.clone(),
-                version: 42,
+                // Keep the state sample below the update's version: at the
+                // same version the adapter's queue keeps the committed
+                // snapshot and drops the transient update, which made this
+                // test observation-dependent on scheduling.
+                version: 41,
                 payload: PayloadTransport::Inline(serde_json::json!({"title": "Companion"})),
             };
             writeln!(socket, "{}", serde_json::to_string(&state).unwrap()).unwrap();
