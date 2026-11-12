@@ -3731,24 +3731,25 @@ impl App for HirariAmeApp {
                     return;
                 }
                 #[cfg(target_os = "macos")]
-                let spawn_result = std::process::Command::new("open")
-                    .arg("-a")
-                    .arg(&app)
-                    .arg(&source)
-                    .spawn();
+                {
+                    match std::process::Command::new("open")
+                        .arg("-a")
+                        .arg(&app)
+                        .arg(&source)
+                        .spawn()
+                    {
+                        Ok(_) => {
+                            open_score_caption.set(format!("OPENUTAU LAUNCHED · {}", app.display()))
+                        }
+                        Err(error) => {
+                            open_score_caption.set(format!("OPENUTAU LAUNCH FAILED: {error}"))
+                        }
+                    }
+                }
                 #[cfg(not(target_os = "macos"))]
-                let spawn_result = {
+                {
                     open_score_caption
-                        .set("OPENUTAU LAUNCH IS MAC-ONLY · RENDER SYMLINKED BY HAND".into());
-                    return;
-                };
-                match spawn_result {
-                    Ok(_) => {
-                        open_score_caption.set(format!("OPENUTAU LAUNCHED · {}", app.display()))
-                    }
-                    Err(error) => {
-                        open_score_caption.set(format!("OPENUTAU LAUNCH FAILED: {error}"))
-                    }
+                        .set("OPENUTAU LAUNCH IS MAC-ONLY · RENDER MUST BE LINKED BY HAND".into());
                 }
             });
         let open_render_source = self.openutau_render.clone();
