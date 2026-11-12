@@ -213,7 +213,7 @@ impl HirariCore {
     }
 
     /// Returns the actual preview-library entries currently registered by the
-    /// audio runtime. This is deliberately JSON so Slint, CLI, and external
+    /// audio runtime. This is deliberately JSON so the desktop UI, CLI, and external
     /// automation can consume the same control-plane catalog.
     pub fn preview_audio_catalog_json(&self) -> String {
         match self.preview_audio.lock() {

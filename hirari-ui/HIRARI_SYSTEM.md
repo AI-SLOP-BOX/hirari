@@ -9,7 +9,7 @@ boundary is an engineering and distribution boundary, not a relicensing of
 Hirari source.
 - **Physical Sandboxing**: Plugins (VST/AU/CLAP) are executed in a dedicated memory space via the `HirariBridge` process.
 - **IPC over Shared Memory**: Audio buffers are transferred via zero-copy shared memory regions to maintain low latency while keeping the worker lifecycle independently recoverable.
-- **UI Sovereignty**: Plugin UIs are managed by the host as independent windows, ensuring that legacy or unstable VST interfaces never compromise the Slint main render thread.
+- **UI Sovereignty**: Plugin UIs are managed by the host as independent windows, ensuring that legacy or unstable VST interfaces never compromise the AmeUI main render thread.
 
 ## 2. "Crash-Resistant" Orchestration
 - **Fault Isolation**: A plugin failure (SIGSEGV/SIGILL) only terminates the `HirariBridge` child process. The main DAW engine continues recording and processing without interruption.
