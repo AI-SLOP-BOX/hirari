@@ -44,6 +44,10 @@ pub struct ArrangeClip {
     pub fade_out: f32,
     /// Clip gain (linear, 0..2), consumed by `set_region_gain`.
     pub gain: f32,
+    /// Clip pitch offset in semitones, from the engine layout.
+    pub pitch_semitones: f32,
+    /// Loop count from the engine layout.
+    pub loop_count: u32,
 }
 
 /// One arrangement lane reduced to what the timeline draws, plus the
@@ -316,6 +320,14 @@ struct RegionLayout {
     fade_out_samples: u64,
     #[serde(default = "default_clip_gain")]
     clip_gain: f32,
+    #[serde(default)]
+    pitch_semitones: f32,
+    #[serde(default = "default_loop_count")]
+    loop_count: u32,
+}
+
+fn default_loop_count() -> u32 {
+    1
 }
 
 fn default_clip_gain() -> f32 {
@@ -456,6 +468,8 @@ pub fn parse_arrange_tracks(
                         } else {
                             region.fade_out_samples as f32 / region.len as f32
                         },
+                        pitch_semitones: region.pitch_semitones,
+                        loop_count: region.loop_count,
                         gain: region.clip_gain.clamp(0.0, 2.0),
                     }
                 })
@@ -1224,6 +1238,10 @@ mod tests {
                     reverse: false,
                     fade_in: 0.0,
                     fade_out: 0.0,
+                    pitch_semitones: 0.0,
+
+                    loop_count: 1,
+
                     gain: 1.0,
                 },
                 ArrangeClip {
@@ -1238,6 +1256,10 @@ mod tests {
                     reverse: false,
                     fade_in: 0.0,
                     fade_out: 0.0,
+                    pitch_semitones: 0.0,
+
+                    loop_count: 1,
+
                     gain: 1.0,
                 },
             ],
@@ -1286,6 +1308,10 @@ mod tests {
             reverse: false,
             fade_in: 0.0,
             fade_out: 0.0,
+            pitch_semitones: 0.0,
+
+            loop_count: 1,
+
             gain: 1.0,
         };
         assert_eq!(trim_edge_at(&geometry, &clip, 107.0), Some(TrimEdge::Left));
@@ -1498,6 +1524,10 @@ mod tests {
                     reverse: false,
                     fade_in: 0.0,
                     fade_out: 0.0,
+                    pitch_semitones: 0.0,
+
+                    loop_count: 1,
+
                     gain: 1.0,
                 }],
             },
@@ -1528,6 +1558,10 @@ mod tests {
                     reverse: false,
                     fade_in: 0.0,
                     fade_out: 0.0,
+                    pitch_semitones: 0.0,
+
+                    loop_count: 1,
+
                     gain: 1.0,
                 }],
             },

@@ -4217,6 +4217,113 @@ impl App for HirariAmeApp {
             ])
         };
 
+        // AUDIO EDIT card (P14 partial): operate on the selected clip.
+        let audio_edit_card = if let Some((track_id, clip_id)) = self.selected_clip.get() {
+            let clips: Vec<_> = self
+                .tracks
+                .get()
+                .iter()
+                .find(|track| track.id == track_id)
+                .map(|track| track.clips.clone())
+                .unwrap_or_default();
+            let selected_clip = clips.iter().find(|clip| clip.id == clip_id).cloned();
+            let edit_core = self.core.clone();
+            let edit_refresh = self.tracks.clone();
+            let reverse_current = selected_clip.as_ref().map(|c| c.reverse).unwrap_or(false);
+            let reverse_button = ButtonView::new(if reverse_current {
+                "UNREVERSE"
+            } else {
+                "REVERSE"
+            })
+            .action_id("audioedit.reverse")
+            .secondary()
+            .on_press(move |_| {
+                let Some(core) = &edit_core else { return };
+                let _ = core.set_region_reverse(track_id, clip_id as u32, !reverse_current);
+                edit_refresh.set(parse_arrange_tracks(
+                    &core.get_project_layout_json(),
+                    |samples| core.samples_to_beats(samples),
+                ));
+            });
+            let pitch_label = format!(
+                "PITCH: {}",
+                selected_clip
+                    .as_ref()
+                    .map(|clip| format!("{:+.1} st", clip.pitch_semitones))
+                    .unwrap_or_else(|| "?".to_owned())
+            );
+            let pitch_down_core = self.core.clone();
+            let pitch_down_current = selected_clip
+                .as_ref()
+                .map(|c| c.pitch_semitones)
+                .unwrap_or(0.0);
+            let pitch_down_refresh = self.tracks.clone();
+            let pitch_down = ButtonView::new("PITCH-")
+                .action_id("audioedit.pitch_down")
+                .secondary()
+                .on_press(move |_| {
+                    let Some(core) = &pitch_down_core else { return };
+                    let _ = core.set_region_pitch_semitones(
+                        track_id,
+                        clip_id as u32,
+                        pitch_down_current - 1.0,
+                    );
+                    pitch_down_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
+            let pitch_up_core = self.core.clone();
+            let pitch_up_current = selected_clip
+                .as_ref()
+                .map(|c| c.pitch_semitones)
+                .unwrap_or(0.0);
+            let pitch_up_refresh = self.tracks.clone();
+            let pitch_up = ButtonView::new("PITCH+")
+                .action_id("audioedit.pitch_up")
+                .secondary()
+                .on_press(move |_| {
+                    let Some(core) = &pitch_up_core else { return };
+                    let _ = core.set_region_pitch_semitones(
+                        track_id,
+                        clip_id as u32,
+                        pitch_up_current + 1.0,
+                    );
+                    pitch_up_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
+            let split_core = self.core.clone();
+            let split_refresh = self.tracks.clone();
+            let split_playhead = self.playhead_beats.clone();
+            let split_button = ButtonView::new("SPLIT")
+                .action_id("audioedit.split")
+                .primary()
+                .on_press(move |_| {
+                    let Some(core) = &split_core else { return };
+                    let beat = split_playhead.get();
+                    let _ = core.split_region(track_id, clip_id as u32, beat);
+                    split_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
+            View::Card(vec![View::HStack(vec![
+                View::Text("AUDIO EDIT".to_owned()),
+                View::Caption(pitch_label),
+                reverse_button.into(),
+                pitch_down.into(),
+                pitch_up.into(),
+                split_button.into(),
+            ])])
+        } else {
+            View::Card(vec![View::HStack(vec![View::Caption(
+                "Select a clip in the arrangement to enable audio edits (REVERSE, PITCH±, SPLIT)."
+                    .to_owned(),
+            )])])
+        };
+
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
         let play_button = ButtonView::new(if playing { "Playing" } else { "Play" })
@@ -5678,6 +5785,7 @@ impl App for HirariAmeApp {
         }
         views.push(synth_card);
         views.push(openutau_card);
+        views.push(audio_edit_card);
         if self.show_spotlight.get() {
             views.insert(1, spotlight_card);
         }
