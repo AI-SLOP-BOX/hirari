@@ -77,6 +77,7 @@ impl HirariCore {
             comping_redo_history: std::sync::Mutex::new(Vec::new()),
             plugin_parameter_events: std::sync::Mutex::new(Vec::with_capacity(64)),
             project_transaction: std::sync::Mutex::new(()),
+            step_sequencer_patterns: RevisionedMutex::new(Vec::new()),
             openutau_vocals: RevisionedMutex::new(Vec::new()),
             track_stacks: RevisionedMutex::new(Vec::new()),
             track_stack_base_volumes: std::sync::Mutex::new(HashMap::new()),

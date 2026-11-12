@@ -272,6 +272,11 @@ impl HirariCore {
                 offline_generation,
             }))
             .collect();
+        document.step_sequencer_patterns = self
+            .step_sequencer_patterns
+            .lock()
+            .map_err(|_| anyhow::anyhow!("step-sequencer pattern lock poisoned"))?
+            .clone();
         document.openutau_vocals = self
             .openutau_vocals
             .lock()

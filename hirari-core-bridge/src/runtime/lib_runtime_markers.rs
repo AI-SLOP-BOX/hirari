@@ -1,4 +1,98 @@
 impl HirariCore {
+    pub fn step_sequencer_patterns_json(&self) -> String {
+        self.step_sequencer_patterns
+            .lock()
+            .ok()
+            .and_then(|patterns| serde_json::to_string(&*patterns).ok())
+            .unwrap_or_else(|| "[]".to_owned())
+    }
+
+    /// Replace the persisted step-sequencer pattern display settings.
+    ///
+    /// Validation accepts a pattern when its track exists and is
+    /// MIDI/Instrument — and, when `region_id != 0`, the region is also
+    /// present on that track — with unique lane pitches (≤ 127), an allowed
+    /// resolution (4/8/16/32/64) and a feel (≤ 2), at most 1 024 patterns,
+    /// and no duplicate `(track_id, region_id)` scopes.
+    pub fn set_step_sequencer_patterns_json(&self, snapshot: &str) -> bool {
+        let Ok(patterns) = serde_json::from_str::<
+            Vec<crate::project::StepSequencerPatternContract>,
+        >(snapshot) else {
+            return false;
+        };
+        if patterns.len() > 1024 {
+            return false;
+        }
+        let Ok(layout) =
+            serde_json::from_str::<serde_json::Value>(&self.get_project_layout_json())
+        else {
+            return false;
+        };
+        // Track types by id and the owning track per region id, for the
+        // existence/ownership checks the document-level validator applies.
+        let mut track_types = std::collections::HashMap::with_capacity(8);
+        let mut region_owner = std::collections::HashMap::with_capacity(32);
+        for track in layout
+            .as_array()
+            .into_iter()
+            .flatten()
+        {
+            let Some(id) = track.get("id").and_then(serde_json::Value::as_u64) else {
+                continue;
+            };
+            let track_type = track
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_owned();
+            track_types.insert(id, track_type);
+            for region in track
+                .get("regions")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+            {
+                if let Some(region_id) = region.get("id").and_then(serde_json::Value::as_u64) {
+                    region_owner.insert(region_id, id);
+                }
+            }
+        }
+        let mut unique_scope = std::collections::HashSet::with_capacity(patterns.len());
+        for pattern in &patterns {
+            if pattern.track_id == 0 {
+                return false;
+            }
+            let Some(track_type) = track_types.get(&u64::from(pattern.track_id)) else {
+                return false;
+            };
+            if !matches!(track_type.as_str(), "Midi" | "MIDI" | "Instrument") {
+                return false;
+            }
+            if !matches!(pattern.resolution, 4 | 8 | 16 | 32 | 64) || pattern.feel > 2 {
+                return false;
+            }
+            let unique_pitches: std::collections::HashSet<u8> =
+                pattern.lane_pitches.iter().copied().collect();
+            if unique_pitches.len() != pattern.lane_pitches.len() {
+                return false;
+            }
+            if pattern.region_id != 0 {
+                match region_owner.get(&u64::from(pattern.region_id)) {
+                    Some(owner) if *owner == u64::from(pattern.track_id) => {}
+                    _ => return false,
+                }
+            }
+            if !unique_scope.insert((pattern.track_id, pattern.region_id)) {
+                return false;
+            }
+        }
+        let Ok(mut current) = self.step_sequencer_patterns.lock() else {
+            return false;
+        };
+        *current = patterns;
+        true
+    }
+
     pub fn track_stacks_json(&self) -> String {
         self.track_stacks
             .lock()

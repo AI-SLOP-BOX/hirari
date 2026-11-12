@@ -155,6 +155,11 @@ impl HirariCore {
             .lock()
             .map_err(|_| anyhow::anyhow!("OpenUtau metadata lock poisoned"))? =
             document.openutau_vocals.clone();
+        *self
+            .step_sequencer_patterns
+            .lock()
+            .map_err(|_| anyhow::anyhow!("step-sequencer pattern lock poisoned"))? =
+            document.step_sequencer_patterns.clone();
         let track_stacks_json = serde_json::to_string(&document.track_stacks).map_err(|error| {
             anyhow::anyhow!("track stack snapshot serialization failed: {error}")
         })?;

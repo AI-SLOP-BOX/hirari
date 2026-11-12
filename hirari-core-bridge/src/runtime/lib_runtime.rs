@@ -3,6 +3,7 @@ use crate::project_contracts::{
     MacroMappingContract, MarkerContract, MidiLearnMappingContract, MidiNoteContract,
     OpenUtauTuningContract, OpenUtauVocalContract, TrackStackContract,
 };
+use crate::project::StepSequencerPatternContract;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 
@@ -179,6 +180,11 @@ pub struct HirariCore {
     /// Serializes project save/load and plugin-state hydration on the
     /// control plane. Audio processing remains native and lock-free.
     project_transaction: std::sync::Mutex<()>,
+    /// Step-sequencer pattern display settings: track-scoped (region_id == 0)
+    /// or region-bound. The MIDI/instrument note content is the real data; this
+    /// contract only records the lane pitches, resolution and feel a user last
+    /// edited, mirroring the Slint dock.
+    step_sequencer_patterns: RevisionedMutex<Vec<StepSequencerPatternContract>>,
     /// OpenUtau source/render pairs belong to the canonical project document,
     /// not to the native layout JSON. Keep them on the same control-plane
     /// transaction so importing a vocal cannot disappear on the next save.

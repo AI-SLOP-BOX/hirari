@@ -553,11 +553,8 @@ impl ProjectDocument {
                 bail!("region {region_id} warp markers are not strictly monotonic");
             }
         }
-        let mut pattern_regions = HashSet::with_capacity(self.step_sequencer_patterns.len());
+        let mut pattern_regions = HashSet::with_capacity(self.step_sequencer_patterns.len()); // set of (track_id, region_id)
         for pattern in &self.step_sequencer_patterns {
-            let Some(region_track_id) = region_track_ids.get(&pattern.region_id) else {
-                bail!("step-sequencer pattern references an unknown region");
-            };
             let Some(track) = self.tracks.iter().find(|track| track.id == pattern.track_id) else {
                 bail!("step-sequencer pattern references an unknown track");
             };
@@ -566,15 +563,27 @@ impl ProjectDocument {
                 .iter()
                 .copied()
                 .collect::<HashSet<_>>();
-            if *region_track_id != pattern.track_id
-                || !matches!(track.track_type.as_str(), "Midi" | "MIDI" | "Instrument")
-                || !pattern_regions.insert(pattern.region_id)
+            if !matches!(track.track_type.as_str(), "Midi" | "MIDI" | "Instrument")
                 || pattern.lane_pitches.iter().any(|pitch| *pitch > 127)
                 || unique_pitches.len() != pattern.lane_pitches.len()
                 || !matches!(pattern.resolution, 4 | 8 | 16 | 32 | 64)
                 || pattern.feel > 2
             {
                 bail!("step-sequencer pattern settings are invalid");
+            }
+            // `region_id == 0` is a track-scoped pattern: the track's MIDI
+            // note content is the grid, so no audio/MIDI region is required.
+            // A bound pattern requires an existing region on the same track.
+            if pattern.region_id != 0 {
+                let Some(region_track_id) = region_track_ids.get(&pattern.region_id) else {
+                    bail!("step-sequencer pattern references an unknown region");
+                };
+                if *region_track_id != pattern.track_id {
+                    bail!("step-sequencer pattern references a different track's region");
+                }
+            }
+            if !pattern_regions.insert((pattern.track_id, pattern.region_id)) {
+                bail!("step-sequencer pattern duplicates the scope of another pattern");
             }
         }
         let mut plugin_slots = HashSet::with_capacity(self.plugin_instances.len());
