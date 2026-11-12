@@ -66,11 +66,11 @@ use vello::wgpu;
 
 use crate::ui_shared::arrange_model::{
     arrange_canvas_geometry, arrangement_measure_starts, arrangement_timeline_end, clip_at,
-    last_clip_end, note_at, parse_arrange_tracks, parse_audio_devices, parse_markers,
-    parse_midi_notes, parse_preview_catalog, parse_track_stacks, piano_roll_geometry, plugin_name,
-    trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry, ArrangeMarker, ArrangeTrack,
-    AudioDevice, LibraryAsset, MeasureStart, PianoNote, PianoRollGeometry, TrimEdge,
-    ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
+    last_clip_end, note_at, parse_arrange_tracks, parse_audio_devices, parse_comping_takes,
+    parse_markers, parse_midi_notes, parse_preview_catalog, parse_track_stacks,
+    piano_roll_geometry, plugin_name, trim_edge_at, valid_time_signatures, ArrangeCanvasGeometry,
+    ArrangeMarker, ArrangeTrack, AudioDevice, CompTake, LibraryAsset, MeasureStart, PianoNote,
+    PianoRollGeometry, TrimEdge, ARRANGE_ZOOM_MAX, ARRANGE_ZOOM_MIN,
 };
 use crate::ui_shared::gpu_canvas::PlotFrameStore;
 use crate::ui_shared::moufu_connection::{load_moufu_address, save_moufu_address};
@@ -288,6 +288,10 @@ pub struct HirariAmeApp {
     flex_quantize_grid: State<u32>,
     /// Swing ratio for the quantize call.
     flex_quantize_swing: State<f32>,
+    /// The last comping snapshot, refreshed each poll tick.
+    comping_takes: State<Vec<CompTake>>,
+    /// Crossfade (0..1 normalized) applied by the COMPING card's slider.
+    comp_crossfade: State<f32>,
     /// Synth engine selector: 0=SYNTH, 1=WAVETABLE, 2=SAMPLER.
     synth_engine: State<u32>,
     /// Local echo of the 8 engine macro values (no engine getter exists).
@@ -509,6 +513,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         flex_quantize_strength: context.state(1.0f32),
         flex_quantize_grid: context.state(2u32),
         flex_quantize_swing: context.state(0.0f32),
+        comping_takes: context.state(Vec::new()),
+        comp_crossfade: context.state(0.01f32),
         show_spotlight: context.state(false),
         spotlight_query: context.state(String::new()),
         focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
@@ -1047,6 +1053,8 @@ impl HirariAmeApp {
         self.poll_render();
         self.poll_moufu();
         self.poll_track_stacks();
+        let snapshot = core.comping_snapshot_json();
+        self.comping_takes.set(parse_comping_takes(&snapshot));
         if let Some(path) = self
             .pending_video_load
             .lock()
@@ -4644,6 +4652,52 @@ impl App for HirariAmeApp {
             ])])
         };
 
+        // COMPING card (P10): take list from comping_snapshot_json, crossfade
+        // slider wired to set_comp_crossfade_normalized, and per-take SELECT
+        // (select_comp_take) wiring into the engine's undo/notification path.
+        let comp_crossfade = self.comp_crossfade.clone();
+        let comp_crossfade_ref = self.core.clone();
+        let comp_crossfade_slider = SliderView::new(self.comp_crossfade.get(), 0.0, 1.0)
+            .action_id("comping.crossfade")
+            .on_change(move |value| {
+                let clamped = value.clamp(0.0, 1.0);
+                comp_crossfade.set(clamped);
+                if let Some(core) = &comp_crossfade_ref {
+                    let _ = core.set_comp_crossfade_normalized(clamped);
+                }
+            });
+        let comp_takes = self.comping_takes.get();
+        let mut comp_rows: Vec<View> = Vec::with_capacity(comp_takes.len() + 2);
+        comp_rows.push(View::Text("COMPING".to_owned()));
+        comp_rows.push(View::HStack(vec![
+            View::Caption("CROSSFADE".to_owned()),
+            comp_crossfade_slider.into(),
+        ]));
+        if comp_takes.is_empty() {
+            comp_rows.push(View::Caption(
+                "No takes yet. Record audio on a track to create a take lane.".to_owned(),
+            ));
+        } else {
+            for take in comp_takes {
+                let take_id = take.id;
+                let take_name = take.name.clone();
+                let take_span = take.end_sample.saturating_sub(take.start_sample) as f64
+                    / take.start_sample.max(1) as f64;
+                let _ = take_span;
+                let select_core = self.core.clone();
+                let select_button = ButtonView::new(format!("SELECT #{take_id} {take_name}"))
+                    .action_id(format!("comping.select.{take_id}"))
+                    .secondary()
+                    .on_press(move |_| {
+                        if let Some(core) = &select_core {
+                            let _ = core.select_comp_take(take_id);
+                        }
+                    });
+                comp_rows.push(View::HStack(vec![select_button.into()]));
+            }
+        }
+        let comping_card = View::Card(vec![View::VStack(comp_rows)]);
+
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
         let play_button = ButtonView::new(if playing { "Playing" } else { "Play" })
@@ -6123,6 +6177,7 @@ impl App for HirariAmeApp {
                 tempo_card,
                 flex_card,
                 stacks_card,
+                comping_card,
                 transport,
                 meter,
                 master_card,

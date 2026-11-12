@@ -18,6 +18,33 @@ pub struct MeasureStart {
     pub number: i32,
 }
 
+/// A single recorded take from the engine's comping snapshot. Region carries
+/// are hidden inside the comping structures; the UI only needs the take id
+/// and span to drive layout.
+#[derive(Clone, Debug, PartialEq, serde::Deserialize)]
+pub struct CompTake {
+    pub id: u32,
+    pub name: String,
+    #[serde(default)]
+    pub start_sample: u64,
+    #[serde(default)]
+    pub end_sample: u64,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+struct CompingSnapshot {
+    #[serde(default)]
+    takes: Vec<CompTake>,
+}
+
+/// Parses `comping_snapshot_json()` once per poll tick, tolerating the
+/// empty-state default (`{"takes":[],"current_comp":[]}`).
+pub fn parse_comping_takes(json: &str) -> Vec<CompTake> {
+    serde_json::from_str::<CompingSnapshot>(json)
+        .map(|snapshot| snapshot.takes)
+        .unwrap_or_default()
+}
+
 /// A persisted track stack. `member_track_ids` is sorted ascending by the
 /// engine boundary, so paths that want members in selected order should sort
 /// again or iterate the arrangement selection directly.
