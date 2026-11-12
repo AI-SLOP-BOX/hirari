@@ -22,10 +22,7 @@ APP_DIR="$STAGED_APP"
 CONTENTS_DIR="$APP_DIR/Contents"
 BIN_DIR="$CONTENTS_DIR/MacOS"
 
-# Optional extra feature flags (word-split, no quoting): forks and hosts
-# without the private AmeUI sibling build `--no-default-features --features
-# slint-wgpu` so the bundle still packages the legacy surface.
-cargo build --release -p hirari-ui --manifest-path "$ROOT_DIR/Cargo.toml" ${HIRARI_UI_FEATURES:-}
+cargo build --release -p hirari-ui --manifest-path "$ROOT_DIR/Cargo.toml"
 
 # Build the isolated plugin worker from the same source revision as the app.
 # This prevents stale or missing worker binaries from making a packaged app
@@ -51,7 +48,7 @@ chmod 644 "$RESOURCE_MANIFEST"
 
 # Ship the license boundary with every application bundle.  Keeping these
 # notices inside the artifact makes the MIT core, optional GPL components, and
-# Slint/other third-party obligations visible to downstream redistributors
+# Third-party obligations visible to downstream redistributors
 # without requiring access to the source repository.
 for notice in LICENSE THIRD_PARTY_NOTICES.md LICENSE-COMBINED-DISTRIBUTION.md; do
     if [ ! -s "$ROOT_DIR/$notice" ]; then

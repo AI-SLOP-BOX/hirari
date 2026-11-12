@@ -10,7 +10,7 @@ work. The canonical classifier is:
 
 The report has four intentional categories:
 
-- `product_source`: Rust, Slint, C++, Objective-C++, shaders, and build scripts
+- `product_source`: Rust, AmeUI, C++, Objective-C++, shaders, and build scripts
   that affect the shipped product.
 - `documentation`: README, policies, release notes, and design records.
 - `tooling`: CI, audit, setup, and test harnesses.

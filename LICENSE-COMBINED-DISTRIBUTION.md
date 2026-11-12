@@ -17,15 +17,10 @@ The Core Bridge links Symphonia 0.5.5 decoder crates under MPL-2.0; combined
 distributions must preserve the applicable notices and comply with MPL-2.0's
 source-availability requirements for covered files.
 
-The desktop bundle selects Slint's royalty-free license and includes the
-`AboutSlint` attribution widget in the Help/Diagnostics surface. That choice
-permits Slint to be distributed as part of the Hirari application with the
-required attribution; it does not permit standalone redistribution of Slint.
-The royalty-free terms also do not permit distributing an Application that
-exposes Slint's APIs, in part or in total. Hirari's public stable API is a Hirari
-contract and must not forward or re-export Slint types, symbols, or handles.
-Distributors may choose Slint GPL-3.0 or a commercial Slint license instead,
-provided they satisfy that license's terms.
+The desktop bundle ships AmeUI, MIT-licensed, path-linked from the sibling
+AmeUI checkout. No separate third-party UI license choice is required for the
+Hirari binary itself. Hirari's public stable API is a Hirari contract and any
+AmeUI types exposed to integrations would remain under the Hirari MIT license.
 
 Installed plugins such as Surge XT and Vital are not included in the Hirari
 source publication. Users obtain and license those products separately.

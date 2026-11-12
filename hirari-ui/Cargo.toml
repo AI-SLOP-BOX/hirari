@@ -4,13 +4,14 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Hirari DAW Project <ui@hirari-daw.io>"]
-description = "Rust and Slint desktop application for the Hirari DAW."
+description = "Rust and AmeUI desktop application for the Hirari DAW."
 
 [dependencies]
-# 🟢 UI LAYER
-# Slint manages the entire user surface and interaction logic.
-slint = { workspace = true, optional = true, features = ["std", "accessibility", "renderer-femtovg", "renderer-software", "compat-1-2", "raw-window-handle-06", "unstable-wgpu-29", "backend-winit-x11"] }
-raw-window-handle = { workspace = true, optional = true }
+# 🟢 UI LAYER — AmeUI is the sole surface.
+# vello must match AmeUI's own vello so the Canvas scene / device types are
+# the same crate instance across the boundary.
+ame-ui.workspace = true
+vello.workspace = true
 
 # 🟢 ENGINE BRIDGE
 # Connects the Rust UI to the Hirari runtime and native audio boundary.
@@ -27,53 +28,3 @@ log.workspace = true
 rfd.workspace = true
 sys-locale = "0.3"
 rand = { version = "0.8.6", default-features = false, features = ["std", "std_rng"] }
-
-[features]
-default = ["ameui"]
-# AmeUI migration target. Off by default: the Slint surface stays the shipped
-# UI until the AmeUI port reaches parity, at which point this becomes the only
-# entry and the Slint stack is deleted. The feature is migration scaffolding,
-# not a permanent compatibility switch.
-ameui = ["dep:ame-ui", "dep:vello"]
-# `slint/unstable-wgpu-29` is the requirement half: the UI selects the WGPU 29
-# backend at startup and feeds its plot imagery through the Slint WGPU
-# rendering notifier. `slint/renderer-femtovg-wgpu` is the capability half: a
-# WGPU-capable renderer compiled into the winit backend. They are wired into
-# one feature on purpose. Enabling the requirement without the capability
-# builds an app whose WGPU request falls through to the OpenGL compatibility
-# check, so every launch dies with "WGPU 29.x rendering is not supported with
-# an OpenGL renderer". Keep them together.
-slint-wgpu = ["dep:slint", "dep:raw-window-handle", "slint/unstable-wgpu-29", "slint/renderer-femtovg-wgpu"]
-# High-rate waveform/spectrum surfaces are opt-in so the normal Slint build
-# stays small. The feature uses wgpu's native Metal/DX12/Vulkan backends.
-gpu-canvas = ["dep:wgpu", "dep:bytemuck"]
-egui-canvas = ["dep:egui", "dep:egui-wgpu"]
-
-[dependencies.wgpu]
-version = "0.20"
-optional = true
-default-features = false
-features = ["metal", "dx12", "vulkan-portability", "wgsl"]
-
-[dependencies.bytemuck]
-version = "1.25"
-optional = true
-
-[dependencies.egui]
-version = "0.36.2"
-optional = true
-
-[dependencies.egui-wgpu]
-version = "0.36.2"
-optional = true
-
-[dependencies.ame-ui]
-workspace = true
-optional = true
-
-[dependencies.vello]
-workspace = true
-optional = true
-
-[build-dependencies]
-slint-build.workspace = true

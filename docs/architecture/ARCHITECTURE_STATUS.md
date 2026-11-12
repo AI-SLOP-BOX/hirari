@@ -8,7 +8,7 @@ what is canonical and what remains compatibility or contract-test code.
 
 | Area | Canonical path | Compatibility / test-only paths |
 | --- | --- | --- |
-| Application | `hirari-ui` Rust/Slint binary | Historical app bundles outside `packaging/` |
+| Application | `hirari-ui` Rust/AmeUI binary | Historical app bundles outside `packaging/` |
 | Project model | `hirari-core-bridge::ProjectDocument` | Native serializer used for rollback snapshots and legacy import |
 | Runtime engine | `hirari-core-bridge::HirariCore` + its owned native `AudioEngine` | Header/translation-unit contracts under `tests/` |
 | Native audio graph | The `AudioEngine` owned by one `HirariCore` session | Older direct `HirariUnifiedEngine` entry points |
@@ -18,22 +18,16 @@ what is canonical and what remains compatibility or contract-test code.
 
 ## UI and rendering split
 
-The desktop shell is Slint. The default Cargo configuration selects Slint's
-WGPU 29 backend and installs a rendering notifier that uses the same device and
-queue as the Slint frame. Shared plot frames are uploaded as RGBA textures and
-imported back as Slint images for Arrange, Mixer, Synth, Waveform, Mastering
-and Piano Roll surfaces. An opt-in `gpu-canvas` feature keeps a standalone
-native `wgpu` 0.20 WGSL pipeline for renderer-level tests and integrations;
-it is not a second window. Slint continues to own layout, accessibility and
-input while dense plot pixels are produced by the GPU path. The separate C++
-graphics layer under `src/graphics/` remains a compatibility path for Metal
-and opt-in Vulkan experiments. The notifier tracks waveform, spectrum, meter,
-and piano-note streams independently, so a meter-only update does not rebuild
-the other three textures.
+The desktop shell is AmeUI. Vello owns the 2D drawing surface for every
+Hirari surface (Arrange, Mixer, Synth, Waveform, Mastering and Piano Roll);
+dense plot imagery is drawn as textures inside that same canvas, so there is
+no second GPU pipeline. Accessibility, layout and input handling are all
+inside AmeUI. The separate C++ graphics layer under `src/graphics/` remains a
+compatibility path for Metal and opt-in Vulkan experiments.
 
 The active UI and graphics support have separate owners:
 
-- `hirari-ui/` is the Rust/Slint application crate in the Cargo workspace. It
+- `hirari-ui/` is the Rust/AmeUI application crate in the Cargo workspace. It
   owns the production desktop UI and invokes the engine through
   `hirari-core-bridge/`.
 - `src/graphics/` contains only shader source (Metal and GLSL). There is no C++
@@ -47,7 +41,7 @@ base revision; the Hirari work renames that existing crate rather than adding
 a second UI implementation. The root `src/` is not an alternative Rust UI
 location: it is the C++ engine tree. The repository history does not record the
 original decision to split the Rust UI into its own crate, but the current
-build boundary is the Rust/Slint app, a Rust/C++ bridge, and the C++ engine.
+build boundary is the Rust/AmeUI app, a Rust/C++ bridge, and the C++ engine.
 
 DSP migrations use C++/Rust equivalence tests as a completion gate, not just a
 successful build. Current coverage and remaining reference fixtures are
@@ -109,7 +103,7 @@ following is true:
 - a release script no longer references it; and
 - the removal is intentional and recorded in the change description.
 
-This keeps the large Rust/Slint migration auditable without treating old
+This keeps the large Rust/AmeUI migration auditable without treating old
 artifacts as production inputs.
 
 ## Rust convergence policy

@@ -67,12 +67,11 @@ packaging outputs and are excluded from the source publication scope.
 Hirari-owned source is offered under the MIT terms in `LICENSE`, subject to
 the separate license requirements of any third-party code that is copied into
 the repository or linked into a combined distribution.
-# Slint
+# AmeUI
 
-The Hirari GUI uses Slint. Slint packages declare
-`GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0`.
-Hirari's MIT license does not relicense Slint. Anyone distributing a combined GUI
-binary must select and comply with an applicable Slint license.
+The Hirari desktop UI uses AmeUI, which is MIT-licensed. Hirari's MIT license
+and AmeUI's MIT license are compatible; there is no separate third-party
+license obligation for the packaged desktop application.
 
 # IBM Plex
 

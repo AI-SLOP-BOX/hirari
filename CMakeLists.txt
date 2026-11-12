@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(HirariDAWBuild NONE)
 
-# The production application is now a Rust/Slint workspace.  Keep a small,
+# The production application is now a Rust/AmeUI workspace.  Keep a small,
 # honest CMake entrypoint for IDEs and existing native build automation rather
 # than resurrecting the deleted legacy C++ executable and stale Metal sources.
 find_program(CARGO_EXECUTABLE cargo REQUIRED)
@@ -39,7 +39,7 @@ add_custom_target(hirari-check
 )
 
 # Keep CTest useful for IDEs and CI runners.  The native project is primarily
-# a Rust/Slint workspace, so the stable smoke gate is the workspace check.
+# a Rust/AmeUI workspace, so the stable smoke gate is the workspace check.
 add_test(NAME hirari_workspace_check
     COMMAND "${CARGO_EXECUTABLE}" check --workspace --manifest-path "${HIRARI_MANIFEST}")
 set_tests_properties(hirari_workspace_check PROPERTIES

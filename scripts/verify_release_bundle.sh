@@ -45,7 +45,7 @@ done
 
 # Keep the package contract explicit: an app with a native main executable
 # and worker but no resource directory is usually a stale or hand-assembled
-# bundle.  The directory is allowed to be empty for the current Rust/Slint
+# bundle.  The directory is allowed to be empty for the current Rust/AmeUI
 # build, but it must exist so resource lookup has a stable root.
 if [ ! -r "$CONTENTS/Info.plist" ]; then
     echo "release bundle Info.plist is not readable" >&2

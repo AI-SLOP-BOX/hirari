@@ -1,13 +1,5 @@
-#[cfg(feature = "slint-wgpu")]
-pub mod moufu;
-pub mod orchestrator;
-#[cfg(feature = "slint-wgpu")]
-pub mod slint_ui;
-#[cfg(feature = "slint-wgpu")]
-pub mod ui;
-
-#[cfg(feature = "ameui")]
 pub mod ameui;
+pub mod orchestrator;
 pub mod ui_shared;
 
 fn configure_plugin_worker() -> bool {
@@ -151,20 +143,5 @@ fn main() {
         }
         return;
     }
-    #[cfg(feature = "ameui")]
-    {
-        ameui::run();
-    }
-    #[cfg(all(not(feature = "ameui"), feature = "slint-wgpu"))]
-    {
-        eprintln!("HIRARI | TRANSITIONING TO SLINT UI...");
-        slint_ui::run();
-    }
-    #[cfg(all(not(feature = "ameui"), not(feature = "slint-wgpu")))]
-    {
-        eprintln!(
-            "HIRARI | no UI backend configured; enable `ameui` (recommended) or `slint-wgpu`."
-        );
-        std::process::exit(1);
-    }
+    ameui::run();
 }

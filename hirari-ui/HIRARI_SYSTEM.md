@@ -2,8 +2,7 @@
 
 ## 1. The "Sanctuary" Doctrine (License and Fault Boundaries)
 Hirari-owned engine and UI source is MIT-licensed. The packaged desktop UI uses
-Slint under its royalty-free application license and includes the required
-`AboutSlint` attribution. External plugins retain their own licenses. Hirari
+AmeUI, which is MIT-licensed. External plugins retain their own licenses. Hirari
 uses a strict **Process Separation** model for external plugins so that
 untrusted code cannot compromise the realtime engine or the UI process; this
 boundary is an engineering and distribution boundary, not a relicensing of
@@ -20,7 +19,7 @@ Hirari source.
 | Layer | Technology | Role |
 | :--- | :--- | :--- |
 | **Nucleus** (Engine) | C++ audio engine and DSP, exposed through the Rust core bridge | Realtime audio graph, DSP, and project operations. |
-| **Face** (UI) | Rust/Slint application in `hirari-ui` | Desktop interface and command client with `AboutSlint` attribution. |
+| **Face** (UI) | Rust/AmeUI application in `hirari-ui` | Desktop interface and command client. |
 | **Appendages** (Plugins) | Isolated plugin worker and format adapters | Sandboxed plugin hosting over IPC. |
 
 No C++ UI code exists in either place. `src/graphics/` holds shader source only;

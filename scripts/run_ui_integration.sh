@@ -55,7 +55,5 @@ echo "[hirari] UI contract tests"
 # explicitly below so the coverage remains visible and bounded.
 run_nonempty_test -p hirari-ui --bin hirari-ui -j 1
 
-echo "[hirari] main-thread Slint integration test"
-run_nonempty_test -p hirari-ui --test ui_core_integration -j 1
 
 echo "[hirari] UI/Core integration smoke passed"

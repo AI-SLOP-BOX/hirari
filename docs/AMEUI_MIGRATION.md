@@ -1,11 +1,15 @@
-# Slint → AmeUI migration
+# Slint → AmeUI migration (completed)
 
-Hirari's shipped UI is Slint (`hirari-ui/src/slint_ui.rs`, default build).
-The migration target is AmeUI (`hirari-ui/src/ameui/mod.rs`, behind the
-opt-in `ameui` feature). This is a strangler migration: the Slint surface
-stays the default entry until the AmeUI port reaches parity, at which
-point the Slint stack is deleted. Do not add new features to Slint-only
-code; put shared logic in the neutral modules below so both surfaces use it.
+Hirari's shipped UI was Slint; the migration target was AmeUI. The
+strangler-pattern pivot completed — the Slint surface is deleted in the
+commit series that closes this document's slice log. The `slint` and
+`slint-build` crates are gone from `Cargo.lock`. The `ameui` cargo feature
+that used to opt into the replacement surface is gone with it; the shipped
+shell is the AmeUI surface by default.
+
+The migration log below is kept for history. Slices 1–53 are unchanged;
+slices 54+ record the AmeUI-now-default flip and the workflow ports that
+were carried through to parity, after which the Slint stack was removed.
 
 ## How to run and verify
 
@@ -115,10 +119,6 @@ Notes:
  53 | `87f4bb4` | AmeUI home page: template starters (`INIT_*` parity), recent projects list, opens/saves/hides the workspace; recent-project open uses the existing native-dialog pending path. |
 | 57 | `8a9b06f` | AmeUI Moufu Hub card (P5): address field persisted, CONNECT/DISCONNECT/REFRESH, entity share/receive/unlink, read-only linked preview via shared `ui_shared::moufu_preview`; publisher snapshot publish through shared `ui_shared::moufu_layout` (no recording-input channel tags yet — engine/model gap). |
 | 59 | `1bd92d1` | AmeUI video monitor slice (P17 part 1): VIDEO card with LOAD VIDEO + SHOW/HIDE toggle; control-rate poll tracks playhead revision; texture uploaded on the draw path like the waveform. |
-| 63 | `af60aab` | AmeUI focus-mode toggle (P6 partial): shared `ui_shared::preferences` persists focus_mode into project-path.json; FOCUS gates the extra cards leaving transport+meter+arrange. |
-| 66 | `d2e4d9a` | AmeUI audio edit card (P14 partial): REVERSE toggle, PITCH-/PITCH+ stepping from engine-published pitch_semitones (layout now parses it), SPLIT at playhead. |
-| 65 | see tip | AmeUI audio edit card (P14 partial): REVERSE toggle, PITCH-/PITCH+ applied from the layout's pitch_semitones, split at playhead. `ui_shared::arrange_model` now parses pitch_semitones/loop_count from the engine layout. |
-| 64 | `6f56a51` | AmeUI spotlight palette (P20): Cmd/Ctrl+K toggles filterable quick-command list (play/loop/metronome/save/new/snap/zoom/fit/render/lock/undo) with direct engine dispatch. |
 | 61 | `337f762` | AmeUI OpenUtau vocal score card (P13): OPEN USTX / LAUNCH OPENUTAU (macOS `open -a`) / PICK RENDER / IMPORT VOCAL — engine-driven import through the poll, adds Vocal track + region. |
 | 63 | `2c9537e` | AmeUI MusicXML export button (P15 partial): engine `export_musicxml` via save dialog, `.musicxml` extension, poll pipeline. |
 | 62 | `160fee4` | AmeUI sends card (P4): source/bus cycler, gain slider with live apply (`set_send_route`), PRE/POST toggle, enable; state refreshed from `audio_routes_json()` at 10 Hz when the panel is open. |

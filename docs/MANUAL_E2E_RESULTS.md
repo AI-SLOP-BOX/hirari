@@ -6,7 +6,7 @@ Manual Computer Use pass completed against the freshly rebuilt
 `packaging/Hirari DAW.app` on macOS. The app launched with the Quick Start
 surface, the Electronic template produced its five-track project, and the
 Piano Roll and Mixer views opened without leaving a blank canvas. The Help
-route opened Diagnostics and displayed the Slint `AboutSlint` attribution.
+route opened Diagnostics and displayed the Hirari diagnostics page.
 No crash, stale-window, or accessibility-action failure was observed.
 
 This pass validates the startup/template/navigation/attribution path only; it

@@ -70,7 +70,6 @@ target/
 .env
 config.json
 *.local
-.slint-tmp/
 __pycache__/
 *.py[cod]
 

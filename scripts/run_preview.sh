@@ -9,6 +9,4 @@ if [ ! -x "$BIN" ]; then
     exit 1
 fi
 
-# Software rendering is the verified fallback for a standalone preview binary.
-# Override explicitly when testing another Slint backend.
-exec env SLINT_BACKEND="${SLINT_BACKEND:-software}" "$BIN" "$@"
+exec "$BIN" "$@"

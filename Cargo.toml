@@ -45,25 +45,11 @@ moufu-protocol = { git = "https://github.com/AI-SLOP-BOX/moufu.git", rev = "8045
 hirari-moufu-adapter = { path = "./hirari-moufu-adapter" }
 
 # --- UI & Frameworks ---
-# AmeUI is the migration target for the Slint surface (wgpu retained). It is
-# an optional path dependency consumed only by hirari-ui's `ameui` feature
-# until the port reaches parity; vello must match AmeUI's own vello so the
-# Canvas scene/device types are the same crate instance across the boundary.
+# AmeUI is Hirari's only UI surface and is a path-dependency on the sibling
+# checkout; vello must match AmeUI's own vello so the Canvas scene/device
+# types are the same crate instance across the boundary.
 ame-ui = { path = "../AmeUI" }
 vello = "0.11"
-winit = "0.30"
-slint = { version = "1.17.1", default-features = false, features = [
-    "std",
-    "accessibility",
-    "backend-winit-x11",
-    "renderer-femtovg",
-    "renderer-software",
-    "compat-1-2",
-    "raw-window-handle-06",
-    "unstable-wgpu-29",
-] }
-raw-window-handle = "0.6"
-slint-build = "1.17.1"
 rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
 
 # --- Project Paths ---

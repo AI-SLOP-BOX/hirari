@@ -50,7 +50,7 @@ release metadata ZIP verification.
 - `scripts/run_clean_build.sh` (隔離ターゲットでfetch/check/全テスト): 成功
 - AU実機E2E（Apple auval + Surge XT worker、状態復元・再構成・過負荷隔離）: 成功
 - Release realtime callback soak (ignored long-duration test, 30 s): 成功、deadline miss 0
-- Manual UI E2E: 成功（Quick Start、Electronicテンプレート、Piano Roll、Mixer、Diagnostics/Slint attributionを実機確認。詳細は [`MANUAL_E2E_RESULTS.md`](MANUAL_E2E_RESULTS.md)）
+- Manual UI E2E: 成功（Quick Start、Electronicテンプレート、Piano Roll、Mixer、Diagnosticsを実機確認。詳細は [`MANUAL_E2E_RESULTS.md`](MANUAL_E2E_RESULTS.md)）
 
 - Release bundle license notices: 成功（`LICENSE`、`THIRD_PARTY_NOTICES.md`、`LICENSE-COMBINED-DISTRIBUTION.md`をResourcesへ同梱し、bundle verifierで必須検査）
 - Release debug-hook exclusion: 成功（本番バイナリに`HIRARI_UI_SMOKE`文字列なし）
@@ -227,7 +227,7 @@ tracked lockfile. `cargo check --workspace --locked`, the serialized full
 workspace test suite, `scripts/run_ui_integration.sh`, dependency vulnerability
 and license policy gates, the native compile contract, and CycloneDX SBOM plus
 SHA-256 metadata generation passed. The UI integration run included the real
-Slint-to-Core production workflow and the repository CLAP worker's instantiate,
+UI-to-Core production workflow and the repository CLAP worker's instantiate,
 continuous processing, crash/quarantine, and overrun recovery paths.
 
 `scripts/run_realtime_performance_matrix.sh` also measured 100 native tracks at

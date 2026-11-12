@@ -49,16 +49,10 @@ implemented in-tree are:
   universal device or plugin compatibility.
 * **UI preview**: a desktop client covering the main project, arrange,
   piano-roll, mixer, browser, and diagnostics surfaces. Several advanced edit
-  operations and production workflows are still incomplete. The default
-  surface is under migration to [AmeUI]; it builds as `default = ["ameui"]`
-  but requires the private AmeUI sources at `../AmeUI`, which are not publicly
-  cloneable. Without them, `cargo` cannot load this workspace at all. Hosts
-  without those sources run `./scripts/ensure_ameui_stub.sh` once (it creates
-  a manifest-only placeholder) and build the legacy Slint WGPU 29 surface
-  with `cargo check --no-default-features --features slint-wgpu`. Dense
-  waveform, spectrum, meter, and piano-roll imagery is uploaded through the
-  shared GPU notifier while Slint remains the layout and accessibility shell
-  on that path.
+  operations and production workflows are still incomplete. The desktop
+  surface is [AmeUI]; it requires the private AmeUI sources at `../AmeUI`,
+  which are not publicly cloneable. Without them, `cargo` cannot load this
+  workspace at all. There is no Slint dependency anywhere in the workspace.
 * **Integration boundaries**: AU/CLAP/VST3 and OpenUtau adapters exist as
   capability-specific boundaries. A host-path test or installed fixture does
   not prove that every third-party plugin, native editor, voicebank, or device
@@ -91,7 +85,7 @@ vendor SDKs and voicebanks remain subject to their own licenses.
 ## 🛠 Project Structure
 
 *   `/hirari-ui`: The primary Rust-based GUI and command surface, built with
-    Slint and Rust.
+    AmeUI and Rust.
 *   `/hirari-core-bridge`: Rust project/runtime core and DSP modules, plus the
     FFI boundary for native audio components that are still being migrated.
 *   `/src`: Native C++ audio and device integration that is still being
@@ -132,12 +126,11 @@ governed by [CODE_OF_CONDUCT.md](./docs/CODE_OF_CONDUCT.md).
 ```sh
 scripts/setup_dev.sh
 # Hirari's AmeUI surface needs the private AmeUI sources at `../AmeUI`.
-if [ -f ../AmeUI/Cargo.toml ]; then
-    cargo test --workspace --locked
-else
-    ./scripts/ensure_ameui_stub.sh
-    cargo test --workspace --no-default-features --features slint-wgpu
+if [ ! -f ../AmeUI/Cargo.toml ]; then
+    echo "Private AmeUI sources not present at ../AmeUI; the workspace will not load." >&2
+    exit 1
 fi
+cargo test --workspace --locked
 scripts/build_app.sh
 open "packaging/Hirari DAW.app"
 ```
@@ -175,10 +168,10 @@ as `third_party_synths` and `.openutau-review`.
 
 ### Build your own DAW on Hirari
 
-Hirari's GUI is an API client, not an engine dependency. The Slint UI and CLI
-both queue mix renders through the versioned `hirari.core.v1` boundary. The
-Rust session core and the native audio components it currently owns are
-independent of Slint. A normal mix can be rendered without opening a window or
+Hirari's GUI is an API client, not an engine dependency. The AmeUI desktop
+and CLI both queue mix renders through the versioned `hirari.core.v1` boundary.
+The Rust session core and the native audio components it currently owns are
+independent of the UI. A normal mix can be rendered without opening a window or
 an audio device:
 
 ```sh
@@ -202,7 +195,7 @@ cargo run -p hirari-core-bridge --example process_audio -- \
 
 Replace `Hirari Compressor` with a catalog alias such as `Plugin Name@clap` or
 `Plugin Name@vst3` when that worker backend is available in the build. The
-example contains no Slint code and does not create or load a Hirari project.
+example contains no UI code and does not create or load a Hirari project.
 
 See `hirari-core-bridge/src/stable_api.rs` for the compatibility-versioned
 request and result types. Future GUI, Python, WebSocket, and AI adapters should
@@ -262,18 +255,10 @@ Hirari-owned source is published under the **MIT License**; see
 [LICENSE](./LICENSE). This does not relicense third-party code or
 installed plugin binaries.
 
-The GUI uses Slint, which is offered under GPL-3.0-only or one of Slint's
-separate licenses. Distributors must select and comply with an applicable Slint
-license for combined binaries; Hirari's MIT license applies only to Hirari-owned
-source and does not override Slint's terms.
-
-The packaged desktop application uses Slint's royalty-free option and carries
-the required `AboutSlint` attribution on the Help/Diagnostics surface. The
-royalty-free terms cover Slint as part of an application; they do not grant a
-right to redistribute Slint as a standalone library, and do not permit an
-application that exposes Slint's APIs. Hirari's stable API is intentionally
-Slint-free; distributors must not re-export Slint types or handles. A
-distributor choosing the GPL option must follow GPL-3.0 instead.
+The GUI uses AmeUI, which is offered under the same MIT license as Hirari.
+There is no separate Slint dependency and no `AboutSlint` attribution
+obligation; the packaged desktop application ships AmeUI and Hirari-owned
+code only.
 
 Hirari may also ship optional GPL-3.0-only tools or frontends as separate
 components. Those components are clearly marked and do not change the MIT

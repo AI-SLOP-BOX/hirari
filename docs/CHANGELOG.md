@@ -6,6 +6,21 @@ production support.
 
 ## Unreleased
 
+### Changed
+
+- The Slint stack is deleted from Hirari. `hirari-ui/ui/**/*.slint`,
+  `hirari-ui/src/ui/`, `hirari-ui/src/slint_ui.rs`,
+  `hirari-ui/src/slint_ui_parts/` and `hirari-ui/src/moufu.rs` are gone,
+  along with `hirari-ui/build.rs` (which Slint's compiler consumed) and
+  the `slint`, `slint-build`, and `raw-window-handle` workspace
+  dependencies. The `slint-wgpu` feature is removed; Hirari has one UI
+  entry point and it is AmeUI. `cargo check --workspace --locked` and the
+  full `cargo test` pass unchanged. The Linux CI hook now runs
+  `cargo check` and `cargo test --locked` only (`scripts/verify_ameui.sh`
+  no longer checks a feature flag); the GitHub Actions `ci.yml` job
+  compiles the engine crates only and documents that the full desktop
+  test requires the private sibling AmeUI checkout.
+
 ### Added
 
 - Rust VST3 hosting in the isolated plugin worker, gated by `HIRARI_VST3_SDK`.

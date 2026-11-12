@@ -1,15 +1,14 @@
 #!/bin/sh
 # Creates a placeholder sibling for the private, unpublished `ame-ui` path
-# dependency when it is absent, so `cargo` can load and resolve the
-# workspace (Cargo.lock is committed; the stub declares the exact same
-# dependency closure so `--locked` keeps working).
+# dependency so `cargo` can load and resolve the workspace (Cargo.lock is
+# committed; the stub declares the exact same dependency closure so
+# `--locked` keeps working).
 #
 # The stub is only a manifest: it is never built. Building Hirari against
-# the placeholder is unsupported; without the real AmeUI tree, Hirari
-# builds the legacy Slint backend with
-#   --no-default-features --features slint-wgpu
-# Hirari's AmeUI verification gate lives in scripts/verify_ameui.sh
-# (internal CI) and is not available to forks.
+# the placeholder is unsupported; without the real AmeUI tree there is no
+# way to build the desktop UI. Hirari's engine-only checks and the
+# internal Linux CI run against the real AmeUI tree and are not available
+# to forks.
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)

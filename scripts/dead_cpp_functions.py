@@ -26,7 +26,7 @@ def all_files():
     for d, dirs, fs in os.walk("."):
         dirs[:] = [x for x in dirs if x not in SKIP_DIRS]
         for f in fs:
-            if f.endswith((".inc", ".hpp", ".cpp", ".h", ".mm", ".rs", ".slint", ".sh", ".toml")):
+            if f.endswith((".inc", ".hpp", ".cpp", ".h", ".mm", ".rs", ".sh", ".toml")):
                 yield os.path.join(d, f)
 
 
