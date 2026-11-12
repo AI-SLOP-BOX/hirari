@@ -6,6 +6,7 @@ pub mod moufu_connection;
 pub mod moufu_layout;
 pub mod moufu_preview;
 pub mod plot_raster;
+pub mod preferences;
 pub mod recent_projects;
 pub mod render_ops;
 pub mod render_path;

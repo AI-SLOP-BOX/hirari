@@ -248,6 +248,9 @@ pub struct HirariAmeApp {
     /// Caption shown inside the export card (render state / progress /
     /// stem counts).
     render_caption: State<String>,
+    /// Focus mode toggle: hide everything except transport, meter and the
+    /// arrange surface. Mirrors the Slint focus setting exactly.
+    focus_mode: State<bool>,
     /// System diagnostics panel toggle (Slint diagnostics page).
     show_diagnostics: State<bool>,
     /// Accumulated AU watchdog trips (engine polls since connect).
@@ -451,6 +454,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         export_tail_index: context.state(2u32),
         stem_export_active: context.state(false),
         render_caption: context.state(String::new()),
+        focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
         show_diagnostics: context.state(false),
         watchdog_trips: context.state(0u32),
         moufu_address: context.state(load_moufu_address().unwrap_or_default()),
@@ -3059,6 +3063,19 @@ impl App for HirariAmeApp {
                 }
             });
         let diagnostics_open_for_button = self.show_diagnostics.clone();
+        let focus_state = self.focus_mode.clone();
+        let focus_button = ButtonView::new(if self.focus_mode.get() {
+            "FOCUS ON"
+        } else {
+            "FOCUS"
+        })
+        .action_id("focus.toggle")
+        .secondary()
+        .on_press(move |_| {
+            let next = !focus_state.get();
+            focus_state.set(next);
+            let _ = crate::ui_shared::preferences::store_focus_mode(next);
+        });
         let diagnostics_button = ButtonView::new(if self.show_diagnostics.get() {
             "SYSTEMS CLOSE"
         } else {
@@ -3099,6 +3116,7 @@ impl App for HirariAmeApp {
             diagnostics_button.into(),
             moufu_button.into(),
             sends_button.into(),
+            focus_button.into(),
             View::Caption(status.clone()),
         ])]);
 
@@ -5446,24 +5464,34 @@ impl App for HirariAmeApp {
             views.push(sends_card);
         }
         views.push(openutau_card);
-        views.extend([
-            export_card,
-            tempo_card,
-            transport,
-            meter,
-            master_card,
-            audio_card,
-            video_card,
-            arrange_toolbar,
-            View::canvas("waveform").frame(None, Some(168)),
-            if self.show_video.get() {
-                View::canvas("video").frame(None, Some(200))
-            } else {
-                View::Caption(String::new())
-            },
-            arrange_timeline,
-            View::canvas("arrange").grow(3),
-        ]);
+        if self.focus_mode.get() {
+            views.extend([
+                transport,
+                meter,
+                View::canvas("waveform").frame(None, Some(168)),
+                arrange_timeline,
+                View::canvas("arrange").grow(3),
+            ]);
+        } else {
+            views.extend([
+                export_card,
+                tempo_card,
+                transport,
+                meter,
+                master_card,
+                audio_card,
+                video_card,
+                arrange_toolbar,
+                View::canvas("waveform").frame(None, Some(168)),
+                if self.show_video.get() {
+                    View::canvas("video").frame(None, Some(200))
+                } else {
+                    View::Caption(String::new())
+                },
+                arrange_timeline,
+                View::canvas("arrange").grow(3),
+            ]);
+        }
         if let Some(inspector) = inspector {
             views.push(inspector);
         }
