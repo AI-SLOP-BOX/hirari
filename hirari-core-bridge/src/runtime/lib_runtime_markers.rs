@@ -188,6 +188,9 @@ impl HirariCore {
         let Ok(candidate) = serde_json::from_str::<Vec<TrackStackContract>>(snapshot) else {
             return false;
         };
+        if candidate.len() > 65_536 {
+            return false;
+        }
         let mut ids = HashSet::new();
         if candidate.iter().any(|stack| {
             stack.id == 0
@@ -196,6 +199,8 @@ impl HirariCore {
                 || stack.name.len() > 256
                 || !stack.master_gain.is_finite()
                 || !(0.0..=2.0).contains(&stack.master_gain)
+                || stack.member_track_ids.is_empty()
+                || stack.member_track_ids.len() > 65_536
                 || {
                     let mut members = HashSet::new();
                     stack
@@ -323,6 +328,7 @@ impl HirariCore {
             || !master_gain.is_finite()
             || !(0.0..=2.0).contains(&master_gain)
             || member_track_ids.is_empty()
+            || member_track_ids.len() > 65_536
         {
             return false;
         }

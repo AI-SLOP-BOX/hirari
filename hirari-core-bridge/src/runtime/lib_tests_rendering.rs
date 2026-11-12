@@ -1376,3 +1376,55 @@ fn queued_pitch_analysis_finishes_and_finalizes() {
 
     let _ = std::fs::remove_file(&wav_path);
 }
+
+#[test]
+fn step_sequencer_patterns_survive_a_v2_save_and_reload() {
+    // The engine now owns step-sequencer pattern display state (lane
+    // pitches, resolution, feel) round-tripping with the project document.
+    // Track-scoped patterns (region_id == 0) were validated at the API and
+    // restored on load so the AmeUI STEP SEQ card cannot silently lose
+    // anything between sessions.
+    let _guard = native_engine_test_guard();
+    let core = crate::HirariCore::new_offline().expect("offline core must initialize");
+    let track = core.add_midi_track();
+    assert_ne!(track, 0, "offline engine must refuse silently MIDI track creation");
+
+    let patterns = vec![crate::project::StepSequencerPatternContract {
+        track_id: track,
+        region_id: 0,
+        lane_pitches: [36, 38, 42, 46, 40, 45],
+        resolution: 32,
+        feel: 1,
+    }];
+    let payload = serde_json::to_string(&patterns).expect("patterns must serialize");
+    assert!(core.set_step_sequencer_patterns_json(&payload));
+
+    let unique = format!(
+        "hirari-step-seq-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let project_path = std::env::temp_dir().join(format!("{unique}.hirari"));
+    let text = project_path.to_string_lossy().into_owned();
+    core.save_project_v2(&text, "Step Sequencer", 120.0)
+        .expect("v2 save must succeed");
+
+    let restored = crate::HirariCore::new_offline().expect("restored offline core must initialize");
+    restored
+        .load_project_v2(&text)
+        .expect("v2 load must succeed");
+    let stored: Vec<serde_json::Value> = serde_json::from_str(
+        &restored.step_sequencer_patterns_json(),
+    )
+    .expect("patterns must be valid JSON");
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0]["track_id"].as_u64(), Some(u64::from(track)));
+    assert_eq!(stored[0]["region_id"].as_u64(), Some(0));
+    assert_eq!(stored[0]["resolution"].as_u64(), Some(32));
+    assert_eq!(stored[0]["feel"].as_u64(), Some(1));
+    assert_eq!(stored[0]["lane_pitches"].as_array().map(Vec::len), Some(6));
+    let _ = std::fs::remove_file(&project_path);
+}
