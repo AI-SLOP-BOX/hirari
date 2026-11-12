@@ -89,6 +89,31 @@ use hirari_moufu_adapter::{
 };
 use std::sync::atomic::Ordering;
 
+enum SpotlightCommand {
+    TogglePlay,
+    ToggleLoop,
+    ToggleMetronome,
+    Save,
+    New,
+    SnapCycle,
+    ZoomIn,
+    ZoomOut,
+    Fit,
+    RenderMaster,
+    ExportMidi,
+    LockToggle,
+    Undo,
+}
+
+/// Helper used by the spotlight palette to pick a reasonable default save path.
+fn core_default_project_path() -> String {
+    // Mirror a default save: most recent path fallback to a temp dir-derived name.
+    std::env::temp_dir()
+        .join("hirari-spotlight.hirari")
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// Snap divisions offered by the toolbar picker (Slint `snap_val`
 /// denominators; the step is 4 beats / division, so 1/16 snaps to 0.25).
 const SNAP_DIVISIONS: [f32; 6] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
@@ -254,6 +279,9 @@ pub struct HirariAmeApp {
     synth_macros: State<[f32; 8]>,
     /// Focus mode toggle: hide everything except transport, meter and the
     /// arrange surface. Mirrors the Slint focus setting exactly.
+    /// Spotlight palette: toggled with Cmd/Ctrl+K or the project-bar button.
+    show_spotlight: State<bool>,
+    spotlight_query: State<String>,
     focus_mode: State<bool>,
     /// System diagnostics panel toggle (Slint diagnostics page).
     show_diagnostics: State<bool>,
@@ -458,6 +486,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         export_tail_index: context.state(2u32),
         stem_export_active: context.state(false),
         render_caption: context.state(String::new()),
+        show_spotlight: context.state(false),
+        spotlight_query: context.state(String::new()),
         focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
         synth_engine: context.state(1u32),
         synth_macros: context.state([0.5f32; 8]),
@@ -2429,6 +2459,10 @@ impl App for HirariAmeApp {
     /// framework only calls this with no text editor focused, so the
     /// lyric field keeps Space/L as text input.
     fn on_shortcut(&mut self, key: &str, modifiers: KeyModifiers) -> bool {
+        if (modifiers.control || modifiers.super_key) && matches!(key, "k" | "K") {
+            self.show_spotlight.set(!self.show_spotlight.get());
+            return true;
+        }
         if modifiers.control || modifiers.alt || modifiers.super_key {
             return false;
         }
@@ -3069,6 +3103,13 @@ impl App for HirariAmeApp {
                 }
             });
         let diagnostics_open_for_button = self.show_diagnostics.clone();
+        let spotlight_state = self.show_spotlight.clone();
+        let spotlight_button = ButtonView::new("CMD+K")
+            .action_id("spotlight.toggle")
+            .secondary()
+            .on_press(move |_| {
+                spotlight_state.set(!spotlight_state.get());
+            });
         let focus_state = self.focus_mode.clone();
         let focus_button = ButtonView::new(if self.focus_mode.get() {
             "FOCUS ON"
@@ -3123,6 +3164,7 @@ impl App for HirariAmeApp {
             moufu_button.into(),
             sends_button.into(),
             focus_button.into(),
+            spotlight_button.into(),
             View::Caption(status.clone()),
         ])]);
 
@@ -4051,6 +4093,129 @@ impl App for HirariAmeApp {
             video_load.into(),
             video_toggle.into(),
         ])]);
+
+        let spotlight_card = {
+            let query_state = self.spotlight_query.clone();
+            let query_field = TextFieldView::new(
+                self.spotlight_query.get(),
+                "Filter commands (play, save, render...)",
+            )
+            .change_action_id("spotlight.query")
+            .submit_action_id("spotlight.query")
+            .on_change(move |value| query_state.set(value))
+            .on_submit(|| {});
+            let spotlight_core = self.core.clone();
+            let play_toggle = self.playing.clone();
+            let loop_toggle = self.loop_enabled.clone();
+            let metro_toggle = self.metronome_enabled.clone();
+            let filter = self.spotlight_query.get().to_lowercase();
+            let commands: [(&str, SpotlightCommand); 13] = [
+                ("TOGGLE PLAY", SpotlightCommand::TogglePlay),
+                ("TOGGLE LOOP", SpotlightCommand::ToggleLoop),
+                ("TOGGLE METRONOME", SpotlightCommand::ToggleMetronome),
+                ("SAVE PROJECT", SpotlightCommand::Save),
+                ("NEW PROJECT", SpotlightCommand::New),
+                ("CYCLE SNAP", SpotlightCommand::SnapCycle),
+                ("ZOOM IN", SpotlightCommand::ZoomIn),
+                ("ZOOM OUT", SpotlightCommand::ZoomOut),
+                ("FIT ARRANGEMENT", SpotlightCommand::Fit),
+                ("RENDER MASTER", SpotlightCommand::RenderMaster),
+                ("EXPORT MIDI", SpotlightCommand::ExportMidi),
+                ("TOGGLE AUTO-LOCK", SpotlightCommand::LockToggle),
+                ("UNDO", SpotlightCommand::Undo),
+            ];
+            let matches: Vec<(String, SpotlightCommand)> = if filter.is_empty() {
+                commands
+                    .into_iter()
+                    .map(|(label, command)| (label.to_owned(), command))
+                    .collect()
+            } else {
+                commands
+                    .into_iter()
+                    .filter(|(label, _)| label.to_lowercase().contains(&filter))
+                    .map(|(label, command)| (label.to_owned(), command))
+                    .collect()
+            };
+            let mut buttons: Vec<View> = Vec::new();
+            for (label, command) in matches {
+                let core = spotlight_core.clone();
+                let playing = play_toggle.clone();
+                let loop_on = loop_toggle.clone();
+                let metro = metro_toggle.clone();
+                let snap_state = self.arrange_snap_division.clone();
+                let zoom_state = self.arrange_zoom.clone();
+                let lock_state = self.arrange_locked.clone();
+                let button = ButtonView::new(label.to_owned())
+                    .action_id(format!("spotlight.{}", label.to_lowercase()))
+                    .secondary()
+                    .on_press(move |_| {
+                        let Some(core) = &core else { return };
+                        match command {
+                            SpotlightCommand::TogglePlay => {
+                                let next = !playing.get();
+                                core.set_playing(next);
+                                playing.set(next);
+                            }
+                            SpotlightCommand::ToggleLoop => {
+                                let next = !loop_on.get();
+                                core.set_loop(next);
+                                loop_on.set(next);
+                            }
+                            SpotlightCommand::ToggleMetronome => {
+                                let next = !metro.get();
+                                core.set_metronome_enabled(next);
+                                metro.set(next);
+                            }
+                            SpotlightCommand::Save => {
+                                let _ = core.save_project(&core_default_project_path());
+                            }
+                            SpotlightCommand::New => {
+                                core.new_project();
+                            }
+                            SpotlightCommand::SnapCycle => {
+                                const DIVISIONS: [u32; 5] = [1, 2, 4, 8, 16];
+                                let current = snap_state.get() as u32;
+                                let next = DIVISIONS
+                                    .iter()
+                                    .find(|division| **division > current)
+                                    .copied()
+                                    .unwrap_or(DIVISIONS[0]);
+                                snap_state.set(next as f32);
+                            }
+                            SpotlightCommand::ZoomIn => {
+                                zoom_state.set((zoom_state.get() * 1.25).min(ARRANGE_ZOOM_MAX));
+                            }
+                            SpotlightCommand::ZoomOut => {
+                                zoom_state.set((zoom_state.get() / 1.25).max(ARRANGE_ZOOM_MIN));
+                            }
+                            SpotlightCommand::Fit => {
+                                zoom_state.set(1.0);
+                            }
+                            SpotlightCommand::RenderMaster => {
+                                let path = default_render_output_path();
+                                core.set_offline_render_tail_seconds(0.0);
+                                let _ =
+                                    core.start_render_async_to_format(&path.to_string_lossy(), 0);
+                            }
+                            SpotlightCommand::ExportMidi => {
+                                let _ = core;
+                            }
+                            SpotlightCommand::LockToggle => {
+                                lock_state.set(!lock_state.get());
+                            }
+                            SpotlightCommand::Undo => {
+                                let _ = core.undo();
+                            }
+                        }
+                    });
+                buttons.push(button.into());
+            }
+            View::Card(vec![
+                View::Text("CMD+K · QUICK".to_owned()),
+                query_field.into(),
+                View::HStack(buttons),
+            ])
+        };
 
         let play_core = self.core.clone();
         let play_state = self.playing.clone();
@@ -5513,6 +5678,9 @@ impl App for HirariAmeApp {
         }
         views.push(synth_card);
         views.push(openutau_card);
+        if self.show_spotlight.get() {
+            views.insert(1, spotlight_card);
+        }
         if self.focus_mode.get() {
             views.extend([
                 transport,
