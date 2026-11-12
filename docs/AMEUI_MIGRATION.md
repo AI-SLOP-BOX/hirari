@@ -142,7 +142,12 @@ Done: transport, master meter, waveform, track names/kinds/clip counts,
 lane/clip/marker/playhead geometry, click-to-seek, zoom (toolbar),
 ruler-drag panning, click clip selection, clip drag-move, edge-drag trim,
 clip waveform peaks, mixer strips (fader/pan/mute/solo/arm), edit lock,
-project open/save/new, loop/metronome toggles.
+project open/save/new, loop/metronome toggles, flex-pitch edits
+(preserve-pitch/speed/pitch/sync-group/quantize), track stacks
+(create/add/gain/collapse/delete), comping take list with engine-driven
+crossfade and select, markers add/delete, audio edits (reverse/pitch/
+split/fade in/fade out/loop/duplicate/delete), vocal-tuning editing,
+and send routing (a flexible plug for routing cards).
 
 Not yet (suggested order):
 
