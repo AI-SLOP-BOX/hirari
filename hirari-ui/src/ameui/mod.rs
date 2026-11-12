@@ -309,6 +309,16 @@ pub struct HirariAmeApp {
     openutau_consonants: State<f32>,
     /// Notated staff view (grand staff for the selected MIDI track).
     show_notation: State<bool>,
+    /// Control-room panel toggle (monitor bus only).
+    show_control_room: State<bool>,
+    /// Dim state mirrored from the engine each refresh.
+    control_room_dim: State<bool>,
+    /// Dim depth in dB.
+    control_room_dim_db: State<f32>,
+    /// Talkback state mirrored from the engine each refresh.
+    talkback_enabled: State<bool>,
+    /// Talkback gain (0..4).
+    talkback_gain: State<f32>,
     /// Step-sequencer panel toggle.
     show_step_seq: State<bool>,
     /// Persisted step-sequencer patterns (from the engine each refresh).
@@ -566,6 +576,11 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         openutau_dynamics: context.state(0.60f32),
         openutau_consonants: context.state(0.50f32),
         show_notation: context.state(false),
+        show_control_room: context.state(false),
+        control_room_dim: context.state(false),
+        control_room_dim_db: context.state(-20.0f32),
+        talkback_enabled: context.state(false),
+        talkback_gain: context.state(1.0f32),
         show_step_seq: context.state(false),
         step_seq_patterns: context.state(Vec::new()),
         step_page: context.state(1u32),
@@ -1319,6 +1334,10 @@ impl HirariAmeApp {
         self.tick = self.tick.wrapping_add(1);
         if self.tick % 10 == 1 {
             self.refresh_arrange_state(&core);
+            self.control_room_dim.set(core.control_room_dimmed());
+            self.control_room_dim_db.set(core.control_room_dim_db());
+            self.talkback_enabled
+                .set(core.control_room_talkback_enabled());
             self.poll_waveforms(&core);
             let devices = parse_audio_devices(&core.list_audio_devices_json());
             self.device_count.set(devices.len() as u32);
@@ -3648,6 +3667,17 @@ impl App for HirariAmeApp {
         .on_press(move |_| {
             midi_open_for_button.set(!midi_open_for_button.get());
         });
+        let control_room_open_for_button = self.show_control_room.clone();
+        let control_room_button = ButtonView::new(if self.show_control_room.get() {
+            "CTRL CLOSE"
+        } else {
+            "CTRL ROOM"
+        })
+        .action_id("control_room.toggle")
+        .secondary()
+        .on_press(move |_| {
+            control_room_open_for_button.set(!control_room_open_for_button.get());
+        });
         let notation_open_for_button = self.show_notation.clone();
         let notation_button = ButtonView::new(if self.show_notation.get() {
             "NOTATION CLOSE"
@@ -3692,6 +3722,7 @@ impl App for HirariAmeApp {
             midi_button.into(),
             step_seq_button.into(),
             notation_button.into(),
+            control_room_button.into(),
             focus_button.into(),
             spotlight_button.into(),
             View::Caption(status.clone()),
@@ -5054,6 +5085,65 @@ impl App for HirariAmeApp {
                     ),
                 ])
             }
+        };
+
+        // CONTROL ROOM card (control room): dim + talkback on the monitor bus,
+        // engine-driven so the values round-trip through the poll each refresh.
+        let control_room_card = {
+            let dim_core = self.core.clone();
+            let dim_state = self.control_room_dim.clone();
+            let dim_checkbox = CheckboxView::new("DIM", self.control_room_dim.get())
+                .action_id("control_room.dim")
+                .on_toggle(move |next| {
+                    if let Some(core) = &dim_core {
+                        core.set_control_room_dim(next);
+                    }
+                    dim_state.set(next);
+                });
+            let dim_db_state = self.control_room_dim_db.clone();
+            let dim_db_core = self.core.clone();
+            let dim_db_slider = SliderView::new(self.control_room_dim_db.get(), -60.0, 0.0)
+                .action_id("control_room.dim_db")
+                .on_change(move |value| {
+                    let clamped = value.clamp(-60.0, 0.0);
+                    dim_db_state.set(clamped);
+                    if let Some(core) = &dim_db_core {
+                        let _ = core.set_control_room_dim_db(clamped);
+                    }
+                });
+            let talkback_state = self.talkback_enabled.clone();
+            let talkback_gain_state = self.talkback_gain.clone();
+            let talkback_core = self.core.clone();
+            let talkback_checkbox = CheckboxView::new("TALKBACK", self.talkback_enabled.get())
+                .action_id("control_room.talkback")
+                .on_toggle(move |next| {
+                    if let Some(core) = &talkback_core {
+                        core.set_control_room_talkback(next, talkback_gain_state.get());
+                    }
+                    talkback_state.set(next);
+                });
+            let gain_state = self.talkback_gain.clone();
+            let gain_core = self.core.clone();
+            let gain_talkback_state = self.talkback_enabled.clone();
+            let gain_slider = SliderView::new(self.talkback_gain.get(), 0.0, 4.0)
+                .action_id("control_room.talkback_gain")
+                .on_change(move |value| {
+                    let clamped = value.clamp(0.0, 4.0);
+                    gain_state.set(clamped);
+                    if let Some(core) = &gain_core {
+                        core.set_control_room_talkback(gain_talkback_state.get(), clamped);
+                    }
+                });
+            View::Card(vec![View::HStack(vec![
+                View::Text("CTRL ROOM".to_owned()),
+                dim_checkbox.into(),
+                View::Caption("dB".to_owned()),
+                dim_db_slider.into(),
+                View::Caption(format!("{:+.0}", self.control_room_dim_db.get())),
+                talkback_checkbox.into(),
+                gain_slider.into(),
+                View::Caption(format!("GAIN {:.2}", self.talkback_gain.get())),
+            ])])
         };
 
         // MIDI LEARN card (MIDI Learn page): ARM MACRO 1-8 to bind the next
@@ -7283,6 +7373,9 @@ impl App for HirariAmeApp {
         }
         if self.show_moufu.get() {
             views.push(moufu_card);
+        }
+        if self.show_control_room.get() {
+            views.push(control_room_card);
         }
         if self.show_midi.get() {
             views.push(midi_learn_card);
