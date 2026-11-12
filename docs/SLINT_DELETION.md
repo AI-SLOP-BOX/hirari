@@ -69,7 +69,7 @@ approx. effort and status. Each item = one AmeUI slice.
 | P3 | Full mixer / smart controls / console variants | `ui/mixer/*` (188 files large) `full_mixer.slint`, `smart_controls.slint`, `console_*` | partial (strips) |
 | P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | **part done** (`160fee4`) — sends card (source/bus/gain/pre-post/live apply) |
 | P5 | Moufu link page | `moufu_link_page.slint` | **done** (`8a9b06f`) — address persistence + connect/refresh/share/receive/unlink, read-only preview, queue-safe revisioned publish |
-| P6 | Preferences / setup pages | `ui/audio_settings.rs`, `ui/setup*`, `ui/preferences*` | partial (audio card) |
+| P6 | Preferences / setup pages | `ui/audio_settings.rs`, `ui/setup*`, `ui/preferences*` | **partial done** (`af60aab`) — focus toggle persisted via shared preferences module; beginner/onboarding guide not ported |
 | P7 | Mastering page | `pages/mastering_page.slint` | **partial done** (`608e9e9`) — MASTER card with integrated LUFS, true peak L/R, gain, delivery target. Static module tiles + GPU curves not ported. |
 | P8 | Flex pitch / flex edit | `ui/flex*`, `editor/*` | not started |
 | P9 | Comping (take lanes) | `ui/comp*`, `editor/comping*` | not started (engine comping works, UI in Slint only) |
@@ -83,7 +83,7 @@ approx. effort and status. Each item = one AmeUI slice.
 | P17 | Video monitor | `media/video_monitor.slint` | **part done** (`1bd92d1`) — LOAD/SHOW/HIDE + frame upload path; frame timing wired |
 | P18 | Advanced automation | `editor/advanced_automation.slint` | partial (overlay edit) |
 | P19 | Global tempo editor | `editor/global_tempo_editor.slint` | **partial done** (`5153234`) — BPM±/tap/time-signature/event list; knob widget + curve canvas not ported |
-| P20 | Spotlight command palette | `navigation/spotlight.slint` | not started |
+| P20 | Spotlight command palette | `navigation/spotlight.slint` | **done** (`6f56a51`) — Cmd/Ctrl+K toggle + 13 commands wired to the engine; the 15-command Slint palette with context previews not ported (simple substring filter instead). |
 | P21 | Workflow pages remainder (flex/global/midi learn) | `pages/workflow_pages.slint` | remaining |
 | P22 | Assistant view (if any remains post-delete) | — | n/a |
 
