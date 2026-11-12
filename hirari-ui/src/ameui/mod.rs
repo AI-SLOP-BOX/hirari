@@ -292,6 +292,14 @@ pub struct HirariAmeApp {
     comping_takes: State<Vec<CompTake>>,
     /// Crossfade (0..1 normalized) applied by the COMPING card's slider.
     comp_crossfade: State<f32>,
+    /// Tracked OpenUtau vocal score/render pair for the tuning editor (P13).
+    openutau_vocal_source: State<String>,
+    openutau_vocal_render: State<String>,
+    /// OpenUtau tuning values mirrored from the engine's vocal contract; all normalized 0..=1.
+    openutau_scoop: State<f32>,
+    openutau_vibrato: State<f32>,
+    openutau_dynamics: State<f32>,
+    openutau_consonants: State<f32>,
     /// Synth engine selector: 0=SYNTH, 1=WAVETABLE, 2=SAMPLER.
     synth_engine: State<u32>,
     /// Local echo of the 8 engine macro values (no engine getter exists).
@@ -518,6 +526,12 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         show_spotlight: context.state(false),
         spotlight_query: context.state(String::new()),
         focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
+        openutau_vocal_source: context.state(String::new()),
+        openutau_vocal_render: context.state(String::new()),
+        openutau_scoop: context.state(0.35f32),
+        openutau_vibrato: context.state(0.45f32),
+        openutau_dynamics: context.state(0.60f32),
+        openutau_consonants: context.state(0.50f32),
         synth_engine: context.state(1u32),
         synth_macros: context.state([0.5f32; 8]),
         show_diagnostics: context.state(false),
@@ -1302,6 +1316,10 @@ impl HirariAmeApp {
                     self.openutau_caption
                         .set("OPENUTAU IMPORT FAILED: COULD NOT CREATE VOCAL REGION".to_owned());
                 } else {
+                    let _ = core.register_openutau_vocal(
+                        &source.to_string_lossy(),
+                        &render.to_string_lossy(),
+                    );
                     self.tracks.set(parse_arrange_tracks(
                         &core.get_project_layout_json(),
                         |samples| core.samples_to_beats(samples),
@@ -3960,13 +3978,88 @@ impl App for HirariAmeApp {
                 }
                 import_caption.set("VOCAL IMPORT QUEUED".to_owned());
             });
-        let openutau_card = View::Card(vec![View::HStack(vec![
-            View::Text("VOCAL SCORE".to_owned()),
-            open_score_button.into(),
-            launch_openutau.into(),
-            pick_render_button.into(),
-            import_button.into(),
-            View::Caption(self.openutau_caption.get()),
+        // Tuning sliders — normalized 0..=1 matching the engine contract.
+        let scoop_state = self.openutau_scoop.clone();
+        let vibrato_state = self.openutau_vibrato.clone();
+        let dynamics_state = self.openutau_dynamics.clone();
+        let consonants_state = self.openutau_consonants.clone();
+        let scoop_slider = SliderView::new(scoop_state.get(), 0.0, 1.0)
+            .action_id("openutau.scoop")
+            .on_change(move |value| {
+                scoop_state.set(value.clamp(0.0, 1.0));
+            });
+        let vibrato_slider = SliderView::new(vibrato_state.get(), 0.0, 1.0)
+            .action_id("openutau.vibrato")
+            .on_change(move |value| {
+                vibrato_state.set(value.clamp(0.0, 1.0));
+            });
+        let dynamics_slider = SliderView::new(dynamics_state.get(), 0.0, 1.0)
+            .action_id("openutau.dynamics")
+            .on_change(move |value| {
+                dynamics_state.set(value.clamp(0.0, 1.0));
+            });
+        let consonants_slider = SliderView::new(consonants_state.get(), 0.0, 1.0)
+            .action_id("openutau.consonants")
+            .on_change(move |value| {
+                consonants_state.set(value.clamp(0.0, 1.0));
+            });
+        let apply_core = self.core.clone();
+        let apply_source = self.openutau_source.clone();
+        let apply_render = self.openutau_render.clone();
+        let apply_scoop = self.openutau_scoop.clone();
+        let apply_vibrato = self.openutau_vibrato.clone();
+        let apply_dynamics = self.openutau_dynamics.clone();
+        let apply_consonants = self.openutau_consonants.clone();
+        let apply_caption = self.openutau_caption.clone();
+        let apply_button = ButtonView::new("APPLY TUNING")
+            .action_id("openutau.apply_tuning")
+            .primary()
+            .on_press(move |_| {
+                let Some(core) = &apply_core else { return };
+                let source = apply_source
+                    .lock()
+                    .map(|slot| slot.clone())
+                    .unwrap_or_default();
+                let render = apply_render
+                    .lock()
+                    .map(|slot| slot.clone())
+                    .unwrap_or_default();
+                let (Some(source), Some(render)) = (source, render) else {
+                    apply_caption.set("PICK BOTH A SCORE AND A RENDER FIRST".to_owned());
+                    return;
+                };
+                match core.set_openutau_tuning(
+                    &source.to_string_lossy(),
+                    &render.to_string_lossy(),
+                    apply_scoop.get(),
+                    apply_vibrato.get(),
+                    apply_dynamics.get(),
+                    apply_consonants.get(),
+                ) {
+                    Ok(()) => apply_caption.set("VOCAL TUNING SAVED".to_owned()),
+                    Err(error) => apply_caption.set(format!("TUNING FAILED: {error}")),
+                }
+            });
+        let openutau_card = View::Card(vec![View::VStack(vec![
+            View::HStack(vec![
+                View::Text("VOCAL SCORE".to_owned()),
+                open_score_button.into(),
+                launch_openutau.into(),
+                pick_render_button.into(),
+                import_button.into(),
+                View::Caption(self.openutau_caption.get()),
+            ]),
+            View::HStack(vec![
+                View::Caption("SCOOP".to_owned()),
+                scoop_slider.into(),
+                View::Caption("VIBRATO".to_owned()),
+                vibrato_slider.into(),
+                View::Caption("DYNAMICS".to_owned()),
+                dynamics_slider.into(),
+                View::Caption("CONSONANTS".to_owned()),
+                consonants_slider.into(),
+                apply_button.into(),
+            ]),
         ])]);
 
         // SYNTH card (synth panel parity): engine picker and the
