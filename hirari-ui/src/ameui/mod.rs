@@ -412,6 +412,10 @@ pub struct HirariAmeApp {
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
+    spectrum_image: Option<CanvasTexture>,
+    spectrum_reusable: Option<wgpu::Texture>,
+    /// Spectrum analyser toggle (FFT-derived, drawn on its own canvas).
+    show_spectrum: State<bool>,
     /// MusicXML export pending path; the poll writes it via the engine
     /// and refreshes the status.
     pending_musicxml: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
@@ -643,6 +647,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         status: context.state(status),
         waveform_image: None,
         waveform_reusable: None,
+        spectrum_image: None,
+        spectrum_reusable: None,
+        show_spectrum: context.state(false),
         video_image: None,
         video_reusable: None,
         video_frame: None,
@@ -1331,6 +1338,10 @@ impl HirariAmeApp {
         self.master_peak.set(peak);
         self.master_gain.set(core.master_gain());
         self.plots.publish_meters(&[peak, peak]);
+        let bands = core.get_fft_bands();
+        if !bands.is_empty() {
+            self.plots.publish_spectrum(&bands);
+        }
 
         // The layout walk is comparatively costly; refresh it a few times a
         // second rather than on every 30 Hz tick.
@@ -3196,7 +3207,7 @@ impl App for HirariAmeApp {
 
     fn canvas_scene_dirty(&self, canvas_id: &str) -> bool {
         match canvas_id {
-            "waveform" | "notation" => true,
+            "waveform" | "notation" | "spectrum" => true,
             "arrange" | "piano" => {
                 let playhead = self.playhead_beats.get();
                 let zoom = self.arrange_zoom.get();
@@ -3681,6 +3692,17 @@ impl App for HirariAmeApp {
         .on_press(move |_| {
             chords_open_for_button.set(!chords_open_for_button.get());
         });
+        let spectrum_open_for_button = self.show_spectrum.clone();
+        let spectrum_button = ButtonView::new(if self.show_spectrum.get() {
+            "SPECTRUM CLOSE"
+        } else {
+            "SPECTRUM"
+        })
+        .action_id("spectrum.toggle")
+        .secondary()
+        .on_press(move |_| {
+            spectrum_open_for_button.set(!spectrum_open_for_button.get());
+        });
         let control_room_open_for_button = self.show_control_room.clone();
         let control_room_button = ButtonView::new(if self.show_control_room.get() {
             "CTRL CLOSE"
@@ -3737,6 +3759,7 @@ impl App for HirariAmeApp {
             step_seq_button.into(),
             notation_button.into(),
             control_room_button.into(),
+            spectrum_button.into(),
             chords_button.into(),
             focus_button.into(),
             spotlight_button.into(),
@@ -7544,6 +7567,11 @@ impl App for HirariAmeApp {
                 video_card,
                 arrange_toolbar,
                 View::canvas("waveform").frame(None, Some(168)),
+                if self.show_spectrum.get() {
+                    View::canvas("spectrum").frame(None, Some(100))
+                } else {
+                    View::Caption(String::new())
+                },
                 if self.show_notation.get() {
                     View::canvas("notation").frame(None, Some(240))
                 } else {
@@ -7838,6 +7866,55 @@ impl App for HirariAmeApp {
                 }
             }
             if let Some(image) = &self.video_image {
+                context.draw_texture(scene, image, bounds);
+            }
+            return;
+        }
+        if canvas_id == "spectrum" {
+            let frame = self.plots.snapshot();
+            let pixels = plot_raster::spectrum_rgba(&frame);
+            let width = plot_raster::WIDTH;
+            let height = 96u32;
+            let texture = self.spectrum_reusable.take().unwrap_or_else(|| {
+                context.create_render_target(
+                    width,
+                    height,
+                    Some("hirari-spectrum"),
+                    wgpu::TextureUsages::COPY_DST,
+                )
+            });
+            context.queue().write_texture(
+                texture.as_image_copy(),
+                &pixels,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            if let Some(image) = &self.spectrum_image {
+                match context.replace_texture(image, texture) {
+                    Ok(previous) => self.spectrum_reusable = Some(previous),
+                    Err(error) => {
+                        eprintln!("could not refresh spectrum canvas: {error}");
+                        return;
+                    }
+                }
+            } else {
+                match context.register_texture(texture) {
+                    Ok(image) => self.spectrum_image = Some(image),
+                    Err(error) => {
+                        eprintln!("could not register spectrum canvas: {error}");
+                        return;
+                    }
+                }
+            }
+            if let Some(image) = &self.spectrum_image {
                 context.draw_texture(scene, image, bounds);
             }
             return;
