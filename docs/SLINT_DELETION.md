@@ -77,11 +77,11 @@ approx. effort and status. Each item = one AmeUI slice.
 | P11 | Step sequencer / drums | `pages/workflow_pages.slint`, `drums` view | engine has step seq; Mikboix UI only |
 | P12 | MIDI learn | `pages/workflow_pages.slint` | engine refs (MIDI learn) in bridge |
 | P13 | OpenUtau editor | `editor/openutau_editor.slint` | **partial done** (`337f762`) — open/launch/import/vocal-track creation; tuning worker not ported |
-| P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | engine refs present |
+| P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | **part done** (`217c…`-family) — audio-edit card (REVERSE/PITCH±SEMITONE/SPLIT) on the selected clip via set_region_reverse/set_region_pitch_semitones/split_region; layout now carries pitch_semitones/loop_count |
 | P15 | Notation / score | `editor/notation_hub.slint` | **partial done** (`2c9537e`) — MusicXML export; notation view not ported |
 | P16 | Synth panel (/ sound_design) | `editor/synth_panel.slint` | not started |
 | P17 | Video monitor | `media/video_monitor.slint` | **part done** (`1bd92d1`) — LOAD/SHOW/HIDE + frame upload path; frame timing wired |
-| P18 | Advanced automation | `editor/advanced_automation.slint` | partial (overlay edit) |
+| P18 | Advanced automation | `editor/advanced_automation.slint` | **wont port** — component is never instantiated anywhere; hardcoded fake 5-node demo canvas with no engine wiring |
 | P19 | Global tempo editor | `editor/global_tempo_editor.slint` | **partial done** (`5153234`) — BPM±/tap/time-signature/event list; knob widget + curve canvas not ported |
 | P20 | Spotlight command palette | `navigation/spotlight.slint` | **done** (`6f56a51`) — Cmd/Ctrl+K toggle + 13 commands wired to the engine; the 15-command Slint palette with context previews not ported (simple substring filter instead). |
 | P21 | Workflow pages remainder (flex/global/midi learn) | `pages/workflow_pages.slint` | remaining |
