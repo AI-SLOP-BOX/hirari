@@ -43,7 +43,7 @@
 //! every engine read happens on the UI thread. A background ticker only sends
 //! `AppMessage("tick")` through the event-loop proxy; `on_event` does the poll.
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -82,11 +82,14 @@ use crate::ui_shared::render_ops::{
 };
 use crate::ui_shared::render_path::default_render_output_path;
 use crate::ui_shared::template_starter::create_template_project;
+use hirari_core_bridge::project_contracts::MidiLearnMappingContract;
 use hirari_core_bridge::project_contracts::MidiNoteContract;
 use hirari_moufu_adapter::{
     LinkStatus, MoufuEvent, HIRARI_PROJECT_DATA_TYPE, HIRARI_PROJECT_ENTITY,
 };
 use std::sync::atomic::Ordering;
+
+mod midi_learn;
 
 enum SpotlightCommand {
     TogglePlay,
@@ -292,6 +295,13 @@ pub struct HirariAmeApp {
     comping_takes: State<Vec<CompTake>>,
     /// Crossfade (0..1 normalized) applied by the COMPING card's slider.
     comp_crossfade: State<f32>,
+    /// MIDI LEARN panel toggle (CoreMIDI poll + CC-to-macro bindings).
+    show_midi: State<bool>,
+    /// 1..=8 = the matching engine macro is armed to learn the next CC;
+    /// 0 = not armed.
+    midi_armed_macro: State<u32>,
+    /// Status line for the MIDI LEARN card.
+    midi_status: State<String>,
     /// OpenUtau tuning values mirrored from the engine's vocal contract; all normalized 0..=1.
     openutau_scoop: State<f32>,
     openutau_vibrato: State<f32>,
@@ -467,6 +477,17 @@ pub struct HirariAmeApp {
     pending_import: Option<(u64, String, u32)>,
     /// Library import ticket slot (dialog/async path shares the poll).
     library_ticket: std::sync::Arc<std::sync::Mutex<Option<(u64, String, u32)>>>,
+    /// MIDI LEARN: true once `core.start_midi_input()` has succeeded; false
+    /// after we deliberately stopped input or the device was unavailable.
+    midi_input_started: bool,
+    /// Per-source running-status byte for the CoreMIDI decoder.
+    midi_running_status: HashMap<i32, Option<u8>>,
+    /// Last ~30 s of Note On/Off events on the MIDI input, used by the
+    /// "Insert buffered MIDI" path.
+    midi_retrospective: Rc<std::cell::RefCell<VecDeque<midi_learn::BufferedMidiEvent>>>,
+    /// Track id to run a retrospective insert for, requested by the MIDI
+    /// LEARN card; the poll performs the insert so it can borrow `self`.
+    midi_insert_pending: Rc<std::cell::RefCell<Option<u32>>>,
     tick: u64,
 }
 
@@ -520,6 +541,9 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         flex_quantize_swing: context.state(0.0f32),
         comping_takes: context.state(Vec::new()),
         comp_crossfade: context.state(0.01f32),
+        show_midi: context.state(false),
+        midi_armed_macro: context.state(0u32),
+        midi_status: context.state("MIDI INPUT OFF".to_owned()),
         show_spotlight: context.state(false),
         spotlight_query: context.state(String::new()),
         focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
@@ -638,6 +662,10 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         dirty_layout: Cell::new(424_242),
         dirty_layout_seen: Cell::new(424_243),
         pending_import: None,
+        midi_input_started: false,
+        midi_running_status: HashMap::new(),
+        midi_retrospective: Rc::new(std::cell::RefCell::new(VecDeque::new())),
+        midi_insert_pending: Rc::new(std::cell::RefCell::new(None)),
         tick: 0,
     }
 }
@@ -1055,6 +1083,153 @@ impl HirariAmeApp {
         }
     }
 
+    /// MIDI LEARN poll. Runs while the MIDI LEARN panel is open: starts
+    /// CoreMIDI on entry, drains input packets, pushes Note On/Off events
+    /// into the 30-second retrospective buffer, binds an armed macro to the
+    /// next CC message seen, and mirrors the last event into the status.
+    fn poll_midi_learn(&mut self, core: &HirariCore) {
+        if !self.midi_input_started {
+            if !core.start_midi_input() {
+                self.midi_status.set("MIDI INPUT UNAVAILABLE".to_owned());
+                return;
+            }
+            self.midi_input_started = true;
+            self.midi_status
+                .set("MIDI INPUT READY · ARM A MACRO THEN MOVE A CC".to_owned());
+        }
+        // A retrospective insert was requested by the card; perform it here so
+        // this borrows `self` freely.
+        if let Some(track_id) = self.midi_insert_pending.borrow_mut().take() {
+            let is_midi = self.tracks.get().iter().any(|track| {
+                track.id == track_id
+                    && matches!(track.kind.as_str(), "Midi" | "MIDI" | "Instrument")
+            });
+            match midi_learn::insert_retrospective_notes(
+                track_id,
+                &self.midi_retrospective,
+                core,
+                is_midi,
+            ) {
+                Ok(count) => {
+                    self.midi_retrospective.borrow_mut().clear();
+                    self.midi_status
+                        .set(format!("INSERTED {count} NOTES · UNDO AVAILABLE"));
+                    self.refresh_arrange_state(core);
+                }
+                Err(message) => {
+                    self.midi_status.set(message);
+                    if is_midi {
+                        self.midi_retrospective.borrow_mut().clear();
+                    }
+                }
+            }
+        }
+        for packet in
+            serde_json::from_str::<Vec<midi_learn::InputPacket>>(&core.poll_midi_input_json())
+                .unwrap_or_default()
+        {
+            let device_id = format!("coremidi:{}:input", packet.source_unique_id);
+            let running_status = self
+                .midi_running_status
+                .entry(packet.source_unique_id)
+                .or_default();
+            for message in midi_learn::decode_midi_messages(&packet.data_hex, running_status) {
+                let event_host_time = if packet.host_time == 0 {
+                    core.midi_host_time_now()
+                } else {
+                    packet.host_time
+                };
+                if matches!(
+                    message,
+                    midi_learn::MidiMessage::NoteOn { .. }
+                        | midi_learn::MidiMessage::NoteOff { .. }
+                ) {
+                    let sample_rate = core.get_sample_rate().max(1.0);
+                    let mut buffer = self.midi_retrospective.borrow_mut();
+                    buffer.push_back(midi_learn::BufferedMidiEvent {
+                        source_id: packet.source_unique_id,
+                        host_time: event_host_time,
+                        message,
+                    });
+                    while buffer.len() > midi_learn::MAX_RETROSPECTIVE_MIDI_EVENTS {
+                        buffer.pop_front();
+                    }
+                    while buffer.front().is_some_and(|event| {
+                        core.midi_host_time_delta_samples(
+                            event.host_time,
+                            event_host_time,
+                            sample_rate,
+                        ) > sample_rate as u64 * midi_learn::RETROSPECTIVE_MIDI_SECONDS
+                    }) {
+                        buffer.pop_front();
+                    }
+                }
+                let midi_learn::MidiMessage::ControlChange {
+                    channel,
+                    controller,
+                    value,
+                } = message
+                else {
+                    continue;
+                };
+                let armed = self.midi_armed_macro.get();
+                let learned = if armed > 0 {
+                    let macro_index = armed - 1;
+                    let mapping = MidiLearnMappingContract {
+                        mapping_id: format!(
+                            "midi:{}:{}:{}:macro:{}",
+                            packet.source_unique_id, channel, controller, macro_index
+                        ),
+                        device_id: device_id.clone(),
+                        channel,
+                        controller: controller as u16,
+                        target_instance_id: format!("macro:{macro_index}"),
+                        target_parameter_id: "value".to_owned(),
+                        min: 0.0,
+                        max: 1.0,
+                        curve: 0.0,
+                        pickup: false,
+                        macro_group: None,
+                    };
+                    match core.add_midi_learn_mapping(mapping) {
+                        Ok(()) => {
+                            self.midi_armed_macro.set(0);
+                            Some(macro_index)
+                        }
+                        Err(error) => {
+                            self.midi_status.set(format!("MIDI LEARN FAILED: {error}"));
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                if learned.is_some() {
+                    self.refresh_arrange_state(core);
+                }
+                core.handle_midi_cc_from_device(&device_id, channel, controller, value);
+                self.midi_status.set(match learned {
+                    Some(macro_index) => format!(
+                        "LEARNED CH {} · CC {} → MACRO {}",
+                        channel + 1,
+                        controller,
+                        macro_index + 1
+                    ),
+                    None => format!("MIDI CH {} · CC {} = {}", channel + 1, controller, value),
+                });
+            }
+        }
+    }
+
+    fn stop_midi_learn(&mut self, core: &HirariCore) {
+        if self.midi_input_started {
+            core.stop_midi_input();
+            self.midi_input_started = false;
+        }
+        self.midi_armed_macro.set(0);
+        self.midi_retrospective.borrow_mut().clear();
+    }
+
     fn poll_engine(&mut self) {
         let Some(core) = self.core.clone() else {
             return;
@@ -1062,6 +1237,12 @@ impl HirariAmeApp {
         self.poll_render();
         self.poll_moufu();
         self.poll_track_stacks();
+        if self.show_midi.get() {
+            self.poll_midi_learn(&core);
+        } else if self.midi_input_started {
+            self.stop_midi_learn(&core);
+            self.midi_status.set("MIDI INPUT OFF".to_owned());
+        }
         let snapshot = core.comping_snapshot_json();
         self.comping_takes.set(parse_comping_takes(&snapshot));
         if let Some(path) = self
@@ -3215,6 +3396,17 @@ impl App for HirariAmeApp {
         .on_press(move |_| {
             sends_open_for_button.set(!sends_open_for_button.get());
         });
+        let midi_open_for_button = self.show_midi.clone();
+        let midi_button = ButtonView::new(if self.show_midi.get() {
+            "MIDI CLOSE"
+        } else {
+            "MIDI LEARN"
+        })
+        .action_id("midi.toggle")
+        .secondary()
+        .on_press(move |_| {
+            midi_open_for_button.set(!midi_open_for_button.get());
+        });
         let moufu_open_for_button = self.show_moufu.clone();
         let moufu_button = ButtonView::new(if self.show_moufu.get() {
             "MOUFU CLOSE"
@@ -3234,6 +3426,7 @@ impl App for HirariAmeApp {
             diagnostics_button.into(),
             moufu_button.into(),
             sends_button.into(),
+            midi_button.into(),
             focus_button.into(),
             spotlight_button.into(),
             View::Caption(status.clone()),
@@ -4233,6 +4426,66 @@ impl App for HirariAmeApp {
                 enable_button.into(),
             ])])
         };
+
+        // MIDI LEARN card (MIDI Learn page): ARM MACRO 1-8 to bind the next
+        // CoreMIDI CC to the engine macro, and INSERT RECENT MIDI to drop the
+        // last 30 s of buffered Note On/Off onto the selected MIDI/Instrument
+        // track. The poll feeds the retrospective buffer; INSERT runs in the
+        // poll so undo/refresh happen in one place.
+        let armed = self.midi_armed_macro.get();
+        let mut midi_arm_buttons: Vec<View> = Vec::new();
+        for macro_index in 1..=8u32 {
+            let armed_state = self.midi_armed_macro.clone();
+            let label = if armed == macro_index {
+                format!("M{macro_index} ARMED")
+            } else {
+                format!("MACRO {macro_index}")
+            };
+            let arm_button = ButtonView::new(label)
+                .action_id(format!("midi.arm.{macro_index}"))
+                .secondary()
+                .on_press(move |_| {
+                    let next = if armed_state.get() == macro_index {
+                        0
+                    } else {
+                        macro_index
+                    };
+                    armed_state.set(next);
+                });
+            midi_arm_buttons.push(arm_button.into());
+        }
+        let piano_track_id = self.piano_track.get();
+        let piano_track_kind = self
+            .tracks
+            .get()
+            .into_iter()
+            .find(|track| track.id == piano_track_id)
+            .map(|track| track.kind)
+            .unwrap_or_default();
+        let is_midi_target = matches!(piano_track_kind.as_str(), "Midi" | "MIDI" | "Instrument");
+        let insert_pending = self.midi_insert_pending.clone();
+        let insert_status = self.midi_status.clone();
+        let insert_button = ButtonView::new("INSERT RECENT MIDI")
+            .action_id("midi.insert_recent")
+            .secondary()
+            .on_press(move |_| {
+                if is_midi_target {
+                    *insert_pending.borrow_mut() = Some(piano_track_id);
+                } else {
+                    insert_status
+                        .set("RECENT MIDI NEEDS A MIDI OR INSTRUMENT TRACK SELECTED".to_owned());
+                }
+            });
+        let midi_learn_card = View::Card(vec![
+            View::Text("MIDI LEARN".to_owned()),
+            View::HStack(midi_arm_buttons),
+            View::HStack(vec![insert_button.into()]),
+            View::Caption(self.midi_status.get()),
+            View::Caption(
+                "Arm a macro then move any CC control. INSERT RECENT MIDI drops the last 30 s of held Note On/Off onto the selected track (also inside LOOP ranges)."
+                    .to_owned(),
+            ),
+        ]);
 
         let video_card = View::Card(vec![View::HStack(vec![
             View::Text("VIDEO".to_owned()),
@@ -6401,6 +6654,9 @@ impl App for HirariAmeApp {
         }
         if self.show_moufu.get() {
             views.push(moufu_card);
+        }
+        if self.show_midi.get() {
+            views.push(midi_learn_card);
         }
         if self.show_sends.get() {
             views.push(sends_card);
