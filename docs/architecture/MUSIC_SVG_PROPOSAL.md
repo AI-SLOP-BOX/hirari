@@ -1,105 +1,133 @@
-# Architecture Decision Record: "Music-SVG" proposal (friend's new standard)
+# Architecture Decision Record: "Textual Patch" program (from the friend proposal)
 
-**Status**: DECIDED — defer implementation until the 800-line split campaign lands.
-**Date**: 2026-11-12
-**Author**: maintainer (after code-grounded review)
+**Status**: APPROVED — pursued seriously. This is now a program of record, not a maybe.
+**Date**: 2026-11-12 (revised from an earlier, weaker "deferred" version — the maintainer
+decided with fresh eyes that this idea deserves a real engineering effort).
 
-A friend proposed a new standard for Hirari: a three-layer separation with
-lock-free synchronization, a declarative "music SVG" (AI-editable text
-format with opaque plugin binaries), unified `kurbo::BezPath` curves for
-UI drawing and DSP evaluation, `arc-swap` hot graph swaps, and an ARA2 host
-"provided by the existing implementation". This ADR records the verdict.
+A friend proposed a specification-adjacent idea: an editable text format
+with declarative dataflow devices, opaque plugin binaries, unified curve
+representation, and lock-free hot-swapping. An earlier review judged parts
+of it by its packaging instead of its substance. The substance is good.
+This ADR records the commitment and the honest scope of "serious".
 
-The proposal is directionally right. Almost all of it is, however, a
-re-expression of what Hirari already implements, plus two genuinely new
-ideas worth adopting. Adopting the whole thing would be a rewrite in search
-of a reason.
+## Naming and ambition, stated honestly
 
-## Verdict at a glance
+Two things must not happen:
+
+1. **Do not brand it "music SVG" or any other already-claimed standard
+   word.** It is a private format. The ambition is not to lie about
+   approval bodies; it is to be *engineered as if* a standards body will
+   show up: written spec, versioned, conformance-tested, deterministic.
+2. **Do not pretend the gap list is solved.** The claim "new standard"
+   is aspirational until there is a spec document, conformance vectors,
+   and at least one reader other than us. Everything else is vibes.
+
+So: the program aims at **specification-grade engineering inside a
+private text format**, not at external recognition. If the quality bar is
+met, the naming question answers itself later.
+
+Working name: **textual patch**.
+
+## Verdict table
 
 | Proposal component | Status in Hirari (evidence) | Verdict |
 | --- | --- | --- |
-| `kurbo` everywhere, one path for UI + DSP | `vello::kurbo` already used for notation/geometry; automation already stores `AutomationPointContract { time, value, curve }` and evaluates `NativeAutomationPoint` sample-accurately (`realtime_automation.rs`) | **Adopt A (unify)** |
-| "Music SVG" AI-editable text format | Native format is already text: pretty JSON + contracts, atomic save (`project_mutations::save_atomic` → `SovereignPersistence::save_document`), `diff_project_json` tooling, schema versioned | **Adopt B (schema addition only, keep JSON)** |
-| `BuiltinDsp` / `ExternalPlugin` unified enum | `PluginInstanceContract` + `is_dawproject_plugin_device` + opaque checksummed base64 state; DawProject devices round-trip | **Adopt B as JSON `BuiltinDataflow` kind** |
-| `arc-swap` for graph topology | `arc-swap` is already a dependency; tempo map, holographic panner config, and the effect-chain `RuntimeSnapshot` hot-swap machinery exist in `effect_chain.rs` / `effect_chain_host.rs` | **No rewrite; measure first** |
-| SPSC rings / raw atomic params everywhere | `hot_swap_state.rs` (U8 phase machine + quiesce watchdog), native timed-parameter events, shared-memory plugin mailbox | **No blanket rewrite; keep, add where benchmarks demand** |
-| KDL/XML as first-class format | Two working formats already exist (native JSON, DawProject XML via `roxmltree`); KDL adds a third reader/writer for free | **Reject as canonical; optional export only** |
-| "ARA2 existing implementation fits perfectly" | `ara2_protocol.rs` is a host-side *contract* (Document/Sequence/AudioModification snapshots); no Celemony SDK binding exists (licensing), `region_audio.rs` has a range-read guard only | **Nothing to wire. Reject for now** |
-| "Music SVG" as an SVG | Name is wrong: it is a private patch format; `kurbo` does not ship a one-line `BezPath::to_svg`, you hand-roll path serialization. It is JSON, not SVG, not a standard | **Reject the name/standard framing; keep textual patch idea** |
-| Vello 60–120 fps, RT thread never blocks | Already the architecture: AmeUI + Vello canvas, RT FFI engine behind `AudioEngine`, paint/metria via canvases | **Already true** |
+| Unify curves (one model, three consumers) | automation stores `AutomationPointContract{time, value, curve}` and FFIs as `NativeAutomationPoint`; UI paints its own copy; save is separate serialization | **Adopt (Phase A)** |
+| `BuiltinDataflow` declarative devices | `PluginInstanceContract` + checksummed base64 state; DawProject roundtrip exists | **Adopt (Phase B)** |
+| Deterministic text project format | native pretty JSON contracts, atomic save, `diff_project_json` compat | **Keep and harden (Phase C)** |
+| Specification-grade engineering | no public written spec; reader ecosystem = zero | **Build it (Phase C)** |
+| arc-swap / lock-free RT graph | `arc-swap` used for tempo/panner/effect-chain snapshots already | **Keep as-is; measure before expanding** |
+| KDL/XML as first-class format | two formats already in tree; KDL is aesthetic preference without added correctness | **Rejected as canonical; optional export only** |
+| ARA2 "fits perfectly" | `ara2_protocol.rs` is a contract layer; no Celemony SDK bound | **Rejected until SDK licensing exists** |
+| "Music SVG" naming | misleading (nothing is SVG; it is JSON) | **Rejected** |
 
-## What we adopt
+## Program roadmap
 
-### A. Unify the automation curve model (after the split campaign)
+The 800-line split campaign continues to gate this work. Do not start
+Phase A/B opportunistically inside the split campaign; both touch the RT
+path and the schema respectively.
 
-One representation, consumed by UI paint, RT evaluation, and save:
+- **Phase 0 — split campaign** (in progress).
+- **Phase A — curve unification** (first after the split):
+  - New contract type `Curve::{Linear, Step, Bezier { p: [Point; 2] } }`
+    (keep `Shortcut { curve: f32 }` for backward compat).
+  - One evaluator used by UI scene build, RT path, and serialization.
+    RT keeps hint-cached scanning in `realtime_automation.rs`.
+  - Save upgrades: older projects load cleanly, store the new form; the
+    writer never emits mixed representations for the same entity.
+  - Acceptance: equivalence tests between the UI-lane evaluator and the
+    FFI-lane evaluator across randomized point sets; a pre-split project
+    round-trips its automation byte-identically.
+- **Phase B — `BuiltinDataflow` devices**:
+  - `PluginInstanceContract` grows `kind: BuiltinDataflow { units, links }`.
+  - External plugins stay opaque (base64 + checksum). The AI edit boundary
+    is *formally enforced*: serializers reject unknown keys in the
+    `BuiltinDataflow` branch shape at load; AI tooling documents what it
+    may edit (only that branch).
+  - DawProject passthrough extracts/writes the same units as custom device
+    or opaque — see Phase C mapping.
+  - Acceptance: roundtrip through save/load + DawProject XML leaves plugin
+    binaries provably untouched (hash comparison).
+- **Phase C — specification release**:
+  - New doc `docs/architecture/TEXTUAL_PATCH.md` versioned per schema.
+    Contains: purpose, notation (JSON profile), canonical ordering,
+    determinism guarantees, versioning policy (minor additions ignore
+    unknown fields; major bumps reject older readers), required/optional
+    field tables, conformance test vectors (parse + emit + roundtrip),
+    reference implementation pointer, DawProject mapping table, AI editing
+    boundary with allowed/blocked example diffs.
+  - Conformance tests live in the contract test suite; release gate wants
+    these green before any public announcement.
+  - Steps before external publication: two correct readers agree on every
+    conformance vector; we do not publish a specification we cannot
+    conform to.
+- **Phase D — optional distribution**:
+  - `.hirpatch` sidecar for device-only sharing, with a strict importer
+    that validates all units/links/limits.
+  - Nice-to-have, not a gate; keep optional forever.
 
-- Introduce a `Curve` enum in the project contract layer:
-  `Linear` | `Bezier { control_points: […] }` | `Step` (existing per-point
-  `curve: f32` is migrated/preserved as `Shortcut` for compatibility).
-- UI: stroke the same curve through `vello::kurbo::Path` (notation-style).
-- RT: evaluate the same cubic (`kurbo::CubicBez::eval`), keeping the current
-  hint-cached scan in `realtime_automation.rs`. FFI stays `NativeAutomationPoint`.
-- Save: same enum in `AutomationPointContract`; existing `.hirari` projects
-  upgrade on load (defaults, no hard break).
-- Acceptance: property tests assert identical evaluation between the UI path
-  and the RT evaluator on noisy inputs; a load test proves a pre-split project
-  opens byte-identical in automation.
+## What "serious" means in practice (guardrails)
 
-### B. `BuiltinDataflow` devices in the JSON schema (after A)
+- No spec document, no claims. Tests before phase names.
+- Deterministic output is non-negotiable: pretty-printer key order, array
+  order, escape rules, numeric formatting — all pinned by golden tests.
+- Every claim in the spec has a test in the contract suite.
+- No external dependencies other than serde-compatible JSON; avoiding
+   KDL/XML keeps two readers in sync, not three.
+- If and when this ships externally, it ships with the conformance suite
+  and the DawProject mapping — not with hype.
 
-- Extend `PluginInstanceContract` with `kind: BuiltinDataflow { units, links }`
-  describing a small explicit node graph (unit kind, normalized params, links).
-- External plugins keep their opaque, checksummed base64 `state`. AI agents
-  edit only `BuiltinDataflow` payloads and `region`/`midi` notes — the
-  external-plugin boundary stays opaque and crash-safe.
-- DawProject export embeds the same payload as a custom device kind or keeps
-  the existing `plugin_devices_xml` behavior with an extra comment; DawProject
-  is the interchange gate either way.
-- Acceptance: round-trip through save/load and through DawProject XML proves
-  plugin binaries are untouched by `BuiltinDataflow` edits.
+## Explicitly rejected, with reasons
 
-## Explicitly rejected
+1. **KDL/XML as canonical.** Same correctness shape as JSON; doubles the
+   reader maintenance surface; loses the tooling we already have.
+2. **SVG/visual language rebrand.** Brings false expectations (nothing is
+   vector graphics; it is time-domain dataflow and audio automation).
+3. **ARA2 wiring now.** No Celemony SDK is bound. Anything called ARA2
+   before licensing is papering over a gap. We re-evaluate after Phase B.
+4. **Full-lock-free RT graph rewrite.** The existing effect-chain
+   snapshot machinery is already the correct pattern. Blind rewrites of
+   the RT path are for architecture astronautics, not DAW shipping.
 
-1. **XML/KDL as canonical format.** JSON with contracts + `diff_project_json`
-   works, has atomic save, and has schema discipline; a third format is
-   fragmentation for aesthetics. (A KDL *export* is fine if someone wants it.)
-2. **Calling it "Music SVG" or a standard.** It is a private textual patch
-   format; branding it as a standard creates expectation debt and
-   misdirection (no SVG involved).
-3. **`arc-swap`/SPSC rewrite of the RT graph.** The design already exists in
-   situ (process sandbox + effect-chain snapshots + atomic watchdogs). Blind
-   rewrites of the RT path are the worst kind of architecture astronautics.
-4. **Linking ARA2 now.** No Celemony SDK is bound; `ara2_protocol.rs` is a
-   contract layer. Any "ARA2 integration" work before SDK licensing is fiction.
+## Process notes
 
-## Process notes and constraints
+- Verify with Linux CI (`cargo check --workspace --locked`,
+  `cargo test --workspace --locked`) — local builds are disk-constrained;
+  treating CI as the source of truth.
+- `ame-ui` is a path dep; do not commit a `Cargo.lock` generated against
+  a dirty `../AmeUI` working tree.
+- Automation RT evaluation must remain `repr(C)`-compatible at the FFI;
+  do not make the FFI strategy fancier before Phase A's tests exist.
 
-- **Disk space**: `/tmp/cargo-mac-ephemeral-target` is ~17 GB on a 228 GB
-  volume; local `cargo test` fails with `No space left on device`. Linux CI
-  remains the verification authority (`cargo check --workspace --locked`,
-  `cargo test --workspace --locked`). Local workloads must step around this,
-  or the cache gets cleaned by the owner.
-- **`ame-ui` is a path dependency** (`../AmeUI`). Its working tree is dirty
-  locally (macOS-only `block2`/`objc2-app-kit` additions). Committing a
-  `Cargo.lock` generated against that dirty state breaks `--locked` on a
-  clean checkout. The Cargo.lock must be produced against or reconciled with
-  the clean AmeUI used by CI (see the Cargo.lock revert shipped in 7f18e19
-  after CI failure at b0fa85b).
-- **Vello as the single GPU pipeline**: every Hirari canvas paints into
-  Vello; automation must not grow a second pipeline.
+## Sequencing decision
 
-## Sequencing
+1. 800-line split campaign finishes (in progress).
+2. Phase A spike → land behind an explicit test gate.
+3. Phase B after A (schema additive, separate commit).
+4. Phase C spec lands once Phases A+B are green: docs + conformance suite
+   in the same PR series; docs live in-repo and stay versioned.
+5. Re-evaluate ARA2 only after Phase B and SDK availability.
 
-1. 800-line campaign finishes (in progress; largest live file now
-   `hirari-core-bridge/src/regions/region_edit_host.rs` ~4648 lines).
-2. Phase A spike: one `Curve` enum + shared evaluator + tests. Measure, then
-   migrate `AutomationPointContract`.
-3. Phase B: schema addition behind the same contract discipline as the rest
-   of persistence; AI boundary documented in the schemas (` BuiltinDataflow`
-   is AI-editable, `ExternalPlugin` never is).
-4. Re-evaluate ARA2 only after SDK licensing exists on this machine.
-
-Keep this document in `docs/architecture/`. Do not start A or B opportunistically
-in the middle of the split; they are both too wide for review riding alongside it.
+This document is the commitment. Do not start Phases A/B mid-flight in the
+split campaign. When the split finishes, open the first spike for Phase A
+and link it here.
