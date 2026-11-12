@@ -248,6 +248,10 @@ pub struct HirariAmeApp {
     /// Caption shown inside the export card (render state / progress /
     /// stem counts).
     render_caption: State<String>,
+    /// Synth engine selector: 0=SYNTH, 1=WAVETABLE, 2=SAMPLER.
+    synth_engine: State<u32>,
+    /// Local echo of the 8 engine macro values (no engine getter exists).
+    synth_macros: State<[f32; 8]>,
     /// Focus mode toggle: hide everything except transport, meter and the
     /// arrange surface. Mirrors the Slint focus setting exactly.
     focus_mode: State<bool>,
@@ -455,6 +459,8 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         stem_export_active: context.state(false),
         render_caption: context.state(String::new()),
         focus_mode: context.state(crate::ui_shared::preferences::load_focus_mode()),
+        synth_engine: context.state(1u32),
+        synth_macros: context.state([0.5f32; 8]),
         show_diagnostics: context.state(false),
         watchdog_trips: context.state(0u32),
         moufu_address: context.state(load_moufu_address().unwrap_or_default()),
@@ -3863,6 +3869,48 @@ impl App for HirariAmeApp {
             View::Caption(self.openutau_caption.get()),
         ])]);
 
+        // SYNTH card (Slint synth panel parity): engine picker and the
+        // eight engine macros via set_macro_value. Local echo mirrors what
+        // was sent; no engine getter exists for these values yet.
+        let synth_engine_state = self.synth_engine.clone();
+        let engine_label = match self.synth_engine.get() {
+            0 => "SYNTH",
+            2 => "SAMPLER",
+            _ => "WAVETABLE",
+        };
+        let synth_engine_core = self.core.clone();
+        let synth_engine_button = ButtonView::new(format!("ENGINE: {engine_label}"))
+            .action_id("synth.engine_cycle")
+            .secondary()
+            .on_press(move |_| {
+                let next = (synth_engine_state.get() + 1) % 3;
+                synth_engine_state.set(next);
+                if let Some(core) = &synth_engine_core {
+                    let _ = core.set_preview_synth_engine(next);
+                }
+            });
+        let mut synth_macros: Vec<View> = vec![synth_engine_button.into()];
+        for index in 0..8u32 {
+            let macros_state = self.synth_macros.clone();
+            let macro_core = self.core.clone();
+            let current = self.synth_macros.get()[index as usize];
+            let slider = SliderView::new(current, 0.0, 1.0)
+                .action_id(format!("synth.macro.{index}"))
+                .on_change(move |value| {
+                    let mut macros = macros_state.get();
+                    macros[index as usize] = value.clamp(0.0, 1.0);
+                    macros_state.set(macros);
+                    if let Some(core) = &macro_core {
+                        let _ = core.set_macro_value(index, value.clamp(0.0, 1.0));
+                    }
+                });
+            synth_macros.push(View::HStack(vec![
+                View::Caption(format!("M{}", index + 1)),
+                slider.into(),
+            ]));
+        }
+        let synth_card = View::Card(vec![View::VStack(synth_macros)]);
+
         // SENDS card (Slint audio routing / aux sends parity): source
         // cycler, destination bus cycler, gain slider with live apply,
         // pre/post toggle and send enable.
@@ -5463,6 +5511,7 @@ impl App for HirariAmeApp {
         if self.show_sends.get() {
             views.push(sends_card);
         }
+        views.push(synth_card);
         views.push(openutau_card);
         if self.focus_mode.get() {
             views.extend([
