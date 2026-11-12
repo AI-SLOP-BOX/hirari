@@ -915,6 +915,5 @@ pub fn execute(
     })
 }
 #[cfg(test)]
-mod tests {
-    include!("command_executor_tests.rs");
-}
+#[path = "command_executor_tests.rs"]
+mod tests;

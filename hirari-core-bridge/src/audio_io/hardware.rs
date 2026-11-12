@@ -496,9 +496,9 @@ impl HardwareOrchestrator {
 }
 
 #[cfg(test)]
-mod tests {
-    include!("hardware_tests.rs");
-}
+#[path = "hardware_tests.rs"]
+mod tests;
+
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum RemoteValueMode {
