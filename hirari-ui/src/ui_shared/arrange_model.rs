@@ -18,10 +18,36 @@ pub struct MeasureStart {
     pub number: i32,
 }
 
+/// A persisted track stack. `member_track_ids` is sorted ascending by the
+/// engine boundary, so paths that want members in selected order should sort
+/// again or iterate the arrangement selection directly.
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+pub struct TrackStack {
+    pub id: u32,
+    pub name: String,
+    #[serde(default)]
+    pub member_track_ids: Vec<u32>,
+    #[serde(default = "one")]
+    pub master_gain: f32,
+    #[serde(default)]
+    pub collapsed: bool,
+}
+
+fn one() -> f32 {
+    1.0
+}
+
+/// Parse `track_stacks_json()` once at a time the UI needs the current
+/// arrangement; kept in `ui_shared` so the canvas, the routing page, and any
+/// inset surface share the same source of truth.
+pub fn parse_track_stacks(json: &str) -> Vec<TrackStack> {
+    serde_json::from_str::<Vec<TrackStack>>(json).unwrap_or_default()
+}
+
 /// A visible arrangement clip. Audio clips carry their native region id;
 /// synthesized MIDI clips carry a negative id and `midi == true` so region
 /// mutations are never offered for them.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 pub struct ArrangeClip {
     pub id: i32,
     pub name: String,
