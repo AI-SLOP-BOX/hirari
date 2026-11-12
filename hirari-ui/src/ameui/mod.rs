@@ -317,6 +317,9 @@ pub struct HirariAmeApp {
     status: State<String>,
     waveform_image: Option<CanvasTexture>,
     waveform_reusable: Option<wgpu::Texture>,
+    /// MusicXML export pending path; the poll writes it via the engine
+    /// and refreshes the status.
+    pending_musicxml: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     /// OpenUtau vocal score orchestration (P13). Source and render are
     /// picked independently because the engine's import flow requires both
     /// the score and the rendered stem; importing runs through the poll.
@@ -508,6 +511,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         openutau_source: std::sync::Arc::new(std::sync::Mutex::new(None)),
         openutau_render: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_openutau: std::sync::Arc::new(std::sync::Mutex::new(None)),
+        pending_musicxml: std::sync::Arc::new(std::sync::Mutex::new(None)),
         show_sends: context.state(false),
         send_source: context.state(0u32),
         send_dest: context.state(0u32),
@@ -1216,6 +1220,20 @@ impl HirariAmeApp {
                             .unwrap_or("score"),
                     ));
                 }
+            }
+        }
+        // MusicXML export: engine takes care of layout + instrument names.
+        if let Some(path) = self
+            .pending_musicxml
+            .lock()
+            .map(|mut slot| slot.take())
+            .unwrap_or_default()
+        {
+            match core.export_musicxml(&path.to_string_lossy()) {
+                Ok(count) => self
+                    .status
+                    .set(format!("MUSICXML EXPORTED · {count} NOTES")),
+                Err(error) => self.status.set(format!("MUSICXML EXPORT FAILED: {error}")),
             }
         }
         // MIDI export dialog result: write the .mid through the engine.
@@ -3155,6 +3173,23 @@ impl App for HirariAmeApp {
                     }
                 });
             });
+        let musicxml_pending = self.pending_musicxml.clone();
+        let musicxml_button = ButtonView::new("MUSICXML")
+            .action_id("export.musicxml")
+            .secondary()
+            .on_press(move |_| {
+                let dialog = ame_ui::platform::NativeFileDialog::new()
+                    .set_file_name("project.musicxml")
+                    .add_filter("MusicXML", &["musicxml", "xml"]);
+                let pending = musicxml_pending.clone();
+                dialog.save_file_async(move |path| {
+                    if let Some(path) = path {
+                        if let Ok(mut slot) = pending.lock() {
+                            *slot = Some(path);
+                        }
+                    }
+                });
+            });
         let midi_pending = self.pending_midi.clone();
         let midi_button = ButtonView::new("MIDI")
             .action_id("export.midi")
@@ -3190,6 +3225,7 @@ impl App for HirariAmeApp {
             render_button.into(),
             stems_button.into(),
             midi_button.into(),
+            musicxml_button.into(),
             cancel_button.into(),
             View::Caption(self.render_caption.get()),
         ])]);
