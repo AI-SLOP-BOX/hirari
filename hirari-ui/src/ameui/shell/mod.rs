@@ -1,0 +1,12 @@
+mod commit_auto_edit;
+mod committers;
+mod draw_arrange;
+mod draw_notation;
+mod draw_piano;
+mod file_dropped_zoom;
+mod piano_pointer;
+mod polling_engine;
+mod polling_learn;
+mod polling_render;
+mod polling_waveforms;
+mod refresh_arrange;
