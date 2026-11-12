@@ -1,7 +1,6 @@
 //! Tests for the region edit host, split out of region_edit_host.rs.
 use super::*;
 
-    use super::*;
     use std::slice;
 
 use crate::vari_audio::{
