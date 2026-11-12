@@ -1,6 +1,5 @@
-//! Offline-render helper surface shared by the Slint dock and the AmeUI
-//! export card. Core owns the queue and the naming; this only translates
-//! documents between core and each surface.
+//! Offline-render helper surface shared by the AmeUI export card and any tooling.
+//! Core owns the queue and the naming; this only translates documents between core and each caller.
 
 use std::path::PathBuf;
 
@@ -16,7 +15,7 @@ pub(crate) enum StemStep {
     /// A stem is armed: render `output` into `format`.
     Ready {
         output: PathBuf,
-        // total/format are only consumed by the Slint render telemetry;
+        // total/format are only consumed by the render telemetry;
         // keep them for a single source of truth for both surfaces.
         #[allow(dead_code)]
         total: u32,

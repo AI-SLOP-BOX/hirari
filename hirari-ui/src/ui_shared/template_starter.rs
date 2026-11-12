@@ -1,11 +1,10 @@
-//! Neutral template starter required by both the Slint home page and the AmeUI home page.
-//! Only the engine-backed template creation lives here; Slint-specific decoration
-//! (AppWindow drives, Z_Track model, recovery mirroring) stays in `ui::templates`.
+//! Neutral template starter shared by the home page and any headless tooling.
+//! Only the engine-backed template creation lives here; UI-specific decoration lives in `ameui/mod.rs`.
 
 use hirari_core_bridge::HirariCore;
 
 /// Creates a fresh project seeded with the named template's tracks. Shared by
-/// the Slint INIT_* flow and the AmeUI home page. The previous unsaved
+/// the INIT_* flow and the AmeUI home page. The previous unsaved
 /// project is abandoned (a new one is created) but any persisted MIDI
 /// sidecar on disk is left alone.
 pub(crate) fn create_template_project(core: &HirariCore, template: &str) -> Result<(), String> {

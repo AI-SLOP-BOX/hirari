@@ -1,6 +1,6 @@
 //! Backend-neutral plot frames for the future wgpu canvas.
 //!
-//! Slint owns controls and layout. This module owns the bounded, finite data
+//! The UI shell owns controls and layout. This module owns the bounded, finite data
 //! contract consumed by a high-rate waveform/spectrum renderer, so moving the
 //! draw step to wgpu does not change the audio or UI state APIs.
 

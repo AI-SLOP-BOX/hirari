@@ -1,7 +1,6 @@
 //! Backend-neutral CPU rasterizers for the dense plot surfaces.
 //!
-//! These turn a [`PlotFrame`] into RGBA pixels. Both the Slint WGPU notifier
-//! and the AmeUI Canvas upload path consume the same bytes, so the draw step
+//! These turn a [`PlotFrame`] into RGBA pixels. Consumed by the AmeUI canvas upload path and any tooling, so the draw step
 //! stays identical while the windowing backend is migrated.
 
 use crate::ui_shared::gpu_canvas::PlotFrame;

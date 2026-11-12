@@ -2,7 +2,7 @@
 //! small selection list (recorded input channels per Audio/Vocal track)
 //! arrives precomputed so the adapter merges it into project JSON on its
 //! worker and the caller avoids a second full-layout parse and
-//! serialization. Shared by the Slint dock and the AmeUI card.
+//! serialization. Shared by the AmeUI card and any tooling.
 
 use hirari_core_bridge::HirariCore;
 use hirari_moufu_adapter::{MoufuPublisher, HIRARI_PROJECT_CONTRACT};

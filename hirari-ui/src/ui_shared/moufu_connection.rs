@@ -1,6 +1,5 @@
-//! Moufu Hub address persistence. Neutral artifact: both the Slint dock and
-//! the AmeUI card read and write the same `moufu-connection.json` in
-//! `hirari-ui/` under the platform config directory.
+//! Moufu Hub address persistence. Neutral artifact: the AmeUI card and any tooling read and write
+//! the same `moufu-connection.json` in `hirari-ui/` under the platform config directory.
 
 use std::fs;
 use std::path::PathBuf;

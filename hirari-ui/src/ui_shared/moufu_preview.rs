@@ -1,6 +1,6 @@
 //! Read-only linked-project preview helpers for the Moufu integration.
-//! Shared by the Slint dock and the AmeUI Moufu card so both surfaces render
-//! received state the same way (and without remote-bidi leaking into rows).
+//! Shared by the AmeUI Moufu card and any tooling so they render received state the same way
+//! (and without remote-bidi leaking into rows).
 
 use hirari_moufu_adapter::PayloadTransport;
 use std::collections::HashMap;

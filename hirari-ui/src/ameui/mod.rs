@@ -1,4 +1,4 @@
-//! AmeUI application shell — the migration target for the Slint surface.
+//! AmeUI application shell — the sole UI surface.
 //!
 //! Slice 1 boots the real engine inside an AmeUI window: a transport bar
 //! (play/stop, tempo, playhead), a live master meter, the shared plot
@@ -9,8 +9,7 @@
 //! adds zoom (toolbar −/+/FIT) and ruler-drag panning; slice 6 adds
 //! click clip selection; slice 7 adds clip drag-move (live preview,
 //! commit on release via the engine undo transaction); slice 8 adds
-//! edge-drag trim (Audio/Vocal only, fraction-clamped like the Slint
-//! dock); slice 9 draws clip waveform peaks from the async decode
+//! edge-drag trim (Audio/Vocal only, fraction-clamped like the arrange dock); slice 9 draws clip waveform peaks from the async decode
 //! queue; slice 10 adds the snap division picker; slice 11 adds the
 //! edit lock; slice 12 turns the track list into mixer strips
 //! (fader/pan/mute/solo/arm); slice 13 adds project open/save/new;
@@ -38,8 +37,7 @@
 //! slice 44 adds canvas accessibility regions; slice 45 fixes the
 //! waveform canvas height; slice 46 adds the audio library;
 //! engine E2 adds the measured I/O latency readout. Audio playback is
-//! real; the Slint UI remains the default entry until the port reaches
-//! parity.
+//! real; this is the default build.
 //!
 //! HirariCore is deliberately not `Send` (its engine stores raw pointers), so
 //! every engine read happens on the UI thread. A background ticker only sends
@@ -114,7 +112,7 @@ fn core_default_project_path() -> String {
         .into_owned()
 }
 
-/// Snap divisions offered by the toolbar picker (Slint `snap_val`
+/// Snap divisions offered by the toolbar picker (`snap_val`
 /// denominators; the step is 4 beats / division, so 1/16 snaps to 0.25).
 const SNAP_DIVISIONS: [f32; 6] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0];
 
@@ -128,7 +126,7 @@ enum LaneDrag {
     /// An Audio/Vocal clip edge: drag trims it, commit on release.
     TrimLeft,
     TrimRight,
-    /// A MIDI clip: select on press, drag does nothing (Slint parity).
+    /// A MIDI clip: select on press, drag does nothing (parity).
     Hold,
 }
 
@@ -190,7 +188,7 @@ fn themed(color: vello::peniko::Color, alpha: u8) -> Color {
 }
 
 /// Converts the parsed notes back to engine contracts for a full-list
-/// replace, with the same field clamping as the Slint commit path.
+/// replace, with the same field clamping as the commit path.
 fn notes_to_contracts(core: &HirariCore, notes: &[PianoNote]) -> Vec<MidiNoteContract> {
     notes
         .iter()
@@ -248,9 +246,9 @@ pub struct HirariAmeApp {
     timeline_end_beats: State<f32>,
     arrange_zoom: State<f32>,
     arrange_scroll_beats: State<f32>,
-    /// Snap division denominator (Slint default 16); step is 4/division.
+    /// Snap division denominator (default 16); step is 4/division.
     arrange_snap_division: State<f32>,
-    /// Edit lock (Slint `is_locked`): while on, clip drags select only and
+    /// Edit lock (`is_locked`): while on, clip drags select only and
     /// never move or trim. Seek and pan still work.
     arrange_locked: State<bool>,
     /// Automation edit mode: lane gestures edit the active automation lane
@@ -268,7 +266,7 @@ pub struct HirariAmeApp {
     export_tail_index: State<u32>,
     /// Set while the stems queue is armed; the poll then watches for
     /// engine bounce completion and advances the batch, like the
-    /// Slint render telemetry.
+    /// render telemetry.
     stem_export_active: State<bool>,
     /// Caption shown inside the export card (render state / progress /
     /// stem counts).
@@ -278,12 +276,12 @@ pub struct HirariAmeApp {
     /// Local echo of the 8 engine macro values (no engine getter exists).
     synth_macros: State<[f32; 8]>,
     /// Focus mode toggle: hide everything except transport, meter and the
-    /// arrange surface. Mirrors the Slint focus setting exactly.
+    /// arrange surface. Mirrors the focus setting exactly.
     /// Spotlight palette: toggled with Cmd/Ctrl+K or the project-bar button.
     show_spotlight: State<bool>,
     spotlight_query: State<String>,
     focus_mode: State<bool>,
-    /// System diagnostics panel toggle (Slint diagnostics page).
+    /// System diagnostics panel toggle (diagnostics page).
     show_diagnostics: State<bool>,
     /// Accumulated AU watchdog trips (engine polls since connect).
     watchdog_trips: State<u32>,
@@ -323,7 +321,7 @@ pub struct HirariAmeApp {
     integrated_lufs: State<f32>,
     true_peak_l: State<f32>,
     true_peak_r: State<f32>,
-    /// Selected clip as `(track_id, clip_id)`, mirroring the Slint
+    /// Selected clip as `(track_id, clip_id)`, mirroring the dock
     /// selection the later drag/trim slice will mutate through.
     selected_clip: State<Option<(u32, i32)>>,
     /// Decoded peak vectors per clip, keyed by `(track_id, clip_id)`.
@@ -335,7 +333,7 @@ pub struct HirariAmeApp {
     piano_notes: State<Vec<PianoNote>>,
     /// Drum mode: the roll shows GM drum lanes instead of pitch rows.
     drum_mode: State<bool>,
-    /// Chord-insert settings (Slint piano roll chord controls).
+    /// Chord-insert settings (piano roll chord controls).
     chord_root: State<u32>,
     chord_quality: State<u32>,
     chord_length: State<f32>,
@@ -363,7 +361,7 @@ pub struct HirariAmeApp {
     openutau_render: std::sync::Arc<std::sync::Mutex<Option<std::path::PathBuf>>>,
     pending_openutau:
         std::sync::Arc<std::sync::Mutex<Option<(std::path::PathBuf, std::path::PathBuf)>>>,
-    /// Send matrix panel (Slint aux sends / audio routing parity):
+    /// Send matrix panel (aux sends / audio routing parity):
     /// source/bus selectors, gain, pre/post, enable.
     show_sends: State<bool>,
     send_source: State<u32>,
@@ -371,7 +369,7 @@ pub struct HirariAmeApp {
     send_gain: State<f32>,
     send_pre: State<bool>,
     send_enabled: State<bool>,
-    /// Video monitor (Slint Z_VideoMonitor parity): raw RGBA frames from
+    /// Video monitor (Z_VideoMonitor parity): raw RGBA frames from
     /// the engine, uploaded to a reusable canvas texture on the draw path
     /// (not on the poll), revision-tracked like the waveform upload.
     video_image: Option<CanvasTexture>,
@@ -503,7 +501,7 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
         moufu_link_selected: context.state(0u32),
         moufu_preview: context.state("No linked project state received.".to_owned()),
         moufu_remote_source: context.state(String::new()),
-        // The connector is started with the same env var+settings the Slint
+        // The connector is started with the same env var+settings the dock
         // app honors (HIRARI_MOUFU_ADDR, else the persisted address).
         moufu_publisher: hirari_moufu_adapter::MoufuPublisher::start_from_env().map(|publisher| {
             let address = load_moufu_address().unwrap_or_default();
@@ -614,7 +612,7 @@ pub fn run() {
 impl HirariAmeApp {
     /// Sample the engine on the UI thread and publish reactive state.
     /// Drives the offline-render flow while a render or a stems batch is
-    /// in flight, mirroring the Slint `telemetry_render` cadence: the
+    /// in flight, mirroring the `telemetry_render` cadence: the
     /// engine reports bounce progress/completion and the stems queue is
     /// advanced here, never on the UI event path.
     fn poll_render(&mut self) {
@@ -745,7 +743,7 @@ impl HirariAmeApp {
         }
     }
 
-    /// Moufu connector poll. Same event discipline as the Slint dock's live
+    /// Moufu connector poll. Same event discipline as the dock's live
     /// link timer: publish the snapshot when it changes while an outbound
     /// link is registered, and mirror the queue effects into the card.
     /// Runs every 8th tick (~250ms) so the drain does not contend with the
@@ -1116,7 +1114,7 @@ impl HirariAmeApp {
             }
         }
         // Dropped-file imports complete asynchronously; poll the ticket
-        // each tick like the Slint import poller.
+        // each tick like the import poller.
         if let Some((ticket, path, imported_track)) = self.pending_import.take() {
             match core.complete_region_import(ticket) {
                 0 => self.pending_import = Some((ticket, path, imported_track)),
@@ -1333,7 +1331,7 @@ impl HirariAmeApp {
     }
 
     /// Consumes finished waveform decodes and queues missing clip peaks,
-    /// mirroring the Slint telemetry queue: at most 8 detached decodes in
+    /// mirroring the telemetry queue: at most 8 detached decodes in
     /// flight, generation-guarded results, failures remembered per
     /// generation. Runs on the layout cadence, never on the UI event path.
     fn poll_waveforms(&mut self, core: &HirariCore) {
@@ -1415,7 +1413,7 @@ impl HirariAmeApp {
     /// immediately instead of waiting for the next layout tick.
     fn refresh_arrange_state(&self, core: &HirariCore) {
         // The neutral arrange model is the one layout parser for both
-        // surfaces, so this shell and the Slint arranger reduce the
+        // surfaces, so this shell and the arranger reduce the
         // same native layout to the same lanes, ruler and timeline.
         let tracks = parse_arrange_tracks(&core.get_project_layout_json(), |samples| {
             core.samples_to_beats(samples)
@@ -1453,7 +1451,7 @@ impl HirariAmeApp {
         (event.x - self.down_x).hypot(event.y - self.down_y)
     }
 
-    /// Clamps a trim beat delta through the Slint dock fraction math, so
+    /// Clamps a trim beat delta through the dock fraction math, so
     /// the preview and the commit agree: fractions clamp to [0, 1] with a
     /// positive span, then convert back to beats.
     fn clamped_trim_delta(&self, snapped: f32) -> f32 {
@@ -1489,7 +1487,7 @@ impl HirariAmeApp {
     }
 
     /// Commits the dragged clip trim through the engine, mirroring the
-    /// Slint `on_trim_clip` path: one undo transaction, abort on failure,
+    /// `on_trim_clip` path: one undo transaction, abort on failure,
     /// immediate layout refresh on success.
     fn commit_clip_trim(&mut self) {
         let Some((track_id, clip_id)) = self.trim_clip else {
@@ -1542,7 +1540,7 @@ impl HirariAmeApp {
     }
 
     /// Commits the piano-roll gesture as one full note-list replace,
-    /// mirroring the Slint `sync_midi_notes_to_core` path: every note
+    /// mirroring the `sync_midi_notes_to_core` path: every note
     /// keeps its authoring contract, the replace is one undo
     /// transaction, and the roll republishes from the engine after.
     fn commit_piano_edit(&mut self) {
@@ -1606,7 +1604,7 @@ impl HirariAmeApp {
     }
 
     /// Commits the dragged clip move through the engine, mirroring the
-    /// Slint `on_clip_moved` path: one undo transaction, sync-group aware,
+    /// `on_clip_moved` path: one undo transaction, sync-group aware,
     /// abort on failure, immediate layout refresh on success.
     fn commit_clip_move(&mut self) {
         let Some((track_id, clip_id)) = self.move_clip else {
@@ -1822,7 +1820,7 @@ impl HirariAmeApp {
 
     /// Draws the arrangement (ruler, lanes, clips, markers, playhead) as
     /// vector shapes. This is the read-only parity step: geometry matches
-    /// the Slint dock, but there is no zoom/scroll, selection or drag yet,
+    /// the dock, but there is no zoom/scroll, selection or drag yet,
     /// and no text inside the canvas (lane names live in the list below).
     /// Scene coordinates are absolute window pixels, offset by `bounds`.
     fn draw_arrange(
@@ -1877,7 +1875,7 @@ impl HirariAmeApp {
             &Rect::new(x0, y0, x0 + width, y0 + height),
         );
 
-        // Lane-header column (Slint 104px): name band for the text labels.
+        // Lane-header column (104px): name band for the text labels.
         let header = f64::from(geometry.header_width);
         scene.fill(
             Fill::NonZero,
@@ -1896,7 +1894,7 @@ impl HirariAmeApp {
         let theme_text = context.theme().text;
         let theme_secondary = context.theme().secondary_text;
 
-        // Faint beat grid, then stronger measure lines (Slint opacities).
+        // Faint beat grid, then stronger measure lines (opacities).
         let steps = (f64::from(timeline_end) / f64::from(geometry.beat_step)).ceil() as u32;
         for step in 0..=steps {
             let x = x_for_beat(step as f32 * geometry.beat_step);
@@ -1928,7 +1926,7 @@ impl HirariAmeApp {
                 None,
                 &Line::new((x0, top), (x0 + width, top)),
             );
-            // Lane color strip, as in the Slint header.
+            // Lane color strip, as in the header.
             scene.fill(
                 Fill::NonZero,
                 Affine::IDENTITY,
@@ -1968,7 +1966,7 @@ impl HirariAmeApp {
             for clip in &track.clips {
                 let selected = selected_clip == Some((track.id, clip.id));
                 // Live move preview: the dragged clip follows the pointer
-                // until release commits it (Slint `drag-current-delta`).
+                // until release commits it (`drag-current-delta`).
                 let drag_delta = if self.move_clip == Some((track.id, clip.id)) {
                     self.move_delta_beats
                 } else {
@@ -1996,7 +1994,7 @@ impl HirariAmeApp {
                     clip_y + clip_height,
                     3.0,
                 );
-                // Slint selection: brighter fill and a 2px border.
+                // selection: brighter fill and a 2px border.
                 scene.fill(
                     Fill::NonZero,
                     Affine::IDENTITY,
@@ -2037,9 +2035,9 @@ impl HirariAmeApp {
                         CanvasTextVAlign::Center,
                     );
                 }
-                // Waveform peaks, as in the Slint dock: 128 pairs windowed
+                // Waveform peaks, as in the dock: 128 pairs windowed
                 // by trim (and flipped when reversed), drawn only when the
-                // clip is wide enough to read (48px gate, as in Slint).
+                // clip is wide enough to read (48px gate, as in the dock).
                 if let Some(points) = peaks.get(&(track.id, clip.id)) {
                     if points.len() >= 256 && clip_width >= 48.0 {
                         let span = clip.trim_end - clip.trim_start;
@@ -2077,7 +2075,7 @@ impl HirariAmeApp {
         }
 
         // Automation overlays: volume/pan polylines through each lane,
-        // mirroring the Slint automation values (read-only lanes until
+        // mirroring the automation values (read-only lanes until
         // AUTO mode; in AUTO mode the gesture preview replaces them).
         for (index, track) in tracks.iter().enumerate() {
             let top = y0 + f64::from(geometry.y_for_lane(index));
@@ -2173,7 +2171,7 @@ impl HirariAmeApp {
             );
         }
 
-        // Slint Style.playhead (#30D158), drawn only inside the timeline.
+        // Style.playhead (#30D158), drawn only inside the timeline.
         let playhead = self.playhead_beats.get();
         if (0.0..=f64::from(timeline_end)).contains(&playhead) {
             let x = x_for_beat(playhead as f32);
@@ -2188,7 +2186,7 @@ impl HirariAmeApp {
     }
     /// Commits the automation gesture: one undo transaction around
     /// `set_automation_data` with beat-sorted native triples, mirroring
-    /// the Slint automation commit (it commits live during the drag
+    /// the automation commit (it commits live during the drag
     /// inside the gesture's transaction; we commit once on release).
     fn commit_auto_edit(&mut self) {
         let Some(edit) = self.auto_edit.take() else {
@@ -2345,7 +2343,7 @@ impl HirariAmeApp {
     }
     /// A dropped audio file becomes a clip on the lane under the drop
     /// point (falling back to the piano track and the playhead), via the
-    /// engine's queued import, like the Slint audio import.
+    /// engine's queued import, like the audio import.
     fn on_file_dropped(&mut self, path: &str, x: Option<f64>, y: Option<f64>) {
         let Some(core) = self.core.clone() else {
             return;
@@ -2455,7 +2453,7 @@ impl App for HirariAmeApp {
         }
     }
 
-    /// App-wide shortcuts (Slint parity: Space plays, L loops). The
+    /// App-wide shortcuts (parity: Space plays, L loops). The
     /// framework only calls this with no text editor focused, so the
     /// lyric field keeps Space/L as text input.
     fn on_shortcut(&mut self, key: &str, modifiers: KeyModifiers) -> bool {
@@ -2750,7 +2748,7 @@ impl App for HirariAmeApp {
                     && self.auto_mode.get()
                 {
                     // Automation mode: press near a point to move it,
-                    // elsewhere on the lane to add one (Slint parity).
+                    // elsewhere on the lane to add one (parity).
                     if self.arrange_locked.get() {
                         return true;
                     }
@@ -2826,7 +2824,7 @@ impl App for HirariAmeApp {
                     return false;
                 } else {
                     // Provisional until the click threshold is crossed:
-                    // a clip press selects immediately (Slint parity) and
+                    // a clip press selects immediately (parity) and
                     // arms a move; empty space arms a seek.
                     self.seeking = true;
                     self.down_x = event.x;
@@ -2855,7 +2853,7 @@ impl App for HirariAmeApp {
                                 Some(clip) if clip.midi => self.down_mode = LaneDrag::Hold,
                                 Some(clip) => {
                                     // Edge zones trim (Audio/Vocal only, as
-                                    // in the Slint dock); the body moves.
+                                    // in the dock); the body moves.
                                     let edge = track_kind
                                         .as_deref()
                                         .filter(|kind| *kind == "Audio" || *kind == "Vocal")
@@ -3019,7 +3017,7 @@ impl App for HirariAmeApp {
         let status = self.status.get();
 
         // Project bar: open/save/new. The file dialog blocks the UI thread
-        // while it is open, same as the Slint project actions.
+        // while it is open, same as the project actions.
         let open_path = self.project_path.clone();
         let open_pending = self.pending_open.clone();
         let open_button = ButtonView::new("Open")
@@ -3168,7 +3166,7 @@ impl App for HirariAmeApp {
             View::Caption(status.clone()),
         ])]);
 
-        // Export card (Slint export dialog parity): format and tail
+        // Export card (export dialog parity): format and tail
         // cyclers, mix render, stem batch, MIDI export, cancel. Stems
         // are armed by the folder-picker poll; the render poll advances
         // the batch while the engine reports bounce state 3.
@@ -3296,9 +3294,9 @@ impl App for HirariAmeApp {
             View::Caption(self.render_caption.get()),
         ])]);
 
-        // Diagnostics card (Slint diagnostics page parity): engine, audio
+        // Diagnostics card (diagnostics page parity): engine, audio
         // drops/overruns, plugin sandbox health and range overflow.
-        // AboutSlint attribution is intentionally not ported.
+        // Aboutattribution is intentionally not ported.
         let diagnostics_card = if let Some(core) = &self.core {
             let health = core.runtime_health_snapshot();
             let state = core.runtime_health_status_text();
@@ -3353,7 +3351,7 @@ impl App for HirariAmeApp {
             View::Card(vec![View::Text("SYSTEM · no engine".to_owned())])
         };
 
-        // Moufu card (Slint moufu_link_page parity): Hub address,
+        // Moufu card (moufu_link_page parity): Hub address,
         // connect/disconnect, entity share/receive, links list and
         // read-only linked-project preview.
         let moufu_card = {
@@ -3572,7 +3570,7 @@ impl App for HirariAmeApp {
             ])
         };
 
-        // Video card (Slint media/video_monitor parity): toggle and load.
+        // Video card (media/video_monitor parity): toggle and load.
         // Frame display fans out through the video canvas; revision-tracked.
         let video_open = self.show_video.clone();
         let video_toggle = ButtonView::new(if self.show_video.get() {
@@ -3601,7 +3599,7 @@ impl App for HirariAmeApp {
                     }
                 });
             });
-        // TEMPO card (Slint global tempo editor parity): base tempo ±,
+        // TEMPO card (global tempo editor parity): base tempo ±,
         // tap tempo, time-signature cycle (4/4 3/4 6/8 7/8), tempo-map
         // event cycler with add/remove and ramp/step mode.
         let tempo_current = self.tempo.clone();
@@ -3782,7 +3780,7 @@ impl App for HirariAmeApp {
             View::Caption(format!("BPM {:.1}", self.tempo.get())),
         ]);
 
-        // OpenUtau vocal card (Slint OpenUtau editor parity): score pick
+        // OpenUtau vocal card (OpenUtau editor parity): score pick
         // + launch + render pick + import into a new Vocal track.
         let open_score_source = self.openutau_source.clone();
         let open_score_caption = self.openutau_caption.clone();
@@ -3911,7 +3909,7 @@ impl App for HirariAmeApp {
             View::Caption(self.openutau_caption.get()),
         ])]);
 
-        // SYNTH card (Slint synth panel parity): engine picker and the
+        // SYNTH card (synth panel parity): engine picker and the
         // eight engine macros via set_macro_value. Local echo mirrors what
         // was sent; no engine getter exists for these values yet.
         let synth_engine_state = self.synth_engine.clone();
@@ -3953,7 +3951,7 @@ impl App for HirariAmeApp {
         }
         let synth_card = View::Card(vec![View::VStack(synth_macros)]);
 
-        // SENDS card (Slint audio routing / aux sends parity): source
+        // SENDS card (audio routing / aux sends parity): source
         // cycler, destination bus cycler, gain slider with live apply,
         // pre/post toggle and send enable.
         let sends_card = {
@@ -4018,7 +4016,7 @@ impl App for HirariAmeApp {
                 .on_change(move |value| {
                     let value = value.clamp(0.0, 1.0);
                     gain_state.set(value);
-                    // Live-apply on change, like the Slint aux-sends panel.
+                    // Live-apply on change, like the aux-sends panel.
                     if let Some(core) = &gain_apply_core {
                         let _ = core.set_send_route(
                             gain_source,
@@ -4416,7 +4414,7 @@ impl App for HirariAmeApp {
             View::Caption(status),
         ])]);
 
-        // Audio settings (Slint audio_settings parity): sample-rate and
+        // Audio settings (the audio settings parity): sample-rate and
         // buffer cyclers plus reconnect, read from the engine each poll.
         let audio_ready = self.audio_ready.get();
         let audio_devices = self.device_count.get();
@@ -4475,7 +4473,7 @@ impl App for HirariAmeApp {
                     core.try_reconnect_audio_device();
                 }
             });
-        // Device cycle + select (Slint on_select_device): the cycle picks
+        // Device cycle + select (on_select_device): the cycle picks
         // a pending index, USE applies it at the current config values.
         let device_list = self.audio_devices.get();
         let pending_index = self
@@ -4543,7 +4541,7 @@ impl App for HirariAmeApp {
             )),
         ])]);
 
-        // Arrange toolbar (Slint dock header): zoom steps match the Slint
+        // Arrange toolbar (dock header): zoom steps match the dock
         // ±1.25 buttons; FIT returns to fit-to-width. Ruler drag pans.
         let zoom_out_state = self.arrange_zoom.clone();
         let zoom_out = ButtonView::new("−")
@@ -4590,7 +4588,7 @@ impl App for HirariAmeApp {
             .on_press(move |_| {
                 lock_state.set(!lock_state.get());
             });
-        // Automation edit mode (Slint auto lanes): AUTO toggles lane
+        // Automation edit mode (auto lanes): AUTO toggles lane
         // editing, the lane button cycles volume/pan, DEL removes the
         // selected automation point.
         let auto_state = self.auto_mode.clone();
@@ -4679,7 +4677,7 @@ impl App for HirariAmeApp {
 
         // Clip inspector for the selected audio clip: fade in/out and
         // gain sliders, committing through the engine undo transactions
-        // like the Slint clip editor. MIDI clips have no region to edit.
+        // like the clip editor. MIDI clips have no region to edit.
         let inspector = self
             .selected_clip
             .get()
@@ -4787,7 +4785,7 @@ impl App for HirariAmeApp {
             });
 
         // Plugin strip for the selected track: bypass toggles, removal,
-        // and an add stepper over the built-in chain (Slint fx list).
+        // and an add stepper over the built-in chain (fx list).
         let plugin_strip = tracks
             .iter()
             .find(|track| track.id == self.piano_track.get())
@@ -4887,7 +4885,7 @@ impl App for HirariAmeApp {
 
         // Mixer strips: the canvas draws geometry only (no text), so the
         // list below carries names plus the fader/pan/mute/solo/arm
-        // controls, wired to the same engine setters as the Slint mixer.
+        // controls, wired to the same engine setters as the mixer.
         let mixer_core = self.core.clone();
         let track_list = View::ScrollView {
             height: 260,
@@ -5073,7 +5071,7 @@ impl App for HirariAmeApp {
                 });
             piano_buttons.push(button.into());
         }
-        // Chord controls (Slint piano roll): root/quality/length/inversion
+        // Chord controls (piano roll): root/quality/length/inversion
         // steppers plus the insert action at the playhead.
         let chord_root_state = self.chord_root.clone();
         let root_down_core = self.chord_root.clone();
@@ -5230,7 +5228,7 @@ impl App for HirariAmeApp {
             chord_button.into(),
             clear_button.into(),
         ]);
-        // Progression insert (Slint insert-progression): four chords
+        // Progression insert: four chords
         // from the preset tables at the playhead, each a chord-length
         // apart, with the engine chord-symbol events.
         let preset_state = self.progression_preset.clone();
@@ -5336,7 +5334,7 @@ impl App for HirariAmeApp {
             });
         piano_buttons.push(preset_button.into());
         piano_buttons.push(prog_button.into());
-        // Articulation map (Slint set-articulation-map): MAP cycles the
+        // Articulation map: MAP cycles the
         // articulation id; KS steps the keyswitch pitch (off, 60, down).
         let map_state = self.map_articulation_id.clone();
         let map_button = ButtonView::new(format!("MAP{}", self.map_articulation_id.get()))
@@ -5445,7 +5443,7 @@ impl App for HirariAmeApp {
                 }
             });
         piano_buttons.push(ks_button.into());
-        // Articulation name field for the MAP id (Slint set-articulation-name).
+        // Articulation name field for the MAP id.
         let name_core = self.core.clone();
         let name_tracks = self.tracks.clone();
         let name_track = self.piano_track.clone();
@@ -5515,7 +5513,7 @@ impl App for HirariAmeApp {
             });
         piano_buttons.push(name_field.into());
         // Lyric editor for the selected note; commits on submit, like the
-        // Slint lyric field. The text buffer is shared between the change
+        // Lyric field. The text buffer is shared between the change
         // and submit closures so Enter commits the typed value.
         let lyric_notes = self.piano_notes.clone();
         let lyric_selected = self.selected_note.clone();
@@ -5560,7 +5558,7 @@ impl App for HirariAmeApp {
                 replace_notes(core, &lyric_notes, notes);
             });
         piano_buttons.push(lyric_field.into());
-        // Articulation stepper for the selected note (Slint set-note-articulation).
+        // Articulation stepper for the selected note.
         for (label, delta) in [("ART-", -1), ("ART+", 1)] {
             let art_core = self.core.clone();
             let art_notes = self.piano_notes.clone();
@@ -5824,7 +5822,7 @@ impl App for HirariAmeApp {
             views.push(plugin_strip);
         }
         // Plugin parameter strip for the selected plugin of the selected
-        // track (normalized 0..1 sliders, like the Slint plugin UI).
+        // track (normalized 0..1 sliders, as in the plugin UI).
         if let Some(core) = &self.core {
             let params_track = tracks
                 .iter()
@@ -5880,7 +5878,7 @@ impl App for HirariAmeApp {
                             param_rows
                                 .push(View::HStack(vec![View::Caption(label), slider.into()]));
                         }
-                        // Preset save/load for this plugin (Slint
+                        // Preset save/load for this plugin
                         // on_save_preset/on_load_preset via native dialogs).
                         let preset_pending = self.pending_preset.clone();
                         let preset_track = params_track_id;
@@ -5933,7 +5931,7 @@ impl App for HirariAmeApp {
             }
         }
         views.extend([piano_selector, View::canvas("piano").grow(2), track_list]);
-        // Audio library (Slint browser parity): folder scan, search
+        // Audio library: folder scan, search
         // filter, per-asset preview and import to the piano track.
         let library_assets = self.library_assets.get();
         let library_filter = self.library_query.get().to_lowercase();

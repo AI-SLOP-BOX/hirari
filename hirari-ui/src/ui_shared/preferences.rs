@@ -1,6 +1,5 @@
-//! Minimal user preference toggles shared by the Slint dock and the AmeUI
-//! surface. Reads/writes the same `hirari-ui/project-path.json` settings
-//! file the rest of Hirari uses, so both surfaces stay in step.
+//! Minimal user preference toggles shared by the AmeUI surface and any tooling. Reads/writes
+//! the same `hirari-ui/project-path.json` settings file the rest of Hirari uses.
 
 use std::fs;
 use std::path::PathBuf;

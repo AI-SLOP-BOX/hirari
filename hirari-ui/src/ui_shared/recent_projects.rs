@@ -1,6 +1,4 @@
-//! Neutral shared listing of recent projects. Both the Slint start page and
-//! the AmeUI home page ask this; it must not depend on either windowing
-//! backend.
+//! Neutral shared listing of recent projects. The AmeUI home page asks this; it must not depend on a windowing backend.
 
 use std::fs;
 use std::path::{Path, PathBuf};

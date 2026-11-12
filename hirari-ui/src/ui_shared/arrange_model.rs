@@ -3,9 +3,9 @@
 //! The arranger needs the same facts regardless of windowing backend: which
 //! tracks and clips exist, where the ruler's measure lines fall, how long the
 //! timeline runs, and how MIDI note runs collapse into visible clips. These
-//! routines were lifted out of the Slint telemetry and track-sync paths so the
-//! Slint surface and the AmeUI Canvas derive identical arrangement geometry
-//! from one source during the migration. Nothing here depends on Slint or on a
+//! Routines are backend-neutral: kept stable so the AmeUI canvas and any
+//! tooling consume the same arrangement geometry from one source. Nothing
+//! here depends on a UI backend or on a
 //! live engine; the engine is reached only through the `samples_to_beats`
 //! closure passed to [`parse_arrange_tracks`], which keeps the parsers testable.
 
@@ -29,13 +29,13 @@ pub struct ArrangeClip {
     pub length_beats: f32,
     pub midi: bool,
     /// Sync group the clip moves with; 0 means it moves alone. Drives the
-    /// `move_region_sync_group` engine call, as in the Slint move path.
+    /// `move_region_sync_group` engine call.
     pub sync_group: u32,
     /// Trim window as fractions of the source (0..1), as published by the
     /// layout and consumed by `set_region_trim`. Full clip is 0..1.
     pub trim_start: f32,
     pub trim_end: f32,
-    /// Reversed playback; flips the waveform peak mapping like the Slint
+    /// Reversed playback; flips the waveform peak mapping as the arrangement dock does
     /// dock, and gates trim handles to Audio/Vocal lanes at draw time.
     pub reverse: bool,
     /// Fade in/out as fractions of the clip length (0..1), as published
@@ -83,7 +83,7 @@ pub struct AutomationPoint {
 }
 
 /// Display name for an engine plugin-type id, mirroring the names the
-/// Slint track sync publishes for the built-in chain.
+/// the track-sync path publishes for the built-in chain.
 pub fn plugin_name(plugin_type: u32, index: usize) -> String {
     match plugin_type {
         0 => "Hirari Limiter".to_owned(),
@@ -102,7 +102,7 @@ pub fn plugin_name(plugin_type: u32, index: usize) -> String {
 }
 
 /// A timeline marker. `color` is the engine's `#rrggbb` marker color as
-/// RGB, matching the Slint `Z_Marker` color so a project keeps its marker
+/// RGB, matching the marker color so a project keeps its marker
 /// colors across the backend migration.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ArrangeMarker {
@@ -112,7 +112,7 @@ pub struct ArrangeMarker {
     pub color: [u8; 3],
 }
 
-/// The rotating lane palette shared with the Slint track sync so a project
+/// The rotating lane palette shared with the track-sync path so a project
 /// keeps its colors across the backend migration.
 pub fn track_color(index: usize) -> [u8; 3] {
     match index % 5 {
@@ -340,7 +340,7 @@ struct TrackLayout {
     name: String,
     #[serde(rename = "type")]
     track_type: String,
-    // Required exactly as in the Slint track sync; the engine always
+    // Required exactly as in the track-sync path; the engine always
     // publishes them, and a snapshot missing them is not a track list.
     volume: f32,
     pan: f32,
@@ -370,7 +370,7 @@ struct AutomationLayoutPoint {
     curve: f32,
 }
 
-/// Mirrors the Slint automation conversion: integer sample times become
+/// Mirrors the automation conversion: integer sample times become
 /// beats, values clamp to the lane range, invalid rows drop.
 fn parse_automation(
     points: Vec<AutomationLayoutPoint>,
@@ -433,7 +433,7 @@ pub fn parse_arrange_tracks(
                         length_beats: (end_beat - start_beat).max(0.0) as f32,
                         midi: false,
                         sync_group: region.sync_group,
-                        // Same trim-fraction formulas as the Slint track
+                        // Same trim-fraction formulas as the track
                         // sync, so both surfaces trim the same window.
                         trim_start: if region.base_length == 0 {
                             0.0
@@ -496,7 +496,7 @@ pub fn parse_arrange_tracks(
 }
 
 /// Parses the engine marker snapshot, dropping invalid rows. A missing or
-/// malformed `color` falls back to the same default the Slint marker sync
+/// malformed `color` falls back to the same default as the marker sync
 /// uses, rather than discarding the whole snapshot.
 pub fn parse_markers(markers_json: &str) -> Vec<ArrangeMarker> {
     #[derive(Deserialize)]
@@ -538,14 +538,14 @@ pub fn last_clip_end(tracks: &[ArrangeTrack]) -> f32 {
         .fold(0.0f32, f32::max)
 }
 
-/// Zoom limits, mirroring the Slint dock buttons (×/÷1.25 per step).
+/// Zoom limits, matching the toolbar buttons (×/÷1.25 per step).
 /// Fit-to-width is zoom 1.0; zooming out past fit would only leave empty
-/// space, so the floor is 1.0 rather than the Slint 0.25.
+/// space, so the floor is 1.0 rather than 0.25.
 pub const ARRANGE_ZOOM_MIN: f32 = 1.0;
 pub const ARRANGE_ZOOM_MAX: f32 = 8.0;
 
 /// Pixel layout of one arrangement canvas. Zoom 1.0 fits the whole
-/// timeline into the slot (the Slint FIT zoom); higher zoom shows a
+/// timeline into the slot (the FIT zoom); higher zoom shows a
 /// window of it scrolled by `scroll_beats`. The draw step stays a pure
 /// function of this struct.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -556,11 +556,11 @@ pub struct ArrangeCanvasGeometry {
     pub ruler_height: f32,
     /// Height of one track lane below the ruler.
     pub lane_height: f32,
-    /// Beat step for the faint grid lines (Slint `visible-beat-step`).
+    /// Beat step for the faint grid lines (`visible-beat-step`).
     pub beat_step: f32,
     /// Left edge of the visible window, in beats (clamped).
     pub scroll_beats: f32,
-    /// Width of the lane-header column at the left (Slint uses 104px).
+    /// Width of the lane-header column at the left (104px).
     pub header_width: f32,
 }
 
@@ -642,7 +642,7 @@ pub fn arrange_canvas_geometry(
     } else {
         (height - ruler_height).max(0.0) / lane_count as f32
     };
-    // Same adaptive step as the Slint dock: at least one beat, and never so
+    // Same adaptive step as the arrange dock: at least one beat, and never so
     // many grid lines that they merge into a solid band.
     let beat_step = (4.0 / px_per_beat.max(f32::EPSILON))
         .max(timeline_end / 2048.0)
@@ -681,7 +681,7 @@ pub fn clip_at(
         .map(|clip| (track.id, clip.id))
 }
 
-/// Which clip edge a canvas x is on, for trim drags. The Slint dock puts
+/// Which clip edge a canvas x is on, for trim drags. The dock puts
 /// an 8px handle on each edge; here the zones are 6px and only exist when
 /// the clip is wide enough to hold both without overlapping.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -791,7 +791,7 @@ pub fn parse_preview_catalog(catalog_json: &str) -> Vec<LibraryAsset> {
 /// One MIDI note with its full authoring contract, so piano-roll edits
 /// can commit a lossless `replace_midi_note_contracts` (lyric,
 /// articulation, vibrato and curve metadata survive an edit, exactly as
-/// the Slint roll preserves them through its UI model).
+/// the roll preserves them through its model).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PianoNote {
     pub track_id: u32,
@@ -813,7 +813,7 @@ pub struct PianoNote {
 }
 
 /// Parses the engine's canonical `midi_notes_json` into notes, sanitized
-/// like the Slint piano roll (`sanitize_notes`): pitches and velocities
+/// like the piano roll (`sanitize_notes`): pitches and velocities
 /// clamped, lengths floored, sorted by track/start/pitch. Malformed
 /// input yields no notes.
 pub fn parse_midi_notes(notes_json: &str, samples_to_beats: impl Fn(u64) -> f64) -> Vec<PianoNote> {
@@ -1127,7 +1127,7 @@ mod tests {
         assert_eq!(markers[0].id, 1);
         assert_eq!(markers[1].beat, 8.0);
         assert_eq!(markers[1].color, [255, 0, 0]);
-        // Unparseable and missing colors take the Slint sync's default.
+        // Unparseable and missing colors take the sync default.
         assert_eq!(markers[0].color, [0x64, 0x72, 0xa8]);
         let markers = parse_markers(r#"[{"id":3,"label":"C","beat":2.0}]"#);
         assert_eq!(markers[0].color, [0x64, 0x72, 0xa8]);

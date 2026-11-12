@@ -1,5 +1,4 @@
-//! Output-path policy for offline renders. Shared by the Slint surface and
-//! the AmeUI export card so both surfaces produce the same naming scheme
+//! Output-path policy for offline renders. Shared by the AmeUI export card and any tooling so both produce the same naming scheme
 //! (`hirari_master-<pid>-<millis>-<seq>.wav` in temp) and keep the same
 //! uniqueness guarantees.
 

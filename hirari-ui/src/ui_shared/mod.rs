@@ -1,4 +1,4 @@
-//! Neutral UI support shared with a future non-Slint surface (basically Hirari's measure math, track layout & parser code; the shared template starter). To avoid a cyclic story this module is exposed `pub`.
+//! Backend-neutral UI support shared with the engine and kept stable across shell changes: measure math, track layout & parser code, plot rasters, template starters. This module is exposed `pub` so the engine and tooling can consume the same sources.
 
 pub mod arrange_model;
 pub mod gpu_canvas;
