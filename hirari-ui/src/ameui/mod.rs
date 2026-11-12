@@ -89,6 +89,7 @@ use hirari_moufu_adapter::{
 };
 use std::sync::atomic::Ordering;
 
+mod canvas_impl;
 mod cards;
 mod midi_learn;
 mod shell;
