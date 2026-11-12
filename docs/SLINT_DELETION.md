@@ -78,7 +78,7 @@ approx. effort and status. Each item = one AmeUI slice.
 | P12 | MIDI learn | `pages/workflow_pages.slint` | engine refs (MIDI learn) in bridge |
 | P13 | OpenUtau editor | `editor/openutau_editor.slint` | **partial done** (`337f762`) — open/launch/import/vocal-track creation; tuning worker not ported |
 | P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | engine refs present |
-| P15 | Notation / score | `editor/notation_hub.slint` | not started |
+| P15 | Notation / score | `editor/notation_hub.slint` | **partial done** (`2c9537e`) — MusicXML export; notation view not ported |
 | P16 | Synth panel (/ sound_design) | `editor/synth_panel.slint` | not started |
 | P17 | Video monitor | `media/video_monitor.slint` | **part done** (`1bd92d1`) — LOAD/SHOW/HIDE + frame upload path; frame timing wired |
 | P18 | Advanced automation | `editor/advanced_automation.slint` | partial (overlay edit) |
