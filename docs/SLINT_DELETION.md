@@ -21,7 +21,10 @@ The Rust worker exports a global-capability probe `build-tools/hirari-plugin-hos
 
 Hirari's desktop bundle now ships AmeUI. The `scripts/build_app.sh` pipeline is unchanged; the artifact is byte-different but has no Slint obligations. `THIRD_PARTY_NOTICES.md` lists AmeUI as MIT and carries no `AboutSlint` or Slint attribution requirement. `README.md`, `docs/RELEASE_READINESS.md`, and `ARCHITECTURE_STATUS.md` reflect the same change.
 
-## What did not happen
+## Final port-queue status
+
+- **Open items in the deletion plan are now empty.** Slices 75 (P11, MIDI Learn) and 76 (P12, Step Sequencer, engine extension) both landed with Linux CI green (`a3b935d` / `ecd271f` → `CHECK OK` / `TEST OK`).
+- Everything previously marked "open" has either merged here or been recorded out of scope with a reason below. See `docs/AMEUI_MIGRATION.md` for the live slice log; the bullets below enumerate what intentionally did not port and why.
 
 Some surfaces that were already absent from the Slint-era UI are intentionally absent here too, and others landed much later than the final deletion — please check the migration log instead of this top-level summary for the live status of every slice. As of this revision:
 
