@@ -116,6 +116,7 @@ Notes:
 | 57 | `8a9b06f` | AmeUI Moufu Hub card (P5): address field persisted, CONNECT/DISCONNECT/REFRESH, entity share/receive/unlink, read-only linked preview via shared `ui_shared::moufu_preview`; publisher snapshot publish through shared `ui_shared::moufu_layout` (no recording-input channel tags yet — engine/model gap). |
 | 59 | `1bd92d1` | AmeUI video monitor slice (P17 part 1): VIDEO card with LOAD VIDEO + SHOW/HIDE toggle; control-rate poll tracks playhead revision; texture uploaded on the draw path like the waveform. |
 | 63 | `af60aab` | AmeUI focus-mode toggle (P6 partial): shared `ui_shared::preferences` persists focus_mode into project-path.json; FOCUS gates the extra cards leaving transport+meter+arrange. |
+| 66 | `d2e4d9a` | AmeUI audio edit card (P14 partial): REVERSE toggle, PITCH-/PITCH+ stepping from engine-published pitch_semitones (layout now parses it), SPLIT at playhead. |
 | 65 | see tip | AmeUI audio edit card (P14 partial): REVERSE toggle, PITCH-/PITCH+ applied from the layout's pitch_semitones, split at playhead. `ui_shared::arrange_model` now parses pitch_semitones/loop_count from the engine layout. |
 | 64 | `6f56a51` | AmeUI spotlight palette (P20): Cmd/Ctrl+K toggles filterable quick-command list (play/loop/metronome/save/new/snap/zoom/fit/render/lock/undo) with direct engine dispatch. |
 | 61 | `337f762` | AmeUI OpenUtau vocal score card (P13): OPEN USTX / LAUNCH OPENUTAU (macOS `open -a`) / PICK RENDER / IMPORT VOCAL — engine-driven import through the poll, adds Vocal track + region. |

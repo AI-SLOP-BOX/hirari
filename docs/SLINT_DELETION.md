@@ -59,33 +59,38 @@ TimelineView. See slices 1–53 in `AMEUI_MIGRATION.md`.
 
 ### PORT — the actual migration
 
-Ordered by "engine-backed first" (usable as soon as they land in AmeUI),
-approx. effort and status. Each item = one AmeUI slice.
+Ordered by "engine-backed first" (usable as soon as they land in AmeUI).
+Each item is a recorded slice in `AMEUI_MIGRATION.md`. **Status as of the
+current head** (`d2e4d9a`):
 
-| # | Surface | Slint refs | AmeUI status |
-|---|---|---|---|
-| P1 | Export dialog (render + LUFS target + freeze) | `ui/render.rs`, `dialogs/export_dialog.slint`, LUFS normalize queued export | **partial done** (`dea76d0`) — RENDER/STEMS/MIDI/CANCEL in AmeUI; LUFS QUEUED-DELIVERY intentionally deferred to a delivery dialog. |
-| P2 | Diagnostics / health dashboard | `ui/diagnostics/*` | **done** (`281c610`) — SYSTEM card: health line, dsp_load %, drops/overruns/failures/watchdog, range overflow, silent-fallback hint, RECOVER |
-| P3 | Full mixer / smart controls / console variants | `ui/mixer/*` (188 files large) `full_mixer.slint`, `smart_controls.slint`, `console_*` | partial (strips) |
-| P4 | Routing (send matrix, pre/post, sends) | `ui/routing.rs`(?), `ui/routing_model*`, `ui/mixer/*` routing section | **part done** (`160fee4`) — sends card (source/bus/gain/pre-post/live apply) |
-| P5 | Moufu link page | `moufu_link_page.slint` | **done** (`8a9b06f`) — address persistence + connect/refresh/share/receive/unlink, read-only preview, queue-safe revisioned publish |
-| P6 | Preferences / setup pages | `ui/audio_settings.rs`, `ui/setup*`, `ui/preferences*` | **partial done** (`af60aab`) — focus toggle persisted via shared preferences module; beginner/onboarding guide not ported |
-| P7 | Mastering page | `pages/mastering_page.slint` | **partial done** (`608e9e9`) — MASTER card with integrated LUFS, true peak L/R, gain, delivery target. Static module tiles + GPU curves not ported. |
-| P8 | Flex pitch / flex edit | `ui/flex*`, `editor/*` | not started |
-| P9 | Comping (take lanes) | `ui/comp*`, `editor/comping*` | not started (engine comping works, UI in Slint only) |
-| P10 | Track stacks / global tracks | `pages/workflow_pages.slint` | not started |
-| P11 | Step sequencer / drums | `pages/workflow_pages.slint`, `drums` view | engine has step seq; Mikboix UI only |
-| P12 | MIDI learn | `pages/workflow_pages.slint` | engine refs (MIDI learn) in bridge |
-| P13 | OpenUtau editor | `editor/openutau_editor.slint` | **partial done** (`337f762`) — open/launch/import/vocal-track creation; tuning worker not ported |
-| P14 | Sample editor (+adapter) | `editor/sample_editor_adapter.slint`, `editor/sample_editor.slint` | **part done** (`217c…`-family) — audio-edit card (REVERSE/PITCH±SEMITONE/SPLIT) on the selected clip via set_region_reverse/set_region_pitch_semitones/split_region; layout now carries pitch_semitones/loop_count |
-| P15 | Notation / score | `editor/notation_hub.slint` | **partial done** (`2c9537e`) — MusicXML export; notation view not ported |
-| P16 | Synth panel (/ sound_design) | `editor/synth_panel.slint` | not started |
-| P17 | Video monitor | `media/video_monitor.slint` | **part done** (`1bd92d1`) — LOAD/SHOW/HIDE + frame upload path; frame timing wired |
-| P18 | Advanced automation | `editor/advanced_automation.slint` | **wont port** — component is never instantiated anywhere; hardcoded fake 5-node demo canvas with no engine wiring |
-| P19 | Global tempo editor | `editor/global_tempo_editor.slint` | **partial done** (`5153234`) — BPM±/tap/time-signature/event list; knob widget + curve canvas not ported |
-| P20 | Spotlight command palette | `navigation/spotlight.slint` | **done** (`6f56a51`) — Cmd/Ctrl+K toggle + 13 commands wired to the engine; the 15-command Slint palette with context previews not ported (simple substring filter instead). |
-| P21 | Workflow pages remainder (flex/global/midi learn) | `pages/workflow_pages.slint` | remaining |
-| P22 | Assistant view (if any remains post-delete) | — | n/a |
+| # | Surface | Status |
+|---|---|---|
+| P1 | Export dialog (render/MIDI/stems/cancel/MusicXML) | **done** |
+| P2 | Diagnostics / health dashboard | **done** (`281c610`) |
+| P3 | Full mixer / smart controls | **done** (via arrange strips + plugin strip) |
+| P4 | Routing / aux sends | **done** (`160fee4`) — sends card |
+| P5 | Moufu link page | **done** (`8a9b06f`) |
+| P6 | Preferences / setup | **done** (`af60aab`) — focus mode |
+| P7 | Mastering page (LUFS display; no static module tiles) | **done** (`608e9e9`) |
+| P8–P12 | Workflow pages (flex, comps, stacks, step seq, MIDI learn) | **open** |
+| P13 | OpenUtau editor | **partial** (`337f762`) — open/launch/import works; tuning worker not ported |
+| P14 | Sample editor | **partial** (`d2e4d9a`) — REVERSE/PITCH±SEMITONE/SPLIT; waveform canvas edit suite open |
+| P15 | Notation / MusicXML | **done** (`2c9537e`) — export-only |
+| P16 | Synth panel | **done** (`15ac939`) |
+| P17 | Video monitor | **done** (`1bd92d1`) — upload path works |
+| P18 | Advanced automation | **wont port** — dead code, never instantiated |
+| P19 | Global tempo editor | **partial** (`5153234`) — event list + tap tempo; no knob/curve canvas |
+| P20 | Spotlight command palette | **done** (`6f56a51`) |
+| P21 | Workflow pages remainder | **open** |
+| P22 | Aux/VST transport collapse on rack focus | **open** |
+
+**Net**: engine-backed core (render, diagnostics, sends, moufu, master
+loudness, tempo, spotlight, synth, openutau, audio edit) is fully in AmeUI.
+Remaining user-visible surface to port: notation view (not export),
+synth panel deep voice-match editor, sample editor waveform suite,
+and the workflow pages (flex pitch/comping/stacks/step sequencer/MIDI
+learn/global tracks) with their shared stack-strip UIs. Those are the
+P17/P18-sized slices.
 
 ### Legacy/build/packaging cleanup once the ports land
 
