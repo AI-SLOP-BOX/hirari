@@ -4367,6 +4367,106 @@ impl App for HirariAmeApp {
                         |samples| core.samples_to_beats(samples),
                     ));
                 });
+            // Fades: one slider each for fade-in and fade-out, applied against
+            // the layout-tracked current value on every change.
+            let clip_fade_in = selected_clip
+                .as_ref()
+                .map(|clip| clip.fade_in.clamp(0.0, 1.0))
+                .unwrap_or(0.0);
+            let clip_fade_out = selected_clip
+                .as_ref()
+                .map(|clip| clip.fade_out.clamp(0.0, 1.0))
+                .unwrap_or(0.0);
+            let fade_in_core = self.core.clone();
+            let fade_in_refresh = self.tracks.clone();
+            let fade_out_current = clip_fade_out;
+            let fade_in_slider = SliderView::new(clip_fade_in, 0.0, 1.0)
+                .action_id("audioedit.fade_in")
+                .on_change(move |value| {
+                    let clamped = value.clamp(0.0, 1.0);
+                    if let Some(core) = &fade_in_core {
+                        let _ = core.set_region_fades(
+                            track_id,
+                            clip_id as u32,
+                            clamped,
+                            fade_out_current,
+                        );
+                        fade_in_refresh.set(parse_arrange_tracks(
+                            &core.get_project_layout_json(),
+                            |samples| core.samples_to_beats(samples),
+                        ));
+                    }
+                });
+            let fade_out_core = self.core.clone();
+            let fade_out_refresh = self.tracks.clone();
+            let fade_in_current = clip_fade_in;
+            let fade_out_slider = SliderView::new(clip_fade_out, 0.0, 1.0)
+                .action_id("audioedit.fade_out")
+                .on_change(move |value| {
+                    let clamped = value.clamp(0.0, 1.0);
+                    if let Some(core) = &fade_out_core {
+                        let _ = core.set_region_fades(
+                            track_id,
+                            clip_id as u32,
+                            fade_in_current,
+                            clamped,
+                        );
+                        fade_out_refresh.set(parse_arrange_tracks(
+                            &core.get_project_layout_json(),
+                            |samples| core.samples_to_beats(samples),
+                        ));
+                    }
+                });
+            let loop_core = self.core.clone();
+            let loop_refresh = self.tracks.clone();
+            let loop_current = selected_clip
+                .as_ref()
+                .map(|clip| clip.loop_count)
+                .unwrap_or(1);
+            let loop_button = ButtonView::new(format!("LOOP {loop_current}×"))
+                .action_id("audioedit.loop")
+                .secondary()
+                .on_press(move |_| {
+                    let Some(core) = &loop_core else { return };
+                    let next = match loop_current {
+                        0 | 1 => 2,
+                        2 => 4,
+                        _ => 1,
+                    };
+                    let _ = core.set_region_loop_count(track_id, clip_id as u32, next);
+                    loop_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
+            let duplicate_core = self.core.clone();
+            let duplicate_refresh = self.tracks.clone();
+            let duplicate_playhead = self.playhead_beats.clone();
+            let duplicate_button = ButtonView::new("DUPLICATE")
+                .action_id("audioedit.duplicate")
+                .secondary()
+                .on_press(move |_| {
+                    let Some(core) = &duplicate_core else { return };
+                    let beat = duplicate_playhead.get();
+                    let _ = core.duplicate_region(track_id, clip_id as u32, beat);
+                    duplicate_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
+            let delete_core = self.core.clone();
+            let delete_refresh = self.tracks.clone();
+            let delete_button = ButtonView::new("DELETE")
+                .action_id("audioedit.delete")
+                .secondary()
+                .on_press(move |_| {
+                    let Some(core) = &delete_core else { return };
+                    let _ = core.remove_region(track_id, clip_id as u32);
+                    delete_refresh.set(parse_arrange_tracks(
+                        &core.get_project_layout_json(),
+                        |samples| core.samples_to_beats(samples),
+                    ));
+                });
             View::Card(vec![View::HStack(vec![
                 View::Text("AUDIO EDIT".to_owned()),
                 View::Caption(pitch_label),
@@ -4374,6 +4474,13 @@ impl App for HirariAmeApp {
                 pitch_down.into(),
                 pitch_up.into(),
                 split_button.into(),
+                View::Caption("FADE IN".to_owned()),
+                fade_in_slider.into(),
+                View::Caption("FADE OUT".to_owned()),
+                fade_out_slider.into(),
+                loop_button.into(),
+                duplicate_button.into(),
+                delete_button.into(),
             ])])
         } else {
             View::Card(vec![View::HStack(vec![View::Caption(
