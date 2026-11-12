@@ -42,6 +42,10 @@ pub struct ArrangeClip {
     /// by the layout and consumed by `set_region_fades`.
     pub fade_in: f32,
     pub fade_out: f32,
+    /// Playback speed ratio (0.25–4×, engine range is 0.5–2×).
+    pub warp_ratio: f64,
+    /// Whether warp preserves pitch (WSOLA).
+    pub pitch_preserve_warp: bool,
     /// Clip gain (linear, 0..2), consumed by `set_region_gain`.
     pub gain: f32,
     /// Clip pitch offset in semitones, from the engine layout.
@@ -322,8 +326,16 @@ struct RegionLayout {
     clip_gain: f32,
     #[serde(default)]
     pitch_semitones: f32,
+    #[serde(default = "default_warp_ratio")]
+    warp_ratio: f64,
+    #[serde(default)]
+    pitch_preserve_warp: bool,
     #[serde(default = "default_loop_count")]
     loop_count: u32,
+}
+
+fn default_warp_ratio() -> f64 {
+    1.0
 }
 
 fn default_loop_count() -> u32 {
@@ -469,6 +481,8 @@ pub fn parse_arrange_tracks(
                             region.fade_out_samples as f32 / region.len as f32
                         },
                         pitch_semitones: region.pitch_semitones,
+                        warp_ratio: region.warp_ratio,
+                        pitch_preserve_warp: region.pitch_preserve_warp,
                         loop_count: region.loop_count,
                         gain: region.clip_gain.clamp(0.0, 2.0),
                     }
@@ -1239,6 +1253,8 @@ mod tests {
                     fade_in: 0.0,
                     fade_out: 0.0,
                     pitch_semitones: 0.0,
+                    warp_ratio: 1.0,
+                    pitch_preserve_warp: false,
 
                     loop_count: 1,
 
@@ -1257,6 +1273,8 @@ mod tests {
                     fade_in: 0.0,
                     fade_out: 0.0,
                     pitch_semitones: 0.0,
+                    warp_ratio: 1.0,
+                    pitch_preserve_warp: false,
 
                     loop_count: 1,
 
@@ -1309,9 +1327,9 @@ mod tests {
             fade_in: 0.0,
             fade_out: 0.0,
             pitch_semitones: 0.0,
-
+            warp_ratio: 1.0,
+            pitch_preserve_warp: false,
             loop_count: 1,
-
             gain: 1.0,
         };
         assert_eq!(trim_edge_at(&geometry, &clip, 107.0), Some(TrimEdge::Left));
@@ -1525,6 +1543,8 @@ mod tests {
                     fade_in: 0.0,
                     fade_out: 0.0,
                     pitch_semitones: 0.0,
+                    warp_ratio: 1.0,
+                    pitch_preserve_warp: false,
 
                     loop_count: 1,
 
@@ -1559,6 +1579,8 @@ mod tests {
                     fade_in: 0.0,
                     fade_out: 0.0,
                     pitch_semitones: 0.0,
+                    warp_ratio: 1.0,
+                    pitch_preserve_warp: false,
 
                     loop_count: 1,
 
