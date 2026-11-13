@@ -528,8 +528,24 @@ pub struct HirariAmeApp {
     tick: u64,
 }
 
+// Tests must never race the machine's physical audio device; the bridge
+// honors cfg!(test) the same way for its own unit tests.
+#[cfg(test)]
+fn core_for_headless() -> Option<Rc<HirariCore>> {
+    hirari_core_bridge::HirariCore::new_offline()
+        .ok()
+        .map(Rc::new)
+}
+
 /// Build the app on the event-loop (main) thread, where the engine must live.
+/// In unit test builds this never opens a physical audio device.
 pub fn create_app(context: &StateContext) -> HirariAmeApp {
+    #[cfg(test)]
+    let (core, status) = match core_for_headless() {
+        Some(core) => (Some(core), String::from("ENGINE READY")),
+        None => (None, String::from("ENGINE INIT FAILED")),
+    };
+    #[cfg(not(test))]
     let (core, status) = match HirariCore::new() {
         Ok(core) => (Some(Rc::new(core)), String::from("ENGINE READY")),
         Err(error) => (None, format!("ENGINE INIT FAILED: {error}")),
@@ -729,5 +745,35 @@ pub fn create_app(context: &StateContext) -> HirariAmeApp {
 pub fn run() {
     if let Err(error) = ame_ui::app::run_with(create_app) {
         eprintln!("Hirari AmeUI event loop failed: {error}");
+    }
+}
+
+#[cfg(test)]
+mod headless_harness_tests {
+    use super::*;
+
+    #[test]
+    fn app_builds_and_lays_out_at_default_viewport() {
+        let (app, _context) = {
+            let context = ame_ui::app::StateContext::default();
+            let app = create_app(&context);
+            (app, context)
+        };
+        let viewport = ame_ui::app::Viewport {
+            width: 1280,
+            height: 800,
+        };
+        let mut harness =
+            ame_ui::testing::UiTestHarness::new(app, viewport).expect("harness must build");
+        let tree = harness.tree();
+        assert!(
+            tree.root.children.len() > 0,
+            "app must render a non-empty tree"
+        );
+        let snapshot = harness
+            .capture_snapshot()
+            .expect("headless capture must work");
+        assert_eq!(snapshot.width(), 1280);
+        assert_eq!(snapshot.height(), 800);
     }
 }
