@@ -424,6 +424,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn randomized_lanes_match_the_shared_shortcut_evaluator() {
+        struct Lcg(u64);
+        impl Lcg {
+            fn next_f32(&mut self) -> f32 {
+                self.0 = self
+                    .0
+                    .wrapping_mul(6364136223846793005)
+                    .wrapping_add(1442695040888963407);
+                ((self.0 >> 33) as f32) / (u32::MAX as f32)
+            }
+        }
+        let mut lcg = Lcg(0x243F6A8885A308D3);
+        for _ in 0..8 {
+            let mut points = Vec::new();
+            let mut time = 0.0f64;
+            for _ in 0..16 {
+                points.push(NativeAutomationPoint {
+                    time,
+                    value: lcg.next_f32() * 2.0 - 1.0,
+                    curve: lcg.next_f32() * 2.0 - 1.0,
+                });
+                time += lcg.next_f32() as f64 * 128.0 + 32.0;
+            }
+            for probe in 0..32 {
+                let t = probe as f64 * time / 32.0;
+                let mut hint = 0usize;
+                let value = unsafe {
+                    hirari_realtime_automation_evaluate(
+                        points.as_ptr(),
+                        points.len(),
+                        t,
+                        &mut hint,
+                    )
+                };
+                // Recompute via the shared segment evaluator.
+                let value_via_shared = super::evaluate_points(&points, t, &mut 0);
+                assert!(
+                    (value - value_via_shared).abs() < f32::EPSILON * 8.0,
+                    "FFI lane and shared evaluator diverged at t={t}"
+                );
+            }
+        }
+    }
+
     #[cfg(feature = "dsp-differential-reference")]
     #[test]
     fn rust_gain_and_pan_application_matches_cpp_with_dry_mirror() {

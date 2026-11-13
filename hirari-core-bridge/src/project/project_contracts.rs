@@ -301,12 +301,75 @@ impl MidiNoteContract {
     }
 }
 
+/// One control point of a caller-supplied ease curve in the unit square.
+/// `t` runs 0 (segment start) to 1 (segment end); `y` is the eased amount.
+/// `x` values inside the unit interval keep the cubic Bézier invertible on
+/// `x`, which is what the evaluator needs to map normalized time to value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct Point {
+    pub x: f32,
+    pub y: f32,
+}
+
+/// The interpolation shapes an authored curve can carry. Serializes tagged
+/// with `kind`; the legacy sigmoid lives in [`Curve::Shortcut`] and keeps the
+/// original bare-number encoding.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum Shape {
+    /// A straight line from left to right value.
+    Linear,
+    /// Holds the left value; jumps to the right value at `amount == 1`.
+    Step,
+    /// Cubic Bézier ease between the segment endpoints with the two given
+    /// control points (endpoints are implicitly (0, 0) and (1, 1)).
+    Bezier { p: [Point; 2] },
+}
+
+/// The interpolation of one automation curve segment. Legacy projects store
+/// a bare `curve` number; new shapes serialize as `{"kind": "..."}` objects,
+/// so older projects round-trip byte-identically and each entity carries a
+/// single, unambiguous representation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum Curve {
+    /// Legacy sigmoid weight in `-1.0..=1.0`; `0.0` is a straight line.
+    Shortcut(f32),
+    /// Explicit shapes added by the curve unification.
+    Shaped(Shape),
+}
+
+impl Default for Curve {
+    fn default() -> Self {
+        Self::Shortcut(0.0)
+    }
+}
+
+impl Curve {
+    /// True when the shape is finite and within its valid parameter range.
+    pub fn is_valid(self) -> bool {
+        match self {
+            Curve::Shortcut(weight) => weight.is_finite() && (-1.0..=1.0).contains(&weight),
+            Curve::Shaped(Shape::Linear) | Curve::Shaped(Shape::Step) => true,
+            Curve::Shaped(Shape::Bezier { p }) => {
+                let [first, second] = p;
+                [first, second].into_iter().all(|point| {
+                    point.x.is_finite()
+                        && point.y.is_finite()
+                        && (0.0..=1.0).contains(&point.x)
+                        && (0.0..=1.0).contains(&point.y)
+                }) && first.x <= second.x
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AutomationPointContract {
     pub time: f64,
     pub value: f32,
     #[serde(default)]
-    pub curve: f32,
+    pub curve: Curve,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -356,8 +419,7 @@ impl AutomationPointContract {
             || self.time < 0.0
             || self.time.fract() != 0.0
             || !self.value.is_finite()
-            || !self.curve.is_finite()
-            || !(-1.0..=1.0).contains(&self.curve)
+            || !self.curve.is_valid()
         {
             bail!("invalid automation point");
         }

@@ -9,6 +9,7 @@
 //! live engine; the engine is reached only through the `samples_to_beats`
 //! closure passed to [`parse_arrange_tracks`], which keeps the parsers testable.
 
+use hirari_core_bridge::project_contracts::Curve;
 use serde::Deserialize;
 
 /// One ruler measure line. `number` is the 1-based measure index.
@@ -432,7 +433,8 @@ struct TrackLayout {
 struct AutomationLayoutPoint {
     time: f64,
     value: f32,
-    curve: f32,
+    #[serde(default)]
+    curve: Curve,
 }
 
 /// Mirrors the automation conversion: integer sample times become
@@ -450,7 +452,7 @@ fn parse_automation(
                 || point.time < 0.0
                 || point.time.fract() != 0.0
                 || !point.value.is_finite()
-                || !point.curve.is_finite()
+                || !point.curve.is_valid()
             {
                 return None;
             }

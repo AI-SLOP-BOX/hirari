@@ -145,7 +145,7 @@ let mut media_path_by_source = HashMap::<String, String>::new();
                     let automation = AutomationPointContract {
                         time: time as f64,
                         value,
-                        curve: 0.0,
+                        curve: crate::project_contracts::Curve::Shortcut(0.0),
                     };
                     automation_point_count = automation_point_count.saturating_add(1);
                     if automation_point_count > crate::project::MAX_PROJECT_REGIONS {

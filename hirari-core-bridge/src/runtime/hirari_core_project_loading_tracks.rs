@@ -244,12 +244,11 @@ impl HirariCore {
                 (1u32, &track.pan_automation),
             ] {
                 if !points.is_empty() {
-                    let packed = points
+                    let triples = points
                         .iter()
-                        .flat_map(|point| {
-                            [point.time, f64::from(point.value), f64::from(point.curve)]
-                        })
-                        .collect();
+                        .map(|point| (point.time, f64::from(point.value), point.curve))
+                        .collect::<Vec<_>>();
+                    let packed = crate::automation::curve_eval::pack_lane_triples(&triples);
                     if !engine.set_automation_data(native_id, parameter_id, packed) {
                         return Err(rollback_error(anyhow::anyhow!(
                             "native engine failed to restore automation {} for track {}",
@@ -260,11 +259,12 @@ impl HirariCore {
                 }
             }
             if !track.track_delay_automation.is_empty() {
-                let packed = track
+                let triples = track
                     .track_delay_automation
                     .iter()
-                    .flat_map(|point| [point.time, f64::from(point.value), f64::from(point.curve)])
-                    .collect();
+                    .map(|point| (point.time, f64::from(point.value), point.curve))
+                    .collect::<Vec<_>>();
+                let packed = crate::automation::curve_eval::pack_lane_triples(&triples);
                 if !engine.set_track_delay_automation(native_id, packed) {
                     return Err(rollback_error(anyhow::anyhow!(
                         "native engine failed to restore track delay automation for track {}",

@@ -149,3 +149,54 @@ fn macro_mapping_requires_existing_plugin_and_round_trips() {
     missing.target_instance_id = "track:9:slot:0".into();
     assert!(validate_contracts(&[plugin], &[], &[missing], &[], &[]).is_err());
 }
+
+#[test]
+fn legacy_automation_point_roundtrips_byte_identically() {
+    let legacy = r#"{"time":48000,"value":0.5,"curve":0.5}"#;
+    let point: AutomationPointContract = serde_json::from_str(legacy).unwrap();
+    assert_eq!(point.curve, Curve::Shortcut(0.5));
+    assert_eq!(serde_json::to_string(&point).unwrap(), legacy);
+    // Omitted curve still defaults to the identity shortcut.
+    let minimal = r#"{"time":96000,"value":1.0}"#;
+    let point: AutomationPointContract = serde_json::from_str(minimal).unwrap();
+    assert_eq!(point.curve, Curve::Shortcut(0.0));
+}
+
+#[test]
+fn shape_variants_roundtrip_stably() {
+    let cases = [
+        (r#"{"time":1,"value":0.25,"curve":{"kind":"linear"}}"#, Curve::Shaped(Shape::Linear)),
+        (r#"{"time":1,"value":0.25,"curve":{"kind":"step"}}"#, Curve::Shaped(Shape::Step)),
+        (
+            r#"{"time":1,"value":0.25,"curve":{"kind":"bezier","p":[{"x":0.25,"y":0.1},{"x":0.75,"y":0.9}]}}"#,
+            Curve::Shaped(Shape::Bezier {
+                p: [Point { x: 0.25, y: 0.1 }, Point { x: 0.75, y: 0.9 }],
+            }),
+        ),
+    ];
+    for (json, expected) in cases {
+        let point: AutomationPointContract = serde_json::from_str(json).unwrap();
+        assert_eq!(point.curve, expected);
+        assert_eq!(serde_json::to_string(&point).unwrap(), json);
+    }
+}
+
+#[test]
+fn bezier_validation_rejects_inverted_and_out_of_range_control_x() {
+    let bad_inverted = r#"{"time":1,"value":0.5,"curve":{"kind":"bezier","p":[{"x":0.9,"y":0.1},{"x":0.1,"y":0.9}]}}"#;
+    let point: AutomationPointContract = serde_json::from_str(bad_inverted).unwrap();
+    assert!(point.validate().is_err());
+    let bad_range = r#"{"time":1,"value":0.5,"curve":{"kind":"bezier","p":[{"x":-0.5,"y":0.1},{"x":1.5,"y":0.9}]}}"#;
+    let point: AutomationPointContract = serde_json::from_str(bad_range).unwrap();
+    assert!(point.validate().is_err());
+    let good = r#"{"time":1,"value":0.5,"curve":{"kind":"bezier","p":[{"x":0.25,"y":0.1},{"x":0.75,"y":0.9}]}}"#;
+    let point: AutomationPointContract = serde_json::from_str(good).unwrap();
+    assert!(point.validate().is_ok());
+}
+
+#[test]
+fn shortcut_validation_matches_the_legacy_range() {
+    let too_far = r#"{"time":1,"value":0.5,"curve":1.5}"#;
+    let point: AutomationPointContract = serde_json::from_str(too_far).unwrap();
+    assert!(point.validate().is_err());
+}
