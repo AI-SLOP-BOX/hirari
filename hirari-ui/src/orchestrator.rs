@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn toggle_play_does_not_report_success_when_audio_backend_is_unavailable() {
         let _guard = native_engine_test_guard();
-        let core = Rc::new(HirariCore::new().expect("core must initialize"));
+        let core = Rc::new(HirariCore::new_offline().expect("core must initialize"));
         let orchestrator = CoreOrchestrator::new(core.clone());
         let result = orchestrator.dispatch_result(UIAction::TogglePlay);
         if !core.is_playing() {
@@ -241,7 +241,7 @@ mod tests {
     #[test]
     fn region_edit_round_trips_through_ui_action_undo_and_redo() {
         let _guard = offline_native_engine_test_guard();
-        let core = HirariCore::new().expect("core must initialize");
+        let core = HirariCore::new_offline().expect("core must initialize");
         assert!(core.apply_audio_config(48_000, 1_024));
         core.start_recording_capture(48_000.0, 2, 128, 0)
             .expect("capture must start");
@@ -349,7 +349,7 @@ mod tests {
     #[test]
     fn midi_events_reach_core_through_ui_action_router() {
         let _guard = native_engine_test_guard();
-        let core = HirariCore::new().expect("core must initialize");
+        let core = HirariCore::new_offline().expect("core must initialize");
         let events = r#"[
             {"beat":0.0,"channel":0,"kind":{"ControlChange":{"controller":1,"value":64}}},
             {"beat":0.5,"channel":1,"kind":{"PitchBend":{"value":0.0}}},
@@ -374,7 +374,7 @@ mod tests {
         assert!(orchestrator
             .core()
             .save_project(project_path.to_str().unwrap()));
-        let restored = HirariCore::new().expect("restored core must initialize");
+        let restored = HirariCore::new_offline().expect("restored core must initialize");
         assert!(restored.load_project(project_path.to_str().unwrap()));
         let restored_events: serde_json::Value = serde_json::from_str(&restored.midi_events_json())
             .expect("restored MIDI snapshot must be JSON");
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     fn dispatch_result_reports_core_rejection_instead_of_silent_failure() {
         let _guard = native_engine_test_guard();
-        let core = HirariCore::new().expect("core must initialize");
+        let core = HirariCore::new_offline().expect("core must initialize");
         let orchestrator = CoreOrchestrator::new(Rc::new(core));
         assert_eq!(
             orchestrator.dispatch_result(UIAction::SetRegionGain(0, 0, 0.5)),

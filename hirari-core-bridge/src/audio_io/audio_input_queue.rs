@@ -89,9 +89,9 @@ impl AudioInputBlockQueue {
                 return false;
             }
             ptr::copy_nonoverlapping(
-                input,
-                samples.as_mut_ptr().add(channel * MAX_FRAMES),
-                frame_count as usize,
+                input.cast::<u8>(),
+                samples.as_mut_ptr().add(channel * MAX_FRAMES).cast::<u8>(),
+                frame_count as usize * std::mem::size_of::<f32>(),
             );
         }
         *slot.info.get() = BlockInfo {
@@ -144,9 +144,9 @@ impl AudioInputBlockQueue {
                 return false;
             }
             ptr::copy_nonoverlapping(
-                samples.as_ptr().add(channel * MAX_FRAMES),
-                output,
-                info.frames as usize,
+                samples.as_ptr().add(channel * MAX_FRAMES).cast::<u8>(),
+                output.cast::<u8>(),
+                info.frames as usize * std::mem::size_of::<f32>(),
             );
         }
         self.read_index
