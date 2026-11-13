@@ -149,7 +149,7 @@ impl OwnedEdit {
 
 /// One history side. The history owns it until the entry is evicted, then
 /// `destroy_entry` drops the adopted note tables and region snapshots.
-struct ReplayEntry {
+pub(crate) struct ReplayEntry {
     ops: HirariRegionHostOps,
     host: *mut c_void,
     edits: Vec<OwnedEdit>,
