@@ -579,4 +579,3 @@ impl HirariCore {
 
 #[path = "hirari_core_arrangement_regions_ext.rs"]
 mod regions_ext;
-pub use regions_ext::*;
