@@ -8,7 +8,7 @@ pub struct TempoEvent {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct NativeTempoMapEvent {
+pub(crate) struct NativeTempoMapEvent {
     sample_pos: u64,
     bpm: f64,
     ramp: bool,
@@ -17,7 +17,7 @@ struct NativeTempoMapEvent {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct NativeTimeSignatureEvent {
+pub(crate) struct NativeTimeSignatureEvent {
     sample_pos: u64,
     numerator: u8,
     denominator: u8,
