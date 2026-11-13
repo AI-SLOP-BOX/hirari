@@ -1,3 +1,48 @@
+
+/// Shared strict validation for the builtin dataflow device branch. Used by
+/// the umbrella plugin-instance path and by the `.hirpatch` strict importer.
+pub(crate) fn validate_builtin_dataflow(
+    dataflow: &crate::project_contracts::BuiltinDataflow,
+    context: &str,
+) -> Result<()> {
+    if dataflow.units.len() > 64 || dataflow.links.len() > 512 {
+        bail!("{context} has too many builtin dataflow items");
+    }
+    let mut unit_ids = HashSet::with_capacity(dataflow.units.len());
+    let unit_id_strings: Vec<String> = dataflow.units.iter().map(|unit| unit.id.clone()).collect();
+    for unit in &dataflow.units {
+        if unit.id.trim().is_empty()
+            || unit.id.len() > 256
+            || unit.kind.trim().is_empty()
+            || unit.kind.len() > 256
+            || unit.id.contains('\0')
+            || unit.kind.contains('\0')
+            || !unit_ids.insert(&unit.id)
+            || unit.parameters.len() > 256
+            || unit.parameters.iter().any(|(key, value)| {
+                key.trim().is_empty()
+                    || key.len() > 256
+                    || key.contains('\0')
+                    || !value.is_finite()
+            })
+        {
+            bail!("{context} has an invalid builtin unit");
+        }
+    }
+    for link in &dataflow.links {
+        let Some(from_unit) = link.from.rsplit_once(':').map(|(unit, _)| unit) else {
+            bail!("{context} has a malformed builtin link");
+        };
+        let Some(to_unit) = link.to.rsplit_once(':').map(|(unit, _)| unit) else {
+            bail!("{context} has a malformed builtin link");
+        };
+        if !unit_id_strings.iter().any(|id| id == from_unit) || !unit_id_strings.iter().any(|id| id == to_unit) {
+            bail!("{context} has a builtin link referencing an unknown unit");
+        }
+    }
+    Ok(())
+}
+
 pub fn validate_contracts(
     plugins: &[PluginInstanceContract],
     mappings: &[MidiLearnMappingContract],
@@ -75,56 +120,7 @@ pub fn validate_contracts(
             );
         }
         if let Some(kind) = &plugin.kind {
-            if kind.units.len() > 64 || kind.links.len() > 512 {
-                bail!(
-                    "plugin instance {} has too many builtin dataflow items",
-                    plugin.instance_id
-                );
-            }
-            let mut unit_ids = HashSet::with_capacity(kind.units.len());
-            let unit_id_strings: Vec<String> = kind.units.iter().map(|unit| unit.id.clone()).collect();
-            for unit in &kind.units {
-                if unit.id.trim().is_empty()
-                    || unit.id.len() > 256
-                    || unit.kind.trim().is_empty()
-                    || unit.kind.len() > 256
-                    || unit.id.contains('\0')
-                    || unit.kind.contains('\0')
-                    || !unit_ids.insert(&unit.id)
-                    || unit.parameters.len() > 256
-                    || unit.parameters.iter().any(|(key, value)| {
-                        key.trim().is_empty()
-                            || key.len() > 256
-                            || key.contains('\0')
-                            || !value.is_finite()
-                    })
-                {
-                    bail!(
-                        "plugin instance {} has an invalid builtin unit",
-                        plugin.instance_id
-                    );
-                }
-            }
-            for link in &kind.links {
-                let Some(from_unit) = link.from.rsplit_once(':').map(|(unit, _)| unit) else {
-                    bail!(
-                        "plugin instance {} has a malformed builtin link",
-                        plugin.instance_id
-                    );
-                };
-                let Some(to_unit) = link.to.rsplit_once(':').map(|(unit, _)| unit) else {
-                    bail!(
-                        "plugin instance {} has a malformed builtin link",
-                        plugin.instance_id
-                    );
-                };
-                if !unit_id_strings.iter().any(|id| id == from_unit) || !unit_id_strings.iter().any(|id| id == to_unit) {
-                    bail!(
-                        "plugin instance {} has a builtin link referencing an unknown unit",
-                        plugin.instance_id
-                    );
-                }
-            }
+            validate_builtin_dataflow(kind, &format!("plugin instance {}", plugin.instance_id))?;
         }
         let mut parameter_ids = HashSet::with_capacity(plugin.parameter_ids.len());
         if plugin.parameter_ids.iter().any(|parameter| {

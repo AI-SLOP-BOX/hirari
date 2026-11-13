@@ -65,6 +65,8 @@ pub mod dsp_utils;
 pub mod wav_decoder_compat;
 #[path = "project/hot_swap_state.rs"]
 pub mod hot_swap_state;
+#[path = "project/hirpatch.rs"]
+pub mod hirpatch;
 #[path = "engine/realtime_thread.rs"]
 pub mod realtime_thread;
 include!("cli_render_tests.rs");
