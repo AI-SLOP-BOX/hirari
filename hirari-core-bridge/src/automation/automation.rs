@@ -7,6 +7,9 @@ pub enum AutomationMode {
     AutoPunch,
 }
 
+#[path = "curve_eval.rs"]
+pub(crate) mod curve_eval;
+
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct AutomationPoint {
     pub tick: u64,

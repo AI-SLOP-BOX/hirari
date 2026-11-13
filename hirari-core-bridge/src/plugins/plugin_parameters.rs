@@ -209,9 +209,8 @@ fn value_at_validated(
         None => return Some(left.normalized),
     };
     let amount =
-        ((sample - left.sample) as f64 / (right.sample - left.sample) as f64).clamp(0.0, 1.0);
-    let shaped =
-        (amount + left.curve * amount * (1.0 - amount) * (1.0 - 2.0 * amount)).clamp(0.0, 1.0);
+        ((sample - left.sample) as f64 / (right.sample - left.sample) as f64).clamp(0.0, 1.0) as f32;
+    let shaped = f64::from(crate::automation::curve_eval::shaped_amount(amount, left.curve as f32));
     Some(left.normalized + (right.normalized - left.normalized) * shaped)
 }
 

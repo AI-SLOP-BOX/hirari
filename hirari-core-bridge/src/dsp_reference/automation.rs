@@ -51,9 +51,7 @@ unsafe fn evaluate(points: *const NativeAutomationPoint, count: usize, time: f64
         return a.value;
     }
     let amount = (((time - a.time) / range) as f32).clamp(0.0, 1.0);
-    let curve = a.curve.clamp(-1.0, 1.0);
-    let shaped = (amount + curve * amount * (1.0 - amount) * (1.0 - 2.0 * amount)).clamp(0.0, 1.0);
-    a.value + (b.value - a.value) * shaped
+    crate::automation::curve_eval::interpolate_segment(a.value, b.value, amount, a.curve)
 }
 
 #[no_mangle]

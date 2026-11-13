@@ -552,9 +552,9 @@ pub(in crate::dawproject) fn plugin_automation_points_xml(
                     continue;
                 }
                 let amount = (sample - point.sample) as f64 / (next.sample - point.sample) as f64;
-                let shaped = (amount
-                    + point.curve * amount * (1.0 - amount) * (1.0 - 2.0 * amount))
-                    .clamp(0.0, 1.0);
+                let shaped = f64::from(crate::automation::curve_eval::shaped_amount(
+                    amount as f32, point.curve as f32,
+                ));
                 flattened.push((
                     sample,
                     point.normalized + (next.normalized - point.normalized) * shaped,

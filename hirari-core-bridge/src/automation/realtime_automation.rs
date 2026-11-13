@@ -65,9 +65,7 @@ fn evaluate_points(points: &[NativeAutomationPoint], time: f64, hint: &mut usize
         return left.value;
     }
     let amount = (((time - left.time) / range) as f32).clamp(0.0, 1.0);
-    let curve = left.curve.clamp(-1.0, 1.0);
-    let shaped = (amount + curve * amount * (1.0 - amount) * (1.0 - 2.0 * amount)).clamp(0.0, 1.0);
-    left.value + (right.value - left.value) * shaped
+    crate::automation::curve_eval::interpolate_segment(left.value, right.value, amount, left.curve)
 }
 
 /// Evaluates one sorted automation lane while retaining its segment cursor.
