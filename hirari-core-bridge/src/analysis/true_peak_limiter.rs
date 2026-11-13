@@ -19,8 +19,6 @@ struct TruePeakLimiterState {
     engine: UnsafeCell<TruePeakLimiterEngine>,
     threshold_db: AtomicU32,
     ceiling_db: AtomicU32,
-    latency: AtomicU32,
-    tail: AtomicU32,
 }
 
 // The audio callback exclusively mutates the engine. UI parameter access is
@@ -28,16 +26,12 @@ struct TruePeakLimiterState {
 unsafe impl Sync for TruePeakLimiterState {}
 
 impl TruePeakLimiterState {
+    #[cfg(test)]
     fn new(sample_rate: f64) -> Self {
-        let engine = TruePeakLimiterEngine::new(sample_rate);
-        let latency = engine.delay_samples;
-        let tail = engine.get_tail_samples();
         Self {
-            engine: UnsafeCell::new(engine),
+            engine: UnsafeCell::new(TruePeakLimiterEngine::new(sample_rate)),
             threshold_db: AtomicU32::new((-0.1f32).to_bits()),
             ceiling_db: AtomicU32::new((-0.1f32).to_bits()),
-            latency: AtomicU32::new(latency),
-            tail: AtomicU32::new(tail),
         }
     }
 
@@ -63,13 +57,11 @@ impl TruePeakLimiterState {
         ((db + 60.0) / 60.0).clamp(0.0, 1.0)
     }
 
+    #[cfg(test)]
     fn prepare(&self, sample_rate: f64) {
         // SAFETY: the host serializes prepare against process and reset.
         let engine = unsafe { &mut *self.engine.get() };
         engine.prepare_to_play(sample_rate);
-        self.latency.store(engine.delay_samples, Ordering::Relaxed);
-        self.tail
-            .store(engine.get_tail_samples(), Ordering::Relaxed);
     }
 
         fn process(&self, left: &mut [f32], right: &mut [f32]) {
@@ -396,9 +388,12 @@ mod tests {
         assert_eq!(ffi_right, reference_right);
 
         state.prepare(96_000.0);
-        assert_eq!(state.latency.load(Ordering::Relaxed), 144);
         assert_eq!(
-            state.tail.load(Ordering::Relaxed),
+            unsafe { &*state.engine.get() }.delay_samples,
+            144
+        );
+        assert_eq!(
+            unsafe { &*state.engine.get() }.get_tail_samples(),
             (144.0 + 0.35 * 96_000.0) as u32
         );
     }

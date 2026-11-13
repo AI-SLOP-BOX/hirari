@@ -27,7 +27,7 @@ use crate::tempo::hirari_tempo_map_set_current_bpm;
 /// Holds the session lock for one configuration transaction. Two UI or CLI
 /// callers must never interleave a device reconfigure with a second prepare, or
 /// the published generation describes neither request.
-struct ConfigLock<'a>(parking_lot::MutexGuard<'a, ()>);
+struct ConfigLock<'a>(#[allow(dead_code)] parking_lot::MutexGuard<'a, ()>);
 
 impl<'a> ConfigLock<'a> {
     fn new(engine: &'a crate::AudioEngine) -> ConfigLock<'a> {

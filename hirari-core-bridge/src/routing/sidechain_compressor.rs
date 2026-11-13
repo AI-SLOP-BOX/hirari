@@ -234,24 +234,6 @@ impl SidechainCompressorEngine {
     }
 }
 
-use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicU32, AtomicU64};
-
-pub struct NativeSidechainCompressor {
-    runtime: UnsafeCell<CompressorRuntime>,
-    sample_rate_bits: AtomicU64,
-    threshold_bits: AtomicU32,
-    ratio_bits: AtomicU32,
-    attack_bits: AtomicU32,
-    release_bits: AtomicU32,
-}
-
-// The audio thread exclusively mutates runtime state. Control updates use only
-// the disjoint atomic parameter slots.
-unsafe impl Sync for NativeSidechainCompressor {}
-
-impl NativeSidechainCompressor {
-                                }
 
 #[cfg(test)]
 mod tests {

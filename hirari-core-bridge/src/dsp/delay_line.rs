@@ -1,67 +1,7 @@
-use std::ffi::c_void;
-
 pub struct DelayLineEngine {
     pub buffer: Vec<f32>,
     pub write_idx: usize,
     pub mask: usize,
-}
-
-/// Integer-sample circular delay preserving the native delay-line contract.
-struct IntegerDelayLine {
-    buffer: Vec<f32>,
-    write_index: usize,
-    mask: usize,
-}
-
-impl IntegerDelayLine {
-    fn new(max_delay_samples: u32) -> Option<Self> {
-        let requested = (max_delay_samples as usize).max(1);
-        let size = requested.checked_next_power_of_two()?;
-        // Bound FFI allocation to 64 MiB per line. Current engine users need
-        // at most 65,536 samples; invalid oversized requests fail closed.
-        if size > (1 << 24) {
-            return None;
-        }
-        Some(Self {
-            buffer: vec![0.0; size],
-            write_index: 0,
-            mask: size - 1,
-        })
-    }
-
-    fn push(&mut self, sample: f32) {
-        self.buffer[self.write_index] = if sample.is_finite() { sample } else { 0.0 };
-        self.write_index = (self.write_index + 1) & self.mask;
-    }
-
-    fn read(&self, delay_samples: u32) -> f32 {
-        let delay = (delay_samples as usize).min(self.mask);
-        let index = self.write_index.wrapping_sub(1 + delay) & self.mask;
-        let output = self.buffer[index];
-        if output.is_finite() {
-            output
-        } else {
-            0.0
-        }
-    }
-
-    fn process(&mut self, sample: f32, delay_samples: u32) -> f32 {
-        self.push(sample);
-        self.read(delay_samples)
-    }
-
-    fn reset(&mut self) {
-        self.buffer.fill(0.0);
-        self.write_index = 0;
-    }
-}
-
-#[no_mangle]
-pub extern "C" fn hirari_integer_delay_create(max_delay_samples: u32) -> *mut c_void {
-    let Some(state) = IntegerDelayLine::new(max_delay_samples) else {
-        return std::ptr::null_mut();
-    };
-    Box::into_raw(Box::new(state)).cast()
 }
 
 impl DelayLineEngine {
@@ -153,39 +93,5 @@ mod tests {
         let output = delay.process(f32::NAN, 2.0);
         assert!(output.is_finite());
         assert!(!delay.audit_delay_line());
-    }
-}
-
-#[cfg(test)]
-mod integer_delay_tests {
-    use super::IntegerDelayLine;
-
-    #[test]
-    fn integer_delay_matches_push_read_and_process_contracts() {
-        let mut delay = IntegerDelayLine::new(4).unwrap();
-        delay.push(1.0);
-        assert_eq!(delay.read(0), 1.0);
-        delay.push(2.0);
-        assert_eq!(delay.read(1), 1.0);
-        assert_eq!(delay.read(0), 2.0);
-        assert_eq!(delay.process(3.0, 2), 1.0);
-        assert_eq!(delay.process(4.0, 0), 4.0);
-    }
-
-    #[test]
-    fn integer_delay_sanitizes_samples_clamps_delay_and_resets() {
-        let mut delay = IntegerDelayLine::new(3).unwrap();
-        assert_eq!(delay.process(f32::NAN, 0), 0.0);
-        delay.process(1.0, 0);
-        delay.process(2.0, 0);
-        delay.process(3.0, 0);
-        assert_eq!(delay.process(4.0, u32::MAX), 1.0);
-        delay.reset();
-        assert_eq!(delay.process(5.0, 3), 0.0);
-    }
-
-    #[test]
-    fn integer_delay_rejects_unreasonable_storage_requests() {
-        assert!(IntegerDelayLine::new(u32::MAX).is_none());
     }
 }

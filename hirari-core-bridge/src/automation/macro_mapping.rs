@@ -1,60 +1,19 @@
 //! Rust-owned mappings from macro controls to plug-in parameter ranges.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicPtr, AtomicU32, AtomicUsize, Ordering};
-use std::sync::Mutex;
-
-use crate::parameter_smoother::SmootherOrchestrator;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 const MAX_MACROS: usize = 128;
 
-#[derive(Clone, Copy)]
-struct Mapping {
-    target_id: u32,
-    minimum: f32,
-    maximum: f32,
-    invert: bool,
-}
-
-struct SnapshotStore {
-    active: Box<Vec<Mapping>>,
-    retired: Vec<Box<Vec<Mapping>>>,
-}
-
-struct MacroSlot {
-    current: AtomicPtr<Vec<Mapping>>,
-    readers: AtomicUsize,
-    snapshots: Mutex<SnapshotStore>,
-}
-
-impl MacroSlot {
-    fn new() -> Self {
-        let mut initial = Box::new(Vec::new());
-        let current = initial.as_mut() as *mut Vec<Mapping>;
-        Self {
-            current: AtomicPtr::new(current),
-            readers: AtomicUsize::new(0),
-            snapshots: Mutex::new(SnapshotStore {
-                active: initial,
-                retired: Vec::new(),
-            }),
-        }
-    }
-
-                }
-
+/// The whole macro mapping state: target values per macro slot.
 struct MacroMappingState {
-    slots: [MacroSlot; MAX_MACROS],
     target_values: [AtomicU32; MAX_MACROS],
-    smoothers: [SmootherOrchestrator; MAX_MACROS],
 }
 
 impl MacroMappingState {
     fn new() -> Self {
         Self {
-            slots: std::array::from_fn(|_| MacroSlot::new()),
             target_values: std::array::from_fn(|_| AtomicU32::new(0.0_f32.to_bits())),
-            smoothers: std::array::from_fn(|_| SmootherOrchestrator::new(0.0)),
         }
     }
 
@@ -124,4 +83,3 @@ pub unsafe extern "C" fn hirari_macro_control_set_midi_target(
         state.set_target(macro_index as usize, value);
     }
 }
-

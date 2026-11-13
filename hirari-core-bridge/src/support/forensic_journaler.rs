@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 use std::ffi::c_void;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::mem::MaybeUninit;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};

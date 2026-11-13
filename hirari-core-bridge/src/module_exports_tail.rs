@@ -79,5 +79,6 @@ pub mod region_processing_ops;
 pub mod engine_native;
 #[path = "dsp/signalsmith_stretch.rs"]
 pub mod signalsmith_stretch;
+#[cfg(test)]
 #[path = "dsp/dsp_fixtures.rs"]
 pub(crate) mod dsp_fixtures;

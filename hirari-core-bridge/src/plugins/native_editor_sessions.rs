@@ -23,6 +23,7 @@ impl SessionRegistry {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn adopt(&self, track: u32, plugin: u32, session: u64) {
         if session == 0 {
             return;

@@ -10,18 +10,6 @@ const IDLE: u8 = 0;
 const WAITING_FOR_QUIESCE: u8 = 1;
 const EXECUTION: u8 = 2;
 const ABORTING: u8 = 3;
-type NativeCallback = unsafe extern "C" fn(*mut c_void);
-type LogCallback = unsafe extern "C" fn(*mut c_void, u32, u32, *const u8, usize);
-type CpuLoadCallback = unsafe extern "C" fn(*mut c_void) -> f32;
-
-struct PendingFallback {
-    target: usize,
-    context: *mut c_void,
-    invoke: NativeCallback,
-    destroy: NativeCallback,
-}
-
-unsafe impl Send for PendingFallback {}
 
 struct HotSwapState {
     phase: AtomicU8,
@@ -29,35 +17,23 @@ struct HotSwapState {
     acknowledged: AtomicBool,
     quiesce_blocks: AtomicU32,
     deadline: Mutex<Option<Instant>>,
-    pending: Mutex<Option<PendingFallback>>,
     daemon_running: AtomicBool,
     daemon: Mutex<Option<JoinHandle<()>>>,
-    callback_context: usize,
-    log: Option<LogCallback>,
-    cpu_load: Option<CpuLoadCallback>,
 }
 
 unsafe impl Send for HotSwapState {}
 unsafe impl Sync for HotSwapState {}
 
 impl HotSwapState {
-    fn new(
-        callback_context: *mut c_void,
-        log: Option<LogCallback>,
-        cpu_load: Option<CpuLoadCallback>,
-    ) -> Self {
+    fn new() -> Self {
         Self {
             phase: AtomicU8::new(IDLE),
             quiesce_requested: AtomicBool::new(false),
             acknowledged: AtomicBool::new(false),
             quiesce_blocks: AtomicU32::new(0),
             deadline: Mutex::new(None),
-            pending: Mutex::new(None),
             daemon_running: AtomicBool::new(false),
             daemon: Mutex::new(None),
-            callback_context: callback_context as usize,
-            log,
-            cpu_load,
         }
     }
 }
@@ -108,7 +84,7 @@ pub unsafe extern "C" fn hirari_hot_swap_state_quiesce_blocks(state: *const c_vo
 static DEFAULT_STATE: OnceLock<Box<HotSwapState>> = OnceLock::new();
 
 fn default_state() -> &'static HotSwapState {
-    DEFAULT_STATE.get_or_init(|| Box::new(HotSwapState::new(std::ptr::null_mut(), None, None)))
+    DEFAULT_STATE.get_or_init(|| Box::new(HotSwapState::new()))
 }
 
 /// Quiesce state shared by the engine when no hot-swap host is installed.

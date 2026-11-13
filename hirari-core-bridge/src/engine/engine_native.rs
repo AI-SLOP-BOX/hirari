@@ -414,6 +414,9 @@ fn command_code(cmd: crate::ffi::HirariCommand) -> u32 {
         crate::ffi::HirariCommand::SetAscendedMode => 11,
         crate::ffi::HirariCommand::SetAutomationRecordMode => 12,
         // cxx shared enums are open to future codes; admission rejects them.
+        // cxx shared enums admit codes the Rust side does not enumerate;
+        // runtime admission rejects them, but the match must still be exhaustive.
+        #[allow(unreachable_patterns)]
         _ => u32::MAX,
     }
 }

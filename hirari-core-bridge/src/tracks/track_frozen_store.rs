@@ -270,7 +270,7 @@ mod tests {
     }
 
     fn store() -> *mut c_void {
-        { hirari_track_frozen_store_create() }
+        hirari_track_frozen_store_create()
     }
 
     #[test]

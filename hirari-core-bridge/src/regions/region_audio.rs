@@ -15,6 +15,7 @@ use crate::region_edit_host::{host_ops, HirariRegionHostOps};
 use crate::waveform_cache::{analysis_waveform_peak_envelope, resample_waveform_peak_envelope};
 
 /// Matches the native `get_region_audio_interleaved` guard.
+#[cfg(test)]
 const MAX_INTERLEAVED_FRAMES: u32 = 16 * 1024 * 1024;
 /// Matches the native ARA2 range-read guard.
 const MAX_RANGE_SAMPLES: u32 = 1 << 20;
@@ -154,6 +155,7 @@ fn channel_slices(pointers: &[*const f32], samples: u64) -> Vec<&[f32]> {
         .collect()
 }
 
+#[cfg(test)]
 fn interleaved_with(
     ops: &HirariRegionHostOps,
     host: *mut c_void,

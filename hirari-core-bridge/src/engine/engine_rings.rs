@@ -114,7 +114,9 @@ macro_rules! spsc_ring {
 
             // Only valid where producer and consumer are both stopped (project
             // load/new-project): stale commands from the previous document must
-            // not reach the first block of the next one.
+            // not reach the first block of the next one. The event-ring expansion
+            // has no consumer today; keep it for symmetry and FFI surface.
+            #[allow(dead_code)]
             fn clear(&self) {
                 let write = self.write.load(Ordering::Acquire);
                 self.read.store(write, Ordering::Release);

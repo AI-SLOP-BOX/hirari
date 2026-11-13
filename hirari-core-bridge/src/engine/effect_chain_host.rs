@@ -542,6 +542,7 @@ pub unsafe extern "C" fn hirari_effect_chain_move(
 /// Drops every entry, keeping the nodes alive until the audio readers drain,
 /// and empties the sandbox identity list with them. The engine rebuilds a
 /// chain by re-adding nodes, so this is only reachable from the chain's tests.
+#[cfg(test)]
 unsafe fn clear(state: *mut c_void) {
     let Some(host) = (unsafe { host(state) }) else {
         return;

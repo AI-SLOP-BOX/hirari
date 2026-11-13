@@ -154,6 +154,7 @@ impl SignalsmithFft {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn size(&self) -> usize {
         self.size
     }
@@ -185,6 +186,7 @@ impl SignalsmithFft {
 /// Reusable analysis/synthesis frame. The Kaiser window and overlap
 /// normalization mirror Signalsmith Linear's STFT setup. `analysis` keeps the
 /// positive-frequency bins; `synthesis` rebuilds the Hermitian frame.
+#[cfg(test)]
 pub(crate) struct SignalsmithStftFrame {
     fft: SignalsmithFft,
     block_size: usize,
@@ -196,6 +198,7 @@ pub(crate) struct SignalsmithStftFrame {
     spectrum: Vec<Complex32>,
 }
 
+#[cfg(test)]
 impl SignalsmithStftFrame {
     pub(crate) fn new(block_size: usize, interval: usize) -> Option<Self> {
         if block_size < 2 || interval == 0 || interval > block_size {
@@ -287,6 +290,7 @@ impl SignalsmithStftFrame {
     }
 }
 
+#[cfg(test)]
 fn signalsmith_real_fft_size(block_size: usize) -> Option<usize> {
     let target = block_size.checked_add(1)?.checked_div(2)?;
     let mut power_of_two = 1usize;

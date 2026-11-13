@@ -86,6 +86,7 @@ impl RecorderSlot {
             .store(ticket.wrapping_mul(2).wrapping_add(2), Ordering::Release);
     }
 
+    #[cfg(test)]
     fn read(&self, ticket: u64) -> Option<NativeAutomationEvent> {
         let expected = ticket.wrapping_mul(2).wrapping_add(2);
         if self.version.load(Ordering::Acquire) != expected {
@@ -153,6 +154,7 @@ impl AutomationRecorderState {
             .fetch_max(min_visible, Ordering::Release);
     }
 
+    #[cfg(test)]
     fn snapshot(&self) -> Vec<NativeAutomationEvent> {
         let end = self.head.load(Ordering::Acquire);
         let start = self
@@ -164,6 +166,7 @@ impl AutomationRecorderState {
             .collect()
     }
 
+    #[cfg(test)]
     fn flush(&self) {
         self.oldest_visible
             .store(self.head.load(Ordering::Acquire), Ordering::Release);

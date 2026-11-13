@@ -21,6 +21,7 @@ impl SandboxSlotStore {
         }
     }
 
+    #[cfg(test)]
     fn position(&self, plugin_index: u32) -> Option<usize> {
         self.indices.iter().position(|&value| value == plugin_index)
     }

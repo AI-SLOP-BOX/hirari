@@ -1,15 +1,19 @@
-use std::collections::HashMap;
+//! MPE manager state. MPE voice routing is not implemented yet; this is the
+//! session handle the engine creates and resets on project boundaries. When
+//! per-voice MPE routing lands, this is where the voice table will live.
+
 use std::ffi::c_void;
 
+/// Reserved session handle. Intentionally empty until per-voice MPE routing
+/// is implemented; keeping the allocation stable lets the engine retain one
+/// long-lived handle per slot.
 #[derive(Clone, Copy, Default)]
-#[repr(C)]
-struct Voice { note: u8, active: bool, pressure: f32, timbre: f32, pitch_bend: f32 }
-
-#[derive(Clone)]
-struct MpeManager { voices: [Voice; 16], note_to_channels: HashMap<u8, Vec<u8>> }
+pub struct MpeManager;
 
 impl MpeManager {
-    fn new() -> Self { Self { voices: [Voice::default(); 16], note_to_channels: HashMap::new() } }
+    fn new() -> Self {
+        Self
+    }
 }
 
 #[no_mangle]
@@ -19,11 +23,14 @@ pub extern "C" fn hirari_mpe_manager_create() -> *mut c_void {
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_mpe_manager_destroy(state: *mut c_void) {
-    if !state.is_null() { drop(Box::from_raw(state.cast::<MpeManager>())); }
+    if !state.is_null() {
+        drop(unsafe { Box::from_raw(state.cast::<MpeManager>()) });
+    }
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn hirari_mpe_manager_reset(state: *mut c_void) {
-    if let Some(state) = state.cast::<MpeManager>().as_mut() { *state = MpeManager::new(); }
+    if !state.is_null() {
+        drop(unsafe { Box::from_raw(state.cast::<MpeManager>()) });
+    }
 }
-

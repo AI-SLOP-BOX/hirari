@@ -1,8 +1,7 @@
-use super::*;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::harmonic::*;
+    use crate::harmonic::ScaleType;
 
     #[test]
     fn chord_track_following_moves_notes_to_nearest_chord_tones() {
@@ -33,7 +32,7 @@ mod tests {
     fn scale_assistant_quantizes_parts_for_extended_modes() {
         let mut harmony = HarmonicOrchestrator::new();
         harmony.set_root(60);
-        harmony.set_scale(super::ScaleType::Pentatonic);
+        harmony.set_scale(ScaleType::Pentatonic);
         let mut notes = [60, 61, 62, 63, 64, 65, 67];
         assert_eq!(harmony.quantize_notes(&mut notes), 3);
         assert!(notes

@@ -5,7 +5,7 @@
     };
 
     fn chain() -> *mut c_void {
-        { hirari_effect_chain_create() }
+        hirari_effect_chain_create()
     }
 
     #[test]
@@ -225,7 +225,7 @@
             std::thread::yield_now();
         }
         stop.store(1, Ordering::Release);
-        hog.join();
+        let _ = hog.join();
         assert!(
             worst < Duration::from_millis(5),
             "diagnostic reader blocked on the control thread: {worst:?}"

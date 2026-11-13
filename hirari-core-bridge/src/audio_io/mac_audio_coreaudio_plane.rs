@@ -2,6 +2,9 @@
 use super::*;
 
 pub(super) struct PlanarBufferList {
+    // ABI prefix of `AudioBufferList` (mNumberBuffers); read by the AU host
+    // under the cast, never on the Rust side. Layout is load-bearing.
+    #[allow(dead_code)]
     number_buffers: u32,
     buffers: [sys::AudioBuffer; MAX_CHANNELS],
 }

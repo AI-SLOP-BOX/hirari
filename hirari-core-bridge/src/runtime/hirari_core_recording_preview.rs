@@ -136,28 +136,6 @@ impl HirariCore {
         crate::audio_driver_host::discard_pending_input(self.driver_handle());
     }
 
-    pub(crate) fn append_recording_preview_block(
-        &self,
-        input: &[f32],
-        block_channels: u16,
-    ) -> anyhow::Result<()> {
-        let mut slot = self
-            .recording_session
-            .lock()
-            .map_err(|_| anyhow::anyhow!("recording session lock poisoned"))?;
-        let session = slot
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("recording session is not active"))?;
-        if block_channels == 0 || session.channel_count() != block_channels {
-            return Err(anyhow::anyhow!(
-                "audio input channel layout changed during recording"
-            ));
-        }
-        session
-            .append_interleaved(input)
-            .map_err(|error| anyhow::anyhow!("recording input rejected: {error:?}"))
-    }
-
     /// Stops the preview session and returns the immutable captured region.
     pub fn stop_recording_preview(
         &self,

@@ -41,7 +41,7 @@
 
     impl Table {
         fn new() -> Self {
-            Table({ hirari_engine_track_table_create() })
+            Table(hirari_engine_track_table_create())
         }
         fn get(&self) -> *mut c_void {
             self.0
