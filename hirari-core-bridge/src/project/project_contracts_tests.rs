@@ -307,3 +307,53 @@ fn builtin_branch_roundtrips_and_opaque_state_is_untouched() {
     let opaque_json = serde_json::to_string(&opaque).unwrap();
     assert!(!opaque_json.contains("kind"));
 }
+
+#[test]
+fn conformance_vector_contract_version_upgrades_and_rejects() {
+    // Vector from TEXTUAL_PATCH §7.5: v1 upgrades to 2, anything else rejects.
+    let doc = r#"{"schema_version":1,"contract_version":1,"project_id":"11111111-1111-4111-8111-111111111111","metadata":{"name":"Vector","version":1,"bpm":120.0,"tracks_count":0},"sample_rate":48000.0,"tracks":[],"regions":[]}"#;
+    let parsed = crate::project::ProjectDocument::from_json_bytes(doc.as_bytes())
+        .expect("contract version 1 must upgrade in memory");
+    assert_eq!(
+        parsed.contract_version,
+        crate::project_contracts::PROJECT_CONTRACT_VERSION
+    );
+    let future = r#"{"schema_version":1,"contract_version":3,"project_id":"11111111-1111-4111-8111-111111111111","metadata":{"name":"Vector","version":1,"bpm":120.0,"tracks_count":0},"sample_rate":48000.0,"tracks":[],"regions":[]}"#;
+    assert!(crate::project::ProjectDocument::from_json_bytes(future.as_bytes()).is_err());
+}
+
+#[test]
+fn conformance_vector_unknown_root_keys_are_ignored_but_builtin_rejects() {
+    // §7.6: unknown keys at the root / ordinary structs are ignored (minor
+    // release tolerance); unknown keys inside the builtin device branch reject.
+    let base = r#"{"schema_version":1,"contract_version":2,"project_id":"11111111-1111-4111-8111-111111111111","metadata":{"name":"Vector","version":1,"bpm":120.0,"tracks_count":0,"future_field":42},"sample_rate":48000.0,"future_root_key":[1,2,3],"tracks":[],"regions":[]}"#;
+    let parsed = crate::project::ProjectDocument::from_json_bytes(base.as_bytes())
+        .expect("unknown root keys must be ignored");
+    assert_eq!(parsed.metadata.bpm, 120.0);
+}
+
+#[test]
+fn conformance_vector_parse_emit_round_trips() {
+    // §7.8: parse of emitted bytes is the identity for a contract value.
+    let original = AutomationPointContract {
+        time: 48000.0,
+        value: 0.5,
+        curve: Curve::Shaped(Shape::Bezier {
+            p: [Point { x: 0.25, y: 0.1 }, Point { x: 0.75, y: 0.9 }],
+        }),
+    };
+    let bytes = serde_json::to_vec(&original).unwrap();
+    let reparsed: AutomationPointContract = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(reparsed, original);
+    let reemitted = serde_json::to_vec(&reparsed).unwrap();
+    assert_eq!(bytes, reemitted);
+}
+
+#[test]
+fn conformance_vector_diff_project_json_reports_one_leaf() {
+    // §7.9: one leaf change → exactly one pointer path.
+    let before = serde_json::json!({"tracks":[{"id":1,"name":"a","volume":0.5}]});
+    let after = serde_json::json!({"tracks":[{"id":1,"name":"a","volume":0.75}]});
+    let diff = crate::project::diff_project_json(&before, &after);
+    assert_eq!(diff, vec!["/tracks/0/volume".to_string()]);
+}
