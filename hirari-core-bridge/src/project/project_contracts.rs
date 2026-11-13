@@ -18,6 +18,38 @@ pub enum PluginFormat {
     BuiltIn,
 }
 
+/// One declarative unit inside a built-in device. This is the branch of the
+/// project document an AI editor may touch; everything else in the document
+/// (opaque third-party plugins especially) is off limits by contract.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltinUnit {
+    pub id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub parameters: std::collections::BTreeMap<String, f64>,
+}
+
+/// One edge between two unit ports. Ports are named `"{unit_id}:{port}"` in
+/// the unit's namespace; the edge references exactly one outgoing port.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltinLink {
+    pub from: String,
+    pub to: String,
+}
+
+/// The declarative graph of a built-in device. External plug-ins never carry
+/// this branch; their state stays an opaque, checksummed base64 blob.
+/// `deny_unknown_fields` makes the AI edit boundary strict: unknown keys in
+/// this branch fail at load instead of being silently dropped.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltinDataflow {
+    pub units: Vec<BuiltinUnit>,
+    pub links: Vec<BuiltinLink>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PluginInstanceContract {
     pub instance_id: String,
@@ -70,6 +102,10 @@ pub struct PluginInstanceContract {
     pub state_schema_version: u32,
     #[serde(default)]
     pub state_generation: u64,
+    /// Declarative units and links for built-in devices. Absent for
+    /// third-party plug-ins; external plug-in state is opaque and untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<BuiltinDataflow>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

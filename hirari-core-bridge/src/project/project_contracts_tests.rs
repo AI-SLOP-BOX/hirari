@@ -28,6 +28,7 @@ fn contracts_reject_duplicate_plugin_ids_and_bad_midi_ranges() {
         architecture: String::new(),
         state_schema_version: 1,
         state_generation: 0,
+        kind: None,
     };
     assert!(validate_contracts(&[plugin.clone(), plugin], &[], &[], &[], &[]).is_err());
     let mapping = MidiLearnMappingContract {
@@ -74,6 +75,7 @@ fn plugin_bus_layout_supports_components_and_sidechain() {
         architecture: "arm64".into(),
         state_schema_version: 1,
         state_generation: 1,
+        kind: None,
     };
     assert!(validate_contracts(&[plugin.clone()], &[], &[], &[], &[]).is_ok());
 
@@ -128,6 +130,7 @@ fn macro_mapping_requires_existing_plugin_and_round_trips() {
         architecture: String::new(),
         state_schema_version: 1,
         state_generation: 0,
+        kind: None,
     };
     let mapping = MacroMappingContract {
         mapping_id: "macro-cutoff".into(),
@@ -200,4 +203,107 @@ fn shortcut_validation_matches_the_legacy_range() {
     let too_far = r#"{"time":1,"value":0.5,"curve":1.5}"#;
     let point: AutomationPointContract = serde_json::from_str(too_far).unwrap();
     assert!(point.validate().is_err());
+}
+
+#[test]
+fn builtin_branch_rejects_unknown_keys_at_load() {
+    // The AI edit boundary: anything not declared in the builtin schema must
+    // fail at load instead of being silently dropped or honoured.
+    let with_junk = r#"{"instance_id":"p","format":"BuiltIn","bundle_path":"builtin://1","plugin_id":"gain","state_blob":[],"gui_state":[],"bypassed":false,"offline":false,"quarantined":false,"binary_hash":"","capability":"","plugin_version":"","architecture":"","state_schema_version":1,"state_generation":0,"kind":{"units":[{"id":"u","kind":"builtin/gain","bogus":1}],"links":[]}}"#;
+    assert!(serde_json::from_str::<PluginInstanceContract>(with_junk).is_err());
+    let bad_link = r#"{"units":[{"id":"u","kind":"builtin/gain"}],"links":[{"from":"ghost:out","to":"u:in"}]}"#;
+    let plugin = PluginInstanceContract {
+        instance_id: "p".into(),
+        track_id: 0,
+        slot_index: 0,
+        format: PluginFormat::BuiltIn,
+        bundle_path: "builtin://1".into(),
+        plugin_id: "gain".into(),
+        bus_layout: vec![],
+        component_ids: vec![],
+        input_channels: 2,
+        output_channels: 2,
+        sidechain_channels: 0,
+        parameter_ids: vec![],
+        parameter_values: vec![],
+        latency_samples: 0,
+        state_blob: vec![1, 2, 3, 4],
+        gui_state: vec![9, 9],
+        bypassed: false,
+        offline: false,
+        quarantined: false,
+        binary_hash: String::new(),
+        capability: String::new(),
+        plugin_version: String::new(),
+        architecture: String::new(),
+        state_schema_version: 1,
+        state_generation: 0,
+        kind: Some(BuiltinDataflow {
+            units: vec![BuiltinUnit {
+                id: "u".into(),
+                kind: "builtin/gain".into(),
+                parameters: Default::default(),
+            }],
+            links: vec![BuiltinLink {
+                from: "ghost:out".into(),
+                to: "u:in".into(),
+            }],
+        }),
+    };
+    assert!(validate_contracts(&[plugin], &[], &[], &[], &[]).is_err());
+    let _ = bad_link;
+}
+
+#[test]
+fn builtin_branch_roundtrips_and_opaque_state_is_untouched() {
+    let original = PluginInstanceContract {
+        instance_id: "track:1:slot:0".into(),
+        track_id: 1,
+        slot_index: 0,
+        format: PluginFormat::BuiltIn,
+        bundle_path: "builtin://3".into(),
+        plugin_id: "builtin:gain".into(),
+        bus_layout: vec![],
+        component_ids: vec![],
+        input_channels: 2,
+        output_channels: 2,
+        sidechain_channels: 0,
+        parameter_ids: vec![],
+        parameter_values: vec![],
+        latency_samples: 0,
+        state_blob: vec![0xde, 0xad, 0xbe, 0xef],
+        gui_state: vec![0xca, 0xfe],
+        bypassed: false,
+        offline: false,
+        quarantined: false,
+        binary_hash: String::new(),
+        capability: "builtin".into(),
+        plugin_version: "1.0.0".into(),
+        architecture: "arm64".into(),
+        state_schema_version: 1,
+        state_generation: 7,
+        kind: Some(BuiltinDataflow {
+            units: vec![BuiltinUnit {
+                id: "gain-1".into(),
+                kind: "builtin/gain".into(),
+                parameters: [("level".to_string(), 0.5)].into_iter().collect(),
+            }],
+            links: vec![],
+        }),
+    };
+    let bytes = serde_json::to_vec(&original).unwrap();
+    let reloaded: PluginInstanceContract = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(reloaded, original);
+    assert_eq!(reloaded.state_blob, original.state_blob);
+    assert_eq!(reloaded.gui_state, original.gui_state);
+    assert_eq!(reloaded.binary_hash, original.binary_hash);
+    // A built-in branch serializes as tagged kind; external plugins omit it.
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(text.contains("\"kind\":{"));
+    let opaque = PluginInstanceContract {
+        kind: None,
+        ..original.clone()
+    };
+    let opaque_json = serde_json::to_string(&opaque).unwrap();
+    assert!(!opaque_json.contains("kind"));
 }

@@ -74,6 +74,58 @@ pub fn validate_contracts(
                 plugin.instance_id
             );
         }
+        if let Some(kind) = &plugin.kind {
+            if kind.units.len() > 64 || kind.links.len() > 512 {
+                bail!(
+                    "plugin instance {} has too many builtin dataflow items",
+                    plugin.instance_id
+                );
+            }
+            let mut unit_ids = HashSet::with_capacity(kind.units.len());
+            let unit_id_strings: Vec<String> = kind.units.iter().map(|unit| unit.id.clone()).collect();
+            for unit in &kind.units {
+                if unit.id.trim().is_empty()
+                    || unit.id.len() > 256
+                    || unit.kind.trim().is_empty()
+                    || unit.kind.len() > 256
+                    || unit.id.contains('\0')
+                    || unit.kind.contains('\0')
+                    || !unit_ids.insert(&unit.id)
+                    || unit.parameters.len() > 256
+                    || unit.parameters.iter().any(|(key, value)| {
+                        key.trim().is_empty()
+                            || key.len() > 256
+                            || key.contains('\0')
+                            || !value.is_finite()
+                    })
+                {
+                    bail!(
+                        "plugin instance {} has an invalid builtin unit",
+                        plugin.instance_id
+                    );
+                }
+            }
+            for link in &kind.links {
+                let Some(from_unit) = link.from.rsplit_once(':').map(|(unit, _)| unit) else {
+                    bail!(
+                        "plugin instance {} has a malformed builtin link",
+                        plugin.instance_id
+                    );
+                };
+                let Some(to_unit) = link.to.rsplit_once(':').map(|(unit, _)| unit) else {
+                    bail!(
+                        "plugin instance {} has a malformed builtin link",
+                        plugin.instance_id
+                    );
+                };
+                if !unit_id_strings.iter().any(|id| id == from_unit) || !unit_id_strings.iter().any(|id| id == to_unit) {
+                    bail!(
+                        "plugin instance {} has a builtin link referencing an unknown unit",
+                        plugin.instance_id
+                    );
+                }
+            }
+        }
         let mut parameter_ids = HashSet::with_capacity(plugin.parameter_ids.len());
         if plugin.parameter_ids.iter().any(|parameter| {
             parameter.trim().is_empty()

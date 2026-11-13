@@ -241,6 +241,7 @@ impl ProjectDocument {
                     architecture: std::env::consts::ARCH.to_owned(),
                     state_schema_version: PLUGIN_STATE_SCHEMA_VERSION,
                     state_generation: 0,
+                    kind: None,
                 });
             }
         }
