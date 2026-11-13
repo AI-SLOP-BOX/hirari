@@ -95,7 +95,7 @@ impl Engine {
     fn new() -> Self {
         let revision = hirari_layout_revision_create();
         let start = unsafe { hirari_layout_revision_current(revision) };
-        let table = unsafe { hirari_engine_track_table_create() };
+        let table = { hirari_engine_track_table_create() };
         let rings = hirari_engine_rings_create();
         let handles = HirariEngineBlockHandles {
             track_table: table,

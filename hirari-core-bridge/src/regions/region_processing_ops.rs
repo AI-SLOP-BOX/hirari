@@ -38,5 +38,5 @@ pub fn clear_region_processing(host: *mut c_void, tid: u32, rid: u32) -> bool {
     let Some(session) = TrackSession::open(host, tid) else {
         return false;
     };
-    unsafe { hirari_region_store_clear_processing(session.track(), rid) }
+    hirari_region_store_clear_processing(session.track(), rid)
 }

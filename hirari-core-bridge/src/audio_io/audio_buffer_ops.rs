@@ -344,11 +344,11 @@ mod storage_contract_tests {
         // A wide channel table inside this sample block is declined by the
         // pointer rule rather than the sample rule.
         let wide = Storage::owned(1, 512);
-        let attempts = unsafe { hirari_audio_buffer_realtime_resize_attempts() };
+        let attempts = { hirari_audio_buffer_realtime_resize_attempts() };
         hirari_audio_buffer_set_realtime_guard(true);
         let sample_status =
             unsafe { hirari_audio_buffer_storage_reserve_buffer(stereo.0, 2, 128) };
-        let sample_capacity = unsafe { hirari_audio_buffer_last_realtime_requested_capacity() };
+        let sample_capacity = { hirari_audio_buffer_last_realtime_requested_capacity() };
         let pointer_status =
             unsafe { hirari_audio_buffer_storage_reserve_buffer(wide.0, 18, 16) };
         hirari_audio_buffer_set_realtime_guard(false);
@@ -360,7 +360,7 @@ mod storage_contract_tests {
         assert_eq!(stereo.dimensions(), (2, 16));
         assert_eq!(wide.dimensions(), (1, 512));
         assert_eq!(
-            unsafe { hirari_audio_buffer_realtime_resize_attempts() },
+            { hirari_audio_buffer_realtime_resize_attempts() },
             attempts + 2
         );
         assert!(sample_capacity >= 2 * 128);
@@ -389,7 +389,7 @@ mod storage_contract_tests {
         assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(stereo.0, 2, 128) }, 0);
         assert!(unsafe { hirari_audio_buffer_storage_resize(stereo.0, 2, 128) });
         assert_eq!(stereo.dimensions(), (2, 128));
-        assert!(unsafe { AUDIO_BUFFER_INLINE_CHANNELS < 18 });
+        assert!({ AUDIO_BUFFER_INLINE_CHANNELS < 18 });
         assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(wide.0, 18, 16) }, 0);
         assert!(unsafe { hirari_audio_buffer_storage_resize(wide.0, 18, 16) });
         assert_eq!(wide.dimensions(), (18, 16));

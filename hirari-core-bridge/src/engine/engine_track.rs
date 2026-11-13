@@ -191,26 +191,26 @@ impl Track {
             kind,
             bus_id: NO_BUS_ID,
             bus_state: std::ptr::null_mut(),
-            strip: unsafe { hirari_channel_strip_create() },
-            chain: unsafe { hirari_effect_chain_create() },
-            plugin_midi: unsafe { hirari_midi_buffer_create() },
-            articulation: unsafe { hirari_track_midi_articulation_create() },
+            strip: { hirari_channel_strip_create() },
+            chain: { hirari_effect_chain_create() },
+            plugin_midi: { hirari_midi_buffer_create() },
+            articulation: { hirari_track_midi_articulation_create() },
             built_in_midi: if kind == TRACK_TYPE_MIDI || kind == TRACK_TYPE_INSTRUMENT {
-                unsafe { hirari_builtin_midi_instrument_create() }
+                hirari_builtin_midi_instrument_create()
             } else {
                 std::ptr::null_mut()
             },
-            pdc_delay: unsafe { hirari_track_pdc_delay_create() },
+            pdc_delay: { hirari_track_pdc_delay_create() },
             runtime: std::ptr::null_mut(),
-            frozen_store: unsafe { hirari_track_frozen_store_create() },
-            automation_store: unsafe { hirari_track_automation_store_create() },
+            frozen_store: { hirari_track_frozen_store_create() },
+            automation_store: { hirari_track_automation_store_create() },
             name_store: unsafe { hirari_track_name_store_create() },
-            panner: unsafe { hirari_track_holographic_panner_create() },
-            work: unsafe { hirari_audio_buffer_storage_create() },
-            pre_fader: unsafe { hirari_audio_buffer_storage_create() },
-            send_pre: unsafe { hirari_audio_buffer_storage_create() },
-            send_post: unsafe { hirari_audio_buffer_storage_create() },
-            pre_insert: unsafe { hirari_audio_buffer_storage_create() },
+            panner: { hirari_track_holographic_panner_create() },
+            work: { hirari_audio_buffer_storage_create() },
+            pre_fader: { hirari_audio_buffer_storage_create() },
+            send_pre: { hirari_audio_buffer_storage_create() },
+            send_post: { hirari_audio_buffer_storage_create() },
+            pre_insert: { hirari_audio_buffer_storage_create() },
         }
     }
 

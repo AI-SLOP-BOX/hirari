@@ -251,7 +251,7 @@ mod tests {
     };
 
     fn storage(channels: u32, samples: u32) -> *mut c_void {
-        let handle = unsafe { hirari_audio_buffer_storage_create() };
+        let handle = { hirari_audio_buffer_storage_create() };
         assert_eq!(unsafe { hirari_audio_buffer_storage_reserve_buffer(handle, channels, samples) }, 0);
         assert!(unsafe { hirari_audio_buffer_storage_resize(handle, channels, samples) });
         handle
@@ -270,7 +270,7 @@ mod tests {
     }
 
     fn store() -> *mut c_void {
-        unsafe { hirari_track_frozen_store_create() }
+        { hirari_track_frozen_store_create() }
     }
 
     #[test]

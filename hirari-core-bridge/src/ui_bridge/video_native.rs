@@ -117,13 +117,13 @@ impl AvFoundationSource {
             CGColorSpace,
         };
 
-        let width = unsafe { CGImage::width(Some(image)) };
-        let height = unsafe { CGImage::height(Some(image)) };
+        let width = { CGImage::width(Some(image)) };
+        let height = { CGImage::height(Some(image)) };
         if width == 0 || height == 0 || width > MAX_FRAME_EDGE || height > MAX_FRAME_EDGE {
             return None;
         }
         let mut pixels = vec![0u8; width * height * 4];
-        let color_space = unsafe { CGColorSpace::new_device_rgb() }?;
+        let color_space = { CGColorSpace::new_device_rgb() }?;
         let context = unsafe {
             CGBitmapContextCreate(
                 pixels.as_mut_ptr().cast(),
@@ -156,7 +156,7 @@ impl FrameSource for AvFoundationSource {
         use objc2_core_media::{kCMTimeZero, CMTimeGetSeconds};
         use objc2_foundation::{NSArray, NSError, NSString, NSURL};
 
-        let url = unsafe { NSURL::fileURLWithPath(&NSString::from_str(path)) };
+        let url = { NSURL::fileURLWithPath(&NSString::from_str(path)) };
         let asset = unsafe { AVURLAsset::URLAssetWithURL_options(&url, None) };
 
         let reply = Arc::new(Reply::new());
@@ -168,7 +168,7 @@ impl FrameSource for AvFoundationSource {
         };
         unsafe { asset.loadTracksWithMediaType_completionHandler(AVMediaTypeVideo.unwrap(), &handler) };
         let tracks = reply.wait(NATIVE_DEADLINE).flatten()?;
-        let track = unsafe { tracks.firstObject() }?;
+        let track = { tracks.firstObject() }?;
         let fps = unsafe { track.nominalFrameRate() } as f64;
         if !(fps > 0.0) { return None; }
         let duration = unsafe { CMTimeGetSeconds(asset.duration()) };

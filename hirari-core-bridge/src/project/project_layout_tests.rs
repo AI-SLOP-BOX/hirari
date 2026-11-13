@@ -1,5 +1,6 @@
 //! Tests split out of project_layout.rs.
 use super::*;
+use crate::project_layout::track::fnv1a;
 
     use crate::region_processing_history::HirariEventStep;
 

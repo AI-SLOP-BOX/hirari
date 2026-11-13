@@ -435,7 +435,7 @@ mod tests {
             // Releasing the bag stops and destroys the journaler, frees the
             // rings and retires the host binding, so the address cannot be read
             // by a later session.
-            unsafe { hirari_engine_session_destroy(self.session) };
+            { hirari_engine_session_destroy(self.session) };
             let _ = std::fs::remove_file(&self.journal_path);
         }
     }

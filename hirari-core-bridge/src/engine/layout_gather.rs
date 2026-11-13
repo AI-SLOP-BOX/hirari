@@ -209,7 +209,7 @@ pub fn with_track_storage<R>(
 ) -> Option<R> {
     let host = host.cast_mut();
     unsafe { native_begin(host) };
-    let (items, count) = unsafe { host_tracks(host) };
+    let (items, count) = { host_tracks(host) };
     let track = (0..count)
         .map(|index| unsafe { *items.add(index) })
         .find(|track| {
@@ -228,7 +228,7 @@ pub fn with_track_storage<R>(
 pub fn each_track_storage(host: *const c_void, kind: u32, mut visit: impl FnMut(u32, *mut c_void)) {
     let host = host.cast_mut();
     unsafe { native_begin(host) };
-    let (items, count) = unsafe { host_tracks(host) };
+    let (items, count) = { host_tracks(host) };
     for index in 0..count {
         let track = unsafe { *items.add(index) };
         if track.is_null() {

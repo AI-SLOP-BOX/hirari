@@ -10,7 +10,7 @@ fn offline_target_and_volume_read_the_rust_stores_directly() {
 
     // A stale target id cannot activate; zero is the master and always valid.
     assert!(!crate::engine_analysis_reads::set_offline_target(core, 9_999));
-    assert_eq!(unsafe { crate::bounce_driver::hirari_bounce_target_active(
+    assert_eq!({ crate::bounce_driver::hirari_bounce_target_active(
         core.bounce_session_state() as *mut std::ffi::c_void,
     ) }, 0);
     assert!(crate::engine_analysis_reads::set_offline_target(core, 0));
@@ -18,20 +18,20 @@ fn offline_target_and_volume_read_the_rust_stores_directly() {
     let track = e.add_track(0);
     assert!(crate::engine_analysis_reads::set_offline_target(core, track));
     let session = core.bounce_session_state() as *mut std::ffi::c_void;
-    assert_eq!(unsafe { crate::bounce_driver::hirari_bounce_target_active(session) }, 1);
-    assert_eq!(unsafe { crate::bounce_driver::hirari_bounce_target_id(session) }, track);
+    assert_eq!({ crate::bounce_driver::hirari_bounce_target_active(session) }, 1);
+    assert_eq!({ crate::bounce_driver::hirari_bounce_target_id(session) }, track);
 
     crate::engine_analysis_reads::clear_offline_target(core);
-    assert_eq!(unsafe { crate::bounce_driver::hirari_bounce_target_active(session) }, 0);
+    assert_eq!({ crate::bounce_driver::hirari_bounce_target_active(session) }, 0);
 
     crate::engine_analysis_reads::set_offline_tail_seconds(core, 2.5);
     assert_eq!(
-        unsafe { crate::bounce_driver::hirari_bounce_tail_millis(session) },
+        { crate::bounce_driver::hirari_bounce_tail_millis(session) },
         2_500
     );
     crate::engine_analysis_reads::set_offline_options(core, true, false);
     assert_eq!(
-        unsafe { crate::bounce_driver::hirari_bounce_target_id(session) },
+        { crate::bounce_driver::hirari_bounce_target_id(session) },
         0,
         "options and tail writes must not disturb the cleared target"
     );

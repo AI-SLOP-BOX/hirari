@@ -40,7 +40,7 @@ fn block_handle(core: &HirariUnifiedEngine) -> *const c_void {
 fn snapshot_with_retries(core: &HirariUnifiedEngine, attempts: usize) -> Option<HirariEngineTelemetry> {
     let state = block_handle(core);
     for _ in 0..attempts {
-        let index = unsafe { hirari_engine_telemetry_active_index(state) };
+        let index = { hirari_engine_telemetry_active_index(state) };
         let mut telemetry = HirariEngineTelemetry::default();
         if unsafe { hirari_engine_telemetry_snapshot(state, index, &mut telemetry) } {
             return Some(telemetry);
@@ -203,7 +203,7 @@ pub fn runtime_telemetry(engine: &AudioEngine, core: &HirariUnifiedEngine) -> Ve
     // the deleted C++ copied with up to eight retries and reported the zeros
     // it started with if none succeeded.
     for _ in 0..8 {
-        let index = unsafe { hirari_engine_telemetry_active_index(state) };
+        let index = { hirari_engine_telemetry_active_index(state) };
         if unsafe { hirari_engine_telemetry_snapshot(state, index, &mut telemetry) } {
             break;
         }
@@ -252,22 +252,22 @@ pub fn set_offline_target(core: &HirariUnifiedEngine, tid: u32) -> bool {
     {
         return false;
     }
-    unsafe { bounce_driver::hirari_bounce_set_offline_target(bounce_session(core), tid) };
+    { bounce_driver::hirari_bounce_set_offline_target(bounce_session(core), tid) };
     true
 }
 
 pub fn clear_offline_target(core: &HirariUnifiedEngine) {
-    unsafe { bounce_driver::hirari_bounce_clear_offline_target(bounce_session(core)) };
+    { bounce_driver::hirari_bounce_clear_offline_target(bounce_session(core)) };
 }
 
 /// Bounds and non-finite rejection are enforced by the caller; the session
 /// stores the millisecond value the render plan consumes.
 pub fn set_offline_tail_seconds(core: &HirariUnifiedEngine, seconds: f32) {
-    unsafe { bounce_driver::hirari_bounce_set_tail_seconds(bounce_session(core), seconds) };
+    { bounce_driver::hirari_bounce_set_tail_seconds(bounce_session(core), seconds) };
 }
 
 pub fn set_offline_options(core: &HirariUnifiedEngine, pre_fader: bool, include_inserts: bool) {
-    unsafe {
+    {
         bounce_driver::hirari_bounce_set_render_options(
             bounce_session(core),
             u8::from(pre_fader),

@@ -52,11 +52,11 @@ const NATIVE_OPS: WeakOps = WeakOps {
 };
 
 fn native_lock(handle: *mut c_void) -> *mut c_void {
-    unsafe { crate::storage_handle::hirari_audio_import_weak_lock(handle) }
+    crate::storage_handle::hirari_audio_import_weak_lock(handle)
 }
 
 fn native_alive(handle: *mut c_void) -> bool {
-    unsafe { crate::storage_handle::hirari_audio_import_weak_alive(handle) }
+    crate::storage_handle::hirari_audio_import_weak_alive(handle)
 }
 
 fn native_release(handle: *mut c_void) {
@@ -297,11 +297,11 @@ pub struct ImportOps {
 }
 
 fn native_create(out_storage: *mut *mut c_void) -> *mut c_void {
-    unsafe { crate::storage_handle::hirari_audio_import_buffer_create(out_storage) }
+    crate::storage_handle::hirari_audio_import_buffer_create(out_storage)
 }
 
 fn native_storage(audio: *mut c_void) -> *mut c_void {
-    unsafe { crate::storage_handle::hirari_audio_import_buffer_storage(audio) }
+    crate::storage_handle::hirari_audio_import_buffer_storage(audio)
 }
 
 fn native_channels(storage: *mut c_void) -> u32 {
@@ -313,7 +313,7 @@ fn native_frames(storage: *mut c_void) -> u64 {
 }
 
 fn native_weak(audio: *mut c_void) -> *mut c_void {
-    unsafe { crate::storage_handle::hirari_audio_import_buffer_weak(audio) }
+    crate::storage_handle::hirari_audio_import_buffer_weak(audio)
 }
 
 fn native_buffer_release(audio: *mut c_void) {
@@ -598,7 +598,7 @@ mod tests {
     fn test_acquire(_path: *const u8, _length: usize, rate: *mut f64, out: *mut *mut c_void) -> i32 {
         match ACQUIRE_MODE.load(SEQ) {
             0 => {
-                let storage = unsafe { hirari_audio_buffer_storage_create() };
+                let storage = { hirari_audio_buffer_storage_create() };
                 let frames = HIT_FRAMES.load(SEQ) as u32;
                 unsafe {
                     hirari_audio_buffer_storage_reserve_buffer(storage, HIT_CHANNELS.load(SEQ), frames);
@@ -645,7 +645,7 @@ mod tests {
     /// Mirrors the native helper: the handle it returns publishes the storage
     /// the import writes into.
     fn test_create(out_storage: *mut *mut c_void) -> *mut c_void {
-        let storage = unsafe { hirari_audio_buffer_storage_create() };
+        let storage = { hirari_audio_buffer_storage_create() };
         if !out_storage.is_null() {
             unsafe { *out_storage = storage };
         }

@@ -481,7 +481,7 @@
     fn owned_history_copies_marker_payloads_before_replay() {
         let _guard = TEST_LOCK.lock().unwrap();
         reset(HirariRegionState::default());
-        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        let state = { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
         FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
         let mut ops = fake_ops();
         ops.record_undo = None;
@@ -539,7 +539,7 @@
         let _guard = TEST_LOCK.lock().unwrap();
         reset(HirariRegionState::default());
         RELEASED.store(0, std::sync::atomic::Ordering::SeqCst);
-        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(1, 300) };
+        let state = { crate::undo_transaction::hirari_undo_manager_create(1, 300) };
         FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
         let mut ops = fake_ops();
         ops.record_undo = None;

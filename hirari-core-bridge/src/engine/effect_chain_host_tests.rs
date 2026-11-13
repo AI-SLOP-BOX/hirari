@@ -5,7 +5,7 @@
     };
 
     fn chain() -> *mut c_void {
-        unsafe { hirari_effect_chain_create() }
+        { hirari_effect_chain_create() }
     }
 
     #[test]
@@ -131,7 +131,7 @@
         let state = chain();
         assert!(unsafe { hirari_effect_chain_add_builtin(state, 7, false, false) });
         assert!(unsafe { hirari_effect_chain_set_sample_rate(state, 48_000.0, 256) });
-        let storage = unsafe { hirari_audio_buffer_storage_create() };
+        let storage = { hirari_audio_buffer_storage_create() };
         assert_eq!(
             unsafe { hirari_audio_buffer_storage_reserve_buffer(storage, 2, 256) },
             0
@@ -146,7 +146,7 @@
                 unsafe { pointer.add(frame).write(0.25) };
             }
         }
-        let midi_state = unsafe { crate::midi_buffer_ops::hirari_midi_buffer_create() };
+        let midi_state = { crate::midi_buffer_ops::hirari_midi_buffer_create() };
         unsafe {
             hirari_effect_chain_process(
                 state,

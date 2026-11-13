@@ -243,7 +243,7 @@ pub unsafe extern "C" fn hirari_plugin_scan_cache_should_scan(
     path: *const u8,
     path_size: usize,
 ) -> bool {
-    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
+    let Some(path) = ({ valid_path(path, path_size) }) else {
         return false;
     };
     let Some(state) = scan_cache() else {
@@ -259,7 +259,7 @@ pub unsafe extern "C" fn hirari_plugin_scan_cache_record_failure(
     path_size: usize,
     reason: u32,
 ) -> bool {
-    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
+    let Some(path) = ({ valid_path(path, path_size) }) else {
         return false;
     };
     let Some(state) = scan_cache() else {
@@ -290,7 +290,7 @@ pub unsafe extern "C" fn hirari_plugin_scan_cache_record_success(
     path: *const u8,
     path_size: usize,
 ) -> bool {
-    let Some(path) = (unsafe { valid_path(path, path_size) }) else {
+    let Some(path) = ({ valid_path(path, path_size) }) else {
         return false;
     };
     let Some(state) = scan_cache() else {

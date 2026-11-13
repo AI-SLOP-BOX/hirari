@@ -160,7 +160,7 @@
         let name = unsafe { crate::track_name_store::hirari_track_name_store_create() };
         let chain = hirari_effect_chain_create();
         let automation = hirari_track_automation_store_create();
-        let frozen = unsafe { hirari_track_frozen_store_create() };
+        let frozen = { hirari_track_frozen_store_create() };
         let articulation = hirari_track_midi_articulation_create();
         let null = std::ptr::null_mut();
         let runtime = unsafe {

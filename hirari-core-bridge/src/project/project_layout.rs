@@ -202,7 +202,6 @@ mod writer;
 #[path = "project_layout_track.rs"]
 mod track;
 pub(crate) use writer::*;
-pub(crate) use track::*;
 
 /// Writes the whole project layout as JSON into a Rust-owned buffer.
 ///

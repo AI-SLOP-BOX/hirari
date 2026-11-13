@@ -152,7 +152,7 @@
         let mut loops = 0;
         assert!(unsafe { hirari_region_store_span_at(key, 0, &mut start, &mut length, &mut loops) });
         assert_eq!((start, length), (100, 1000));
-        unsafe { hirari_region_store_forget(key) };
+        { hirari_region_store_forget(key) };
     }
 
     #[test]
@@ -205,7 +205,7 @@
         assert_eq!(after.start, 2000);
         assert_eq!(after.clip_gain, 0.5);
 
-        let snapshot = unsafe { hirari_region_store_snapshot_region(key, 1) };
+        let snapshot = { hirari_region_store_snapshot_region(key, 1) };
         assert!(!snapshot.is_null());
         payload.op = HIRARI_REGION_EDIT_REMOVE;
         payload.blob = ptr::null();
@@ -235,7 +235,7 @@
         assert_eq!(clone, 9);
         // Regions 1 (restored), 2 and the clone are all live now.
         assert_eq!(hirari_region_store_count(key), 3);
-        unsafe { hirari_region_store_forget(key) };
+        { hirari_region_store_forget(key) };
     }
 
     #[test]
@@ -259,8 +259,8 @@
             unsafe { hirari_region_store_list_track_regions(left, ptr::null_mut(), 0) },
             1
         );
-        unsafe { hirari_region_store_forget(left) };
-        unsafe { hirari_region_store_forget(right) };
+        { hirari_region_store_forget(left) };
+        { hirari_region_store_forget(right) };
     }
 
     #[test]
@@ -310,7 +310,7 @@
             5
         );
         assert_eq!(&path[..5], b"a.wav");
-        unsafe { hirari_region_store_forget(key) };
+        { hirari_region_store_forget(key) };
     }
 
     #[test]
@@ -329,7 +329,7 @@
         };
         let draft =
             unsafe { hirari_region_store_draft_new(1, ptr::null(), 0, ptr::null(), 0, &state) };
-        let clip = unsafe { hirari_region_store_draft_clip(draft) };
+        let clip = { hirari_region_store_draft_clip(draft) };
         assert!(!clip.is_null());
         let seed = [
             range_edit(0, 100, 0.5, 999, 999),
@@ -379,7 +379,7 @@
             1
         );
         assert_eq!(read[0].fade_in, 99);
-        unsafe { hirari_region_store_forget(key) };
+        { hirari_region_store_forget(key) };
     }
 
     #[test]
@@ -405,8 +405,8 @@
             ..Default::default()
         };
         assert!(!unsafe { hirari_region_store_apply_edit(host(), key, &missing) });
-        assert!(!unsafe { hirari_region_store_prepare(key, 0.0, 512) });
-        assert!(unsafe { hirari_region_store_prepare(key, 44_100.0, 512) });
-        unsafe { hirari_region_store_trim_retired(key) };
-        unsafe { hirari_region_store_forget(key) };
+        assert!(!{ hirari_region_store_prepare(key, 0.0, 512) });
+        assert!({ hirari_region_store_prepare(key, 44_100.0, 512) });
+        { hirari_region_store_trim_retired(key) };
+        { hirari_region_store_forget(key) };
     }

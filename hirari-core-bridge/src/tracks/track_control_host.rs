@@ -132,7 +132,7 @@ mod tests {
         fn drop(&mut self) {
             // Releasing the bag runs the track's own storage teardown and retires
             // the host binding, so the address cannot be read by a later session.
-            unsafe { hirari_engine_session_destroy(self.session) };
+            { hirari_engine_session_destroy(self.session) };
         }
     }
 

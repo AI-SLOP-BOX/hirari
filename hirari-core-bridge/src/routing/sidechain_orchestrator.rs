@@ -386,7 +386,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_register_link(
         return false;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_register_link(
                 gate,
                 destination_track,
@@ -420,7 +420,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_register_silent_link(
         return false;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_register_silent_link(
                 gate,
                 destination_track,
@@ -446,7 +446,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_remove_link(
         return false;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_remove_link(gate, destination_track, plugin_index)
         })
     }
@@ -471,7 +471,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_remove_track(state: *const c_vo
         return;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_remove_track(gate, track)
         })
     };
@@ -483,7 +483,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_reset(state: *const c_void) {
         return;
     };
     unsafe {
-        with_control(engine, |gate| unsafe { hirari_sidechain_reset(gate) })
+        with_control(engine, |gate| { hirari_sidechain_reset(gate) })
     };
 }
 
@@ -532,7 +532,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_refresh_source(
         return false;
     };
     unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_refresh_source(
                 gate,
                 source_track,
@@ -650,7 +650,7 @@ pub unsafe extern "C" fn hirari_sidechain_engine_capture_links(
     }
     let mut links: Vec<CapturedLink> = Vec::new();
     let captured = unsafe {
-        with_control(engine, |gate| unsafe {
+        with_control(engine, |gate| {
             hirari_sidechain_capture_track(
                 gate,
                 track,

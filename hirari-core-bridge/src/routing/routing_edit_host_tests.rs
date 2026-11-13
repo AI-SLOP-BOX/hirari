@@ -302,7 +302,7 @@ use super::*;
     fn route_edit_without_native_recorder_uses_the_rust_history() {
         let host = TestHost::new();
         let host_ptr = host_ptr(&host);
-        let state = unsafe { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
+        let state = { crate::undo_transaction::hirari_undo_manager_create(8, 300) };
         FAKE_UNDO.store(state, std::sync::atomic::Ordering::SeqCst);
         let mut ops = test_ops();
         ops.record_undo = None;

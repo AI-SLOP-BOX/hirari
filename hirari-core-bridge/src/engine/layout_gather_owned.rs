@@ -489,5 +489,5 @@ pub unsafe extern "C" fn hirari_project_state_revision(host: *const c_void) -> u
             crate::engine_session::H_ENGINE_BLOCK,
         ))
     };
-    unsafe { crate::project_layout::hirari_project_state_revision_mix(layout, midi, control) }
+    crate::project_layout::hirari_project_state_revision_mix(layout, midi, control)
 }

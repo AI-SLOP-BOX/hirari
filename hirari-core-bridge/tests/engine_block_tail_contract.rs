@@ -128,7 +128,7 @@ impl Engine {
             ]
         };
         let borrowed = self.borrowed;
-        self.table = unsafe { hirari_engine_track_table_create() };
+        self.table = hirari_engine_track_table_create();
         let handles = HirariEngineBlockHandles {
             routing: borrowed[0],
             track_table: self.table,

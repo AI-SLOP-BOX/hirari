@@ -115,7 +115,7 @@ fn trim_retired_regions_at_host(host: *mut c_void) {
     // SAFETY: the table's buffer holds `count` entries while its lock is held.
     for &track in unsafe { std::slice::from_raw_parts(pointers, count) } {
         if !track.is_null() {
-            unsafe { region_store::hirari_region_store_trim_retired(track) };
+            { region_store::hirari_region_store_trim_retired(track) };
         }
     }
 }
@@ -198,5 +198,5 @@ pub fn assign_track_to_vca(core: &HirariUnifiedEngine, track_id: u32, group_id: 
         return false;
     }
     TrackSession::open(address(core), track_id).is_some()
-        && unsafe { hirari_vca_assign_track(track_id, group_id) }
+        && { hirari_vca_assign_track(track_id, group_id) }
 }
