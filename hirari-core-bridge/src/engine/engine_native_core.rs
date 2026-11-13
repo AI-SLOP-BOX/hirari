@@ -632,4 +632,3 @@ unsafe extern "C" fn emit_structure_marker(context: *mut c_void, start: u64, len
 
 #[path = "engine_native_sync.rs"]
 mod sync_;
-pub(crate) use sync_::*;

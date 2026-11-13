@@ -59,8 +59,7 @@ pub use core::*;
 
 #[path = "engine_native_host_ops.rs"]
 mod host_ops;
-pub use host_ops::*;
-
+pub(crate) use host_ops::*;
 pub struct AudioEngine {
     /// Session-owned graph. Separate FFI handles receive separate project
     /// state.
