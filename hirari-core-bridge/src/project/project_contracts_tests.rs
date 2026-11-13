@@ -152,7 +152,8 @@ fn macro_mapping_requires_existing_plugin_and_round_trips() {
 
 #[test]
 fn legacy_automation_point_roundtrips_byte_identically() {
-    let legacy = r#"{"time":48000,"value":0.5,"curve":0.5}"#;
+    // Exactly what the pre-split writer produced (f64 prints with a fraction).
+    let legacy = r#"{"time":48000.0,"value":0.5,"curve":0.5}"#;
     let point: AutomationPointContract = serde_json::from_str(legacy).unwrap();
     assert_eq!(point.curve, Curve::Shortcut(0.5));
     assert_eq!(serde_json::to_string(&point).unwrap(), legacy);
@@ -165,10 +166,10 @@ fn legacy_automation_point_roundtrips_byte_identically() {
 #[test]
 fn shape_variants_roundtrip_stably() {
     let cases = [
-        (r#"{"time":1,"value":0.25,"curve":{"kind":"linear"}}"#, Curve::Shaped(Shape::Linear)),
-        (r#"{"time":1,"value":0.25,"curve":{"kind":"step"}}"#, Curve::Shaped(Shape::Step)),
+        (r#"{"time":1.0,"value":0.25,"curve":{"kind":"linear"}}"#, Curve::Shaped(Shape::Linear)),
+        (r#"{"time":1.0,"value":0.25,"curve":{"kind":"step"}}"#, Curve::Shaped(Shape::Step)),
         (
-            r#"{"time":1,"value":0.25,"curve":{"kind":"bezier","p":[{"x":0.25,"y":0.1},{"x":0.75,"y":0.9}]}}"#,
+            r#"{"time":1.0,"value":0.25,"curve":{"kind":"bezier","p":[{"x":0.25,"y":0.1},{"x":0.75,"y":0.9}]}}"#,
             Curve::Shaped(Shape::Bezier {
                 p: [Point { x: 0.25, y: 0.1 }, Point { x: 0.75, y: 0.9 }],
             }),
