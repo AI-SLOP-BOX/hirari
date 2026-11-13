@@ -11,6 +11,8 @@ use crate::virtuoso_space::VirtuosoSpaceEngine;
 include!("lib_tests_sandbox.rs");
 include!("lib_tests_composition.rs");
 include!("lib_tests_rendering.rs");
+include!("lib_tests_render_assertions.rs");
+include!("lib_tests_render_verification.rs");
 include!("lib_tests_automation.rs");
 include!("lib_tests_automation_edit.rs");
 include!("lib_tests_note_edits.rs");
