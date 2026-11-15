@@ -33,7 +33,7 @@ slint = { version = "1.17.1", default-features = false, features = [
 ] }
 raw-window-handle = "0.6"
 slint-build = "1.17.1"
-rfd = { version = "0.17.2", default-features = false, features = ["xdg-portal"] }
+rfd = { version = "0.18.0", default-features = false, features = ["xdg-portal"] }
 
 # --- Project Paths ---
 hirari-core-bridge = { version = "0.1.0", path = "./hirari-core-bridge" }
