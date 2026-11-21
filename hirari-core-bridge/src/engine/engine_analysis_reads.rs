@@ -310,10 +310,10 @@ fn for_each_chain(core: &HirariUnifiedEngine, mut visit: impl FnMut(*mut c_void)
         if track.is_null() {
             continue;
         }
-        visit(track_session::storage(
+        visit(unsafe { track_session::storage(
             track,
             track_session::STORAGE_CHAIN,
-        ));
+        ) });
     }
 }
 

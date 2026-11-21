@@ -630,7 +630,7 @@ impl HirariCore {
         if left.is_empty() || left.len() != right.len() || left.len() > MAX_SANDBOX_AUDIO_BLOCK {
             return false;
         }
-        self.engine_opt().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| unsafe {
             crate::plugin_sandbox_maintenance::process_sandbox_block(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,

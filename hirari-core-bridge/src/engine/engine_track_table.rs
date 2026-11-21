@@ -147,8 +147,9 @@ impl EngineTrackTable {
             compensated.push(track);
         }
         let mut offsets = vec![0u32; configs.len()];
-        let solved =
-            crate::native_pdc::sync_graph(pdc, routing, &configs, offsets.as_mut_slice());
+        let solved = unsafe {
+            crate::native_pdc::sync_graph(pdc, routing, &configs, offsets.as_mut_slice())
+        };
         for (&track, offset) in compensated.iter().zip(offsets).take(solved) {
             track.apply_pdc_offset(offset);
         }

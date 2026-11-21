@@ -4,12 +4,18 @@
 use super::*;
 
 /// The layout change token of the engine behind this host address.
-pub fn project_layout_revision(host: *const c_void) -> u64 {
+///
+/// # Safety
+/// `host` must be a live engine host pointer.
+pub unsafe fn project_layout_revision(host: *const c_void) -> u64 {
     unsafe { hirari_project_layout_revision(host) }
 }
 
 /// The combined native change token of the engine behind this host address.
-pub fn project_state_revision(host: *const c_void) -> u64 {
+///
+/// # Safety
+/// `host` must be a live engine host pointer.
+pub unsafe fn project_state_revision(host: *const c_void) -> u64 {
     unsafe { hirari_project_state_revision(host) }
 }
 

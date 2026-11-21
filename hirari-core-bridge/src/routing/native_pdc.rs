@@ -630,7 +630,11 @@ pub struct PdcTrackConfig {
 /// Rebuild the control-side PDC graph from the published routing engine and
 /// publish the resulting offsets. `offsets` receives one entry per element of
 /// `tracks`, in the same order; the return value is that count.
-pub fn sync_graph(
+///
+/// # Safety
+/// `pdc` and `routing` must be live state pointers published by the engine and
+/// the caller must hold the routing control-plane lock for their lifetime.
+pub unsafe fn sync_graph(
     pdc: *const c_void,
     routing: *const c_void,
     tracks: &[PdcTrackConfig],

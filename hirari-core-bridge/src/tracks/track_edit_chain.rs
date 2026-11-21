@@ -72,11 +72,11 @@ pub unsafe extern "C" fn hirari_track_clone_state(
     }
     // A name that cannot carry the suffix aborts the duplicate before any other
     // storage is touched.
-    if !crate::track_name_store::copy_with_suffix(
+    if !unsafe { crate::track_name_store::copy_with_suffix(
         source_name as *const c_void,
         dest_name,
         b" Copy",
-    ) {
+    ) } {
         return false;
     }
     unsafe {

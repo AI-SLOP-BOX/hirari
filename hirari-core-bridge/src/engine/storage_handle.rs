@@ -46,8 +46,14 @@ fn weak(handle: *mut c_void) -> Option<&'static WeakRef> {
 }
 
 /// A new owned buffer. `out_storage` receives the storage to resize and fill.
+///
+/// # Safety
+/// `out_storage`, if non-null, must point to writable storage for a handle
+/// pointer.
 #[no_mangle]
-pub extern "C" fn hirari_audio_import_buffer_create(out_storage: *mut *mut c_void) -> *mut c_void {
+pub unsafe extern "C" fn hirari_audio_import_buffer_create(
+    out_storage: *mut *mut c_void,
+) -> *mut c_void {
     let storage = hirari_audio_buffer_storage_create();
     if !out_storage.is_null() {
         unsafe { *out_storage = storage };

@@ -333,7 +333,7 @@ impl crate::AudioEngine {
         crate::engine_transport::assign_track_to_vca(self.get_core(), track_id, group_id)
     }
     pub fn new_project(&self) {
-        pinned(self).new_project()
+        unsafe { pinned(self) }.new_project()
     }
     pub fn take_watchdog_trips(&self) -> u32 {
         crate::engine_analysis_reads::watchdog_trips(self.get_core())
@@ -349,7 +349,7 @@ impl crate::AudioEngine {
         )
     }
     pub fn set_plugin_bypass(&self, tid: u32, plugin_index: u32, bypassed: bool) -> bool {
-        pinned(self).set_plugin_bypass(tid, plugin_index, bypassed)
+        unsafe { pinned(self) }.set_plugin_bypass(tid, plugin_index, bypassed)
     }
     pub fn get_plugin_parameter_name(
         &self,
@@ -365,20 +365,20 @@ impl crate::AudioEngine {
         )
     }
     pub fn cancel_bounce(&self) -> bool {
-        pinned(self).cancel_bounce()
+        unsafe { pinned(self) }.cancel_bounce()
     }
     pub fn pause_bounce(&self) -> bool {
-        pinned(self).pause_bounce()
+        unsafe { pinned(self) }.pause_bounce()
     }
     pub fn resume_bounce(&self) -> bool {
-        pinned(self).resume_bounce()
+        unsafe { pinned(self) }.resume_bounce()
     }
     pub fn execute_vocal_remover(&self, tid: u32) -> bool {
         let host = crate::engine_event_ops::host_from_core(self.get_core());
         crate::engine_event_ops::execute_vocal_remover(host, tid)
     }
     pub fn set_articulation_map(&self, tid: u32, map_hash: u32) -> bool {
-        pinned(self).set_articulation_map(tid, map_hash)
+        unsafe { pinned(self) }.set_articulation_map(tid, map_hash)
     }
     pub fn set_track_eq(
         &self,
@@ -398,10 +398,10 @@ impl crate::AudioEngine {
         )
     }
     pub fn execute_auto_arrangement(&self) -> bool {
-        pinned(self).execute_auto_arrangement()
+        unsafe { pinned(self) }.execute_auto_arrangement()
     }
     pub fn set_project_scale(&self, root: i32, scale_type: i32) -> bool {
-        pinned(self).set_project_scale(root, scale_type)
+        unsafe { pinned(self) }.set_project_scale(root, scale_type)
     }
     pub fn append_region_processing(
         &self,
@@ -436,7 +436,7 @@ impl crate::AudioEngine {
         self.get_core().mark_project_layout_changed()
     }
     pub fn mark_project_state_changed(&self) {
-        pinned(self).mark_project_state_changed()
+        unsafe { pinned(self) }.mark_project_state_changed()
     }
     pub fn set_loop(&self, enabled: bool) {
         crate::engine_transport::set_loop(self.get_core(), enabled);
@@ -456,7 +456,7 @@ impl crate::AudioEngine {
         crate::engine_transport::set_test_tone(self.get_core(), enabled)
     }
     pub fn set_master_gain(&self, value: f32) -> bool {
-        if !pinned(self).set_master_gain(value) {
+        if !unsafe { pinned(self) }.set_master_gain(value) {
             return false;
         }
         self.mark_project_state_changed();
@@ -479,11 +479,13 @@ impl crate::AudioEngine {
         );
     }
     pub fn get_project_layout_revision(&self) -> u64 {
-        layout_gather::project_layout_revision(core_mut(self) as *const _)
+        // SAFETY: the engine lives as long as this session.
+        unsafe { layout_gather::project_layout_revision(core_mut(self) as *const _) }
     }
 
     pub fn get_project_state_revision(&self) -> u64 {
-        layout_gather::project_state_revision(core_mut(self) as *const _)
+        // SAFETY: the engine lives as long as this session.
+        unsafe { layout_gather::project_state_revision(core_mut(self) as *const _) }
     }
     pub fn is_playing(&self) -> bool {
         crate::engine_transport::is_playing(self.get_core())

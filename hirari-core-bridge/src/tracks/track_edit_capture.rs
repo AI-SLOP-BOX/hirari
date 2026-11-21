@@ -99,7 +99,7 @@ impl Stores {
         let track = unsafe { hirari_track_owner_object(owner) };
         let owned = unsafe { hirari_track_owner_retain(owner) };
         if unsafe { hirari_engine_track_insert(self.table, index, owned) } {
-            track_session::mark_layout(track);
+            unsafe { track_session::mark_layout(track) };
         }
         index
     }
@@ -120,7 +120,7 @@ impl Stores {
         if owner.is_null() {
             return std::ptr::null_mut();
         }
-        track_session::mark_layout(track);
+        unsafe { track_session::mark_layout(track) };
         self.publish(false);
         owner
     }
@@ -134,7 +134,7 @@ impl Stores {
         }
         let owner = unsafe { hirari_track_owner_retain(captured.owner) };
         if unsafe { hirari_engine_track_insert(self.table, captured.index, owner) } {
-            track_session::mark_layout(captured.track);
+            unsafe { track_session::mark_layout(captured.track) };
             self.publish(stamp);
         }
     }

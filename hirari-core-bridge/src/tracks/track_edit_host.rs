@@ -197,7 +197,8 @@ fn duplicate_track_impl(
             return 0;
         }
         // The copy is named by the clone step, so it starts nameless.
-        let (owner, copy) = stores.build(track_session::track_type(source), new_id, "");
+        // SAFETY: the caller holds the tracks lock through the insert above.
+        let (owner, copy) = unsafe { stores.build(track_session::track_type(source), new_id, "") };
         let owner = TrackOwner { owner };
         // The copy's own storages are the destination, name included: the reads
         // and writes go store to store, so the copy suffix is Rust's rule.

@@ -144,12 +144,15 @@ impl HirariCore {
                     }
                     if let Some(state) = track.sandbox_plugin_states.get(sandbox_index as usize) {
                         if !state.is_empty()
-                            && !crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
-                                crate::audio_engine_delegate_ext::host(engine),
-                                native_id,
-                                sandbox_index,
-                                state,
-                            ) {
+                            && !unsafe {
+                                crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
+                                    crate::audio_engine_delegate_ext::host(engine),
+                                    native_id,
+                                    sandbox_index,
+                                    state,
+                                )
+                            }
+                        {
                             let (_, state_error) =
                                 crate::plugin_sandbox_maintenance::sandbox_state_error(
                                     crate::audio_engine_delegate_ext::host(engine),

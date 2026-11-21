@@ -69,7 +69,14 @@ fn tempo_state(engine: &crate::AudioEngine) -> *mut c_void {
 
 /// Mutable pinned view of the session engine. The wrapper owns exactly one engine
 /// object for its whole lifetime and never moves it, so pinning is stable.
-fn pinned_core(
+///
+/// # Safety
+/// Same contract as [`crate::audio_engine_delegate_ext::pinned`]: the caller must
+/// hold exclusive control-plane access to the engine. Config transactions take
+/// `config_lock` first, so only one runs at a time and no audio callback runs
+/// during the quiesce/prepare sequence.
+#[allow(clippy::mut_from_ref)]
+unsafe fn pinned_core(
     engine: &crate::AudioEngine,
 ) -> core::pin::Pin<&mut crate::HirariUnifiedEngine> {
     unsafe {
@@ -93,7 +100,7 @@ fn apply_negotiated_driver_config(engine: &crate::AudioEngine) {
     // driver rate is what the graph sees.
     let sample_rate = f64::from(hirari_audio_driver_host_sample_rate(host) as u32);
     let block_size = hirari_audio_driver_host_buffer_size(host);
-    pinned_core(engine).prepare_to_play(sample_rate, block_size);
+    unsafe { pinned_core(engine) }.prepare_to_play(sample_rate, block_size);
 }
 
 /// The transaction itself. Returns whether the requested format was applied; a
@@ -120,7 +127,7 @@ fn apply_config_locked(engine: &crate::AudioEngine, tempo: f32, sr: u32, bs: u32
     }
     engine.get_core().join_audio_callbacks();
     unsafe { hirari_tempo_map_set_current_bpm(tempo_state(engine), tempo) };
-    pinned_core(engine).prepare_to_play(f64::from(sr), bs);
+    unsafe { pinned_core(engine) }.prepare_to_play(f64::from(sr), bs);
     true
 }
 

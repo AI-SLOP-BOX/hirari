@@ -54,7 +54,13 @@ impl BlockAudio {
         unsafe { *self.planes.add(index) }
     }
 
-    fn slice(&self, index: usize, frames: usize) -> Option<&mut [f32]> {
+    /// # Safety
+    /// `index` must be below `channels`, `frames` must not exceed `samples`, and
+    /// the caller must not hold another slice of the same plane while this one
+    /// is live. Only the audio graph calls this, and each node reads a plane
+    /// once per block.
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn slice(&self, index: usize, frames: usize) -> Option<&mut [f32]> {
         let pointer = self.plane(index);
         if pointer.is_null() {
             return None;
@@ -77,7 +83,7 @@ impl BlockAudio {
     /// Zeroes every channel for the block's own sample count.
     pub fn clear(&self) {
         for index in 0..self.channels as usize {
-            if let Some(plane) = self.slice(index, self.samples as usize) {
+            if let Some(plane) = unsafe { self.slice(index, self.samples as usize) } {
                 plane.fill(0.0);
             }
         }

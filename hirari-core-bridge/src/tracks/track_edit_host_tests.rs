@@ -59,7 +59,7 @@
             });
         }
         fn name(&self) -> Vec<u8> {
-            crate::track_name_store::read(self.name as *const c_void)
+            unsafe { crate::track_name_store::read(self.name) }
         }
     }
 

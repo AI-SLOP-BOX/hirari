@@ -297,7 +297,8 @@ pub struct ImportOps {
 }
 
 fn native_create(out_storage: *mut *mut c_void) -> *mut c_void {
-    crate::storage_handle::hirari_audio_import_buffer_create(out_storage)
+    // SAFETY: the caller owns the out-slot; the cache fills it synchronously.
+    unsafe { crate::storage_handle::hirari_audio_import_buffer_create(out_storage) }
 }
 
 fn native_storage(audio: *mut c_void) -> *mut c_void {

@@ -63,7 +63,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return Vec::new();
         };
-        self.engine_opt().map_or_else(Vec::new, |engine| {
+        self.engine_opt().map_or_else(Vec::new, |engine| unsafe {
             crate::plugin_sandbox_maintenance::sandbox_plugin_state(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -81,7 +81,7 @@ impl HirariCore {
         let Ok(_project_transaction) = self.project_transaction.lock() else {
             return false;
         };
-        self.engine_opt().is_some_and(|engine| {
+        self.engine_opt().is_some_and(|engine| unsafe {
             crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
                 crate::audio_engine_delegate_ext::host(engine),
                 track_id,
@@ -119,9 +119,11 @@ impl HirariCore {
             };
         };
         let host = crate::audio_engine_delegate_ext::host(engine);
-        let ok = crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
-            host, track_id, sandbox_index, state,
-        );
+        let ok = unsafe {
+            crate::plugin_sandbox_maintenance::set_sandbox_plugin_state(
+                host, track_id, sandbox_index, state,
+            )
+        };
         let (code, message) =
             crate::plugin_sandbox_maintenance::sandbox_state_error(host, track_id, sandbox_index);
         // An unresolved track answers with no text; the state-error table names

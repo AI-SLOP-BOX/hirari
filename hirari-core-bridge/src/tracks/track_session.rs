@@ -89,27 +89,45 @@ impl Drop for GraphLock {
 
 /// Resolves a track id in the live graph; null when it is not there. The caller
 /// holds the tracks lock.
-pub fn find(host: *mut c_void, track_id: u32) -> *mut c_void {
+///
+/// # Safety
+/// `host` must be a live engine host pointer and the caller must hold the
+/// tracks lock.
+pub unsafe fn find(host: *mut c_void, track_id: u32) -> *mut c_void {
     let table = handle_of_host(host as *const c_void, H_TRACK_TABLE);
     unsafe { crate::engine_track_table::hirari_engine_track_find(table, track_id) }
 }
 
 /// One of a track's own storages, by the numbering above.
-pub fn storage(track: *mut c_void, kind: u32) -> *mut c_void {
+///
+/// # Safety
+/// `track` must be a live track pointer from [`find`] and `kind` a storage
+/// number of this module; the caller must hold the tracks lock.
+pub unsafe fn storage(track: *mut c_void, kind: u32) -> *mut c_void {
     unsafe { crate::engine_track::hirari_track_storage(track, kind) }
 }
 
-pub fn track_type(track: *mut c_void) -> u32 {
+/// # Safety
+/// `track` must be a live track pointer from [`find`]; the caller must hold
+/// the tracks lock.
+pub unsafe fn track_type(track: *mut c_void) -> u32 {
     unsafe { crate::engine_track::hirari_track_type(track) }
 }
 
-pub fn mark_layout(track: *mut c_void) {
+/// # Safety
+/// `track` must be a live track pointer from [`find`]; the caller must hold
+/// the tracks lock.
+pub unsafe fn mark_layout(track: *mut c_void) {
     unsafe { crate::engine_track::hirari_track_mark_layout(track) };
 }
 
 /// Re-prepares one track for the device format the engine block currently
 /// holds.
-pub fn prepare_track(host: *mut c_void, track: *mut c_void) {
+///
+/// # Safety
+/// `host` must be a live engine host pointer and `track` a live track from
+/// [`find`]; the caller must hold the tracks lock.
+pub unsafe fn prepare_track(host: *mut c_void, track: *mut c_void) {
     let block = handle_of_host(host as *const c_void, H_ENGINE_BLOCK);
     unsafe { crate::engine_block_host::hirari_engine_block_prepare_track(block, track) };
 }
@@ -126,7 +144,8 @@ impl TrackSession {
     /// stale handle.
     pub fn open(host: *mut c_void, track_id: u32) -> Option<Self> {
         let guard = GraphLock::acquire(host)?;
-        let track = find(guard.host(), track_id);
+        // SAFETY: the guard holds the tracks lock for this whole scope.
+        let track = unsafe { find(guard.host(), track_id) };
         if track.is_null() {
             return None;
         }
@@ -136,41 +155,51 @@ impl TrackSession {
     }
 
     /// The track's Rust channel strip: fader, pan, solo and record-arm state.
+    /// Every accessor below is sound because `open` keeps the tracks lock
+    /// forgotten (never dropped) for the session's lifetime, so the track and
+    /// its storages cannot be released under it.
     pub fn strip(&self) -> *mut c_void {
-        storage(self.track, STORAGE_STRIP)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_STRIP) }
     }
 
     /// The track's Rust effect chain.
     pub fn chain(&self) -> *mut c_void {
-        storage(self.track, STORAGE_CHAIN)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_CHAIN) }
     }
 
     /// The track's Rust automation store: the volume, pan and delay curves and
     /// the plugin parameter lanes.
     pub fn automation(&self) -> *mut c_void {
-        storage(self.track, STORAGE_AUTOMATION)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_AUTOMATION) }
     }
 
     /// The track's Rust frozen-render store.
     pub fn frozen(&self) -> *mut c_void {
-        storage(self.track, STORAGE_FROZEN)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_FROZEN) }
     }
 
     /// The track's Rust name store.
     pub fn name_store(&self) -> *mut c_void {
-        storage(self.track, STORAGE_NAME)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_NAME) }
     }
 
     /// The track's Rust realtime runtime — the entry an offline freeze render
     /// drives block by block.
     pub fn runtime(&self) -> *mut c_void {
-        storage(self.track, STORAGE_RUNTIME)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_RUNTIME) }
     }
 
     /// The track's active work buffer — the Rust audio storage the block
     /// pipeline renders into, which a sidechain source taps.
     pub fn work_buffer(&self) -> *mut c_void {
-        storage(self.track, STORAGE_WORK_BUFFER)
+        // SAFETY: the session holds the tracks lock.
+        unsafe { storage(self.track, STORAGE_WORK_BUFFER) }
     }
 
     /// The engine's address of this track. The Rust region store keys on it, so
@@ -181,7 +210,8 @@ impl TrackSession {
 
     /// The track's current name, read from its own store.
     pub fn read_name(&self) -> Vec<u8> {
-        crate::track_name_store::read(self.name_store() as *const c_void)
+        // SAFETY: `name_store()` hands back the live store this track owns.
+        unsafe { crate::track_name_store::read(self.name_store()) }
     }
 
     /// Replaces the track's name in its own store.
@@ -196,17 +226,20 @@ impl TrackSession {
     }
 
     pub fn is_bus(&self) -> bool {
-        track_type(self.track) == TRACK_TYPE_BUS
+        // SAFETY: the session holds the tracks lock.
+        unsafe { track_type(self.track) == TRACK_TYPE_BUS }
     }
 
     pub fn mark_layout(&self) {
-        mark_layout(self.track);
+        // SAFETY: the session holds the tracks lock.
+        unsafe { mark_layout(self.track) };
     }
 
     /// Re-prepares the track for the engine's current rate and block size, as
     /// the engine's initial plugin insert did.
     pub fn prepare(&self) {
-        prepare_track(self.host, self.track);
+        // SAFETY: the session holds the tracks lock and its own live pointers.
+        unsafe { prepare_track(self.host, self.track) };
     }
 
     /// Drops the rendered freeze so stale audio cannot outlive the edit, then

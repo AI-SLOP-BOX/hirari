@@ -45,7 +45,15 @@ fn core_mut(engine: &crate::AudioEngine) -> *mut crate::HirariUnifiedEngine {
     core as *mut crate::HirariUnifiedEngine
 }
 
-fn pinned(engine: &crate::AudioEngine) -> core::pin::Pin<&mut crate::HirariUnifiedEngine> {
+/// # Safety
+/// `engine` must own a live unified engine (every `AudioEngine` does for its
+/// whole lifetime) and the caller must have exclusive control-plane access:
+/// this hands out a mutable view without proving exclusivity, so two overlapping
+/// calls would alias. The engine is `!Send`/`!Sync` and every caller runs on the
+/// session's owning thread; the audio callback reaches the graph through its
+/// own driver-host pointer and never through this helper.
+#[allow(clippy::mut_from_ref)]
+unsafe fn pinned(engine: &crate::AudioEngine) -> core::pin::Pin<&mut crate::HirariUnifiedEngine> {
     unsafe { core::pin::Pin::new_unchecked(&mut *core_mut(engine)) }
 }
 

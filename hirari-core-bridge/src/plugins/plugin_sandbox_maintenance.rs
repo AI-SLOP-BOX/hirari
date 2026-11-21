@@ -209,7 +209,11 @@ fn slot_plugin_index(host: *mut c_void, track_id: u32, slot: u32) -> Option<u32>
 /// Reads a sandbox slot's plugin state through the plugin-chain state op; the
 /// slot keeps the engine's plugin index, so the state is the same bytes the
 /// audio graph would persist.
-pub fn sandbox_plugin_state(host: *mut c_void, track_id: u32, slot: u32) -> Vec<u8> {
+///
+/// # Safety
+/// `host` must be a live engine host pointer and the caller must hold the
+/// engine's control-plane access (tracks lock or control thread).
+pub unsafe fn sandbox_plugin_state(host: *mut c_void, track_id: u32, slot: u32) -> Vec<u8> {
     let Some(plugin_index) = slot_plugin_index(host, track_id, slot) else {
         return Vec::new();
     };
@@ -242,7 +246,11 @@ pub fn sandbox_plugin_state(host: *mut c_void, track_id: u32, slot: u32) -> Vec<
 /// Stores a sandbox slot's plugin state. Mirrors the engine's admission: an
 /// oversized blob is refused before the graph is touched, and no undo entry is
 /// recorded because hydration and recovery replay the preset themselves.
-pub fn set_sandbox_plugin_state(
+///
+/// # Safety
+/// `host` must be a live engine host pointer and the caller must hold the
+/// engine's control-plane access.
+pub unsafe fn set_sandbox_plugin_state(
     host: *mut c_void,
     track_id: u32,
     slot: u32,
@@ -267,7 +275,11 @@ pub fn set_sandbox_plugin_state(
 
 /// Runs one isolated stereo block through a sandbox slot. The caller owns the
 /// buffers; both must hold `frames` samples.
-pub fn process_sandbox_block(
+///
+/// # Safety
+/// `host` must be a live engine host pointer; the caller must own the buffers
+/// for the block duration and hold the engine's control-plane access.
+pub unsafe fn process_sandbox_block(
     host: *mut c_void,
     track_id: u32,
     slot: u32,

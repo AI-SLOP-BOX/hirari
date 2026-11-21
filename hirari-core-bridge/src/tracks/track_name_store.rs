@@ -97,7 +97,10 @@ unsafe fn get(state: *const c_void, out: *mut u8, capacity: usize) -> usize {
 
 /// Reads the whole name through the two-pass get, for Rust callers that hold a
 /// store handle but no buffer. Only Rust reads names this way; C++ never does.
-pub fn read(state: *const c_void) -> Vec<u8> {
+///
+/// # Safety
+/// `state` must be a handle from [`hirari_track_name_store_create`] or null.
+pub unsafe fn read(state: *const c_void) -> Vec<u8> {
     let length = unsafe { get(state, std::ptr::null_mut(), 0) };
     if length == 0 {
         return Vec::new();
@@ -111,7 +114,11 @@ pub fn read(state: *const c_void) -> Vec<u8> {
 /// Copies one track's name into another store with a suffix appended, which is
 /// how duplicating a track names the copy. A result that would exceed the limit
 /// is refused, leaving the destination untouched.
-pub fn copy_with_suffix(
+///
+/// # Safety
+/// Both handles must come from [`hirari_track_name_store_create`] (null is
+/// rejected) and both stores must be live for the call.
+pub unsafe fn copy_with_suffix(
     source: *const c_void,
     destination: *mut c_void,
     suffix: &[u8],
@@ -146,7 +153,7 @@ mod tests {
             unsafe { hirari_track_name_store_set(self.0, name.as_ptr(), name.len()) }
         }
         fn read(&self) -> Vec<u8> {
-            super::read(self.0 as *const c_void)
+            unsafe { super::read(self.0 as *const c_void) }
         }
     }
 
@@ -196,7 +203,7 @@ mod tests {
         let source = Store::new();
         let copy = Store::new();
         assert!(source.set(b"Guitar"));
-        assert!(copy_with_suffix(source.0 as *const c_void, copy.0, b" Copy"));
+        assert!(unsafe { copy_with_suffix(source.0 as *const c_void, copy.0, b" Copy") });
         assert_eq!(copy.read(), b"Guitar Copy".to_vec());
         assert_eq!(source.read(), b"Guitar".to_vec());
 
@@ -204,7 +211,7 @@ mod tests {
         assert!(long.set(&vec![b'a'; MAX_TRACK_NAME_BYTES]));
         let rejected = Store::new();
         assert!(rejected.set(b"keep"));
-        assert!(!copy_with_suffix(long.0 as *const c_void, rejected.0, b" Copy"));
+        assert!(!unsafe { copy_with_suffix(long.0 as *const c_void, rejected.0, b" Copy") });
         assert_eq!(rejected.read(), b"keep".to_vec());
     }
 
@@ -212,7 +219,7 @@ mod tests {
     fn null_handles_are_the_same_rejection_as_an_empty_store() {
         assert!(!unsafe { hirari_track_name_store_set(std::ptr::null_mut(), b"x".as_ptr(), 1) });
         assert_eq!(unsafe { get(std::ptr::null(), std::ptr::null_mut(), 0) }, 0);
-        assert!(!copy_with_suffix(std::ptr::null(), std::ptr::null_mut(), b" Copy"));
+        assert!(!unsafe { copy_with_suffix(std::ptr::null(), std::ptr::null_mut(), b" Copy") });
         // A length with no buffer is refused rather than dereferenced.
         let store = Store::new();
         assert!(!unsafe { hirari_track_name_store_set(store.0, std::ptr::null(), 4) });

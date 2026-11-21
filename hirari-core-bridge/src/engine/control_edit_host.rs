@@ -160,7 +160,7 @@ pub unsafe extern "C" fn hirari_control_edit_set_input_monitor(
             Some(guard) => guard,
             None => return false,
         };
-        let found = !track_session::find(guard.host(), track_id).is_null();
+        let found = !unsafe { track_session::find(guard.host(), track_id) }.is_null();
         drop(guard);
         found
     };

@@ -213,7 +213,7 @@ pub(crate) unsafe fn gather_track(
     }
     let mut scratch = TrackScratch {
         scalars,
-        name: crate::track_name_store::read(storage(NAME) as *const c_void),
+        name: unsafe { crate::track_name_store::read(storage(NAME)) },
         frozen_path,
         expression_map: expression_map(articulation, 0),
         expression_map_pro: expression_map(articulation, 1),

@@ -55,7 +55,7 @@ fn track_exists(host: *mut c_void, track_id: u32) -> bool {
     let Some(guard) = track_session::GraphLock::acquire(host) else {
         return false;
     };
-    !track_session::find(guard.host(), track_id).is_null()
+    !unsafe { track_session::find(guard.host(), track_id) }.is_null()
 }
 
 /// The layout fingerprint the command was written against and the device
